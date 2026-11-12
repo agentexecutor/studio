@@ -1,7 +1,7 @@
 # AX Studio
 
-A desktop app for [AX](../ax): design tasks, watch them run, and create local
-AX clusters. Built with Electron, React and TypeScript for macOS, Windows and Linux.
+A desktop app for [AX](https://github.com/google/ax): design tasks, watch them run, and create local
+AX clusters. Runs on macOS, Windows and Linux.
 
 ![Activity](docs/screenshots/overview.png)
 
