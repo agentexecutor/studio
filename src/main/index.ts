@@ -16,6 +16,8 @@ let pending: string[] = []
 const arg = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 // `--screenshot=out.png` renders off-screen, saves the page and quits; it never takes focus.
 const screenshot = arg('screenshot')
+// `--ux` opens the new UX (ux/index.html) in place of the current pages. It gets the same bridge to ax and kubectl.
+const ux = process.argv.includes('--ux')
 
 function createWindow() {
   win = new BrowserWindow({
@@ -25,9 +27,10 @@ function createWindow() {
     minHeight: 700,
     title: 'AX Studio',
     show: false,
-    backgroundColor: screenshot ? '#f5f5f4' : '#00000000',
-    // Native traffic lights inset into our own title bar on macOS; standard frame elsewhere.
-    ...(isMac && !screenshot ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar' } : {}),
+    backgroundColor: screenshot || ux ? '#f5f5f4' : '#00000000',
+    // Native traffic lights inset into our own title bar on macOS; standard frame elsewhere. The new UX has its own
+    // top bar, so it keeps the standard frame.
+    ...(isMac && !screenshot && !ux ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 18 }, vibrancy: 'sidebar' } : {}),
     icon: join(__dirname, '../../build-resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -58,7 +61,8 @@ function createWindow() {
     if (v) query[k] = v
   }
   const search = new URLSearchParams(query).toString()
-  if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL + (search ? `?${search}` : ''))
+  if (ux) win.loadFile(join(app.getAppPath(), 'ux/index.html'))
+  else if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL + (search ? `?${search}` : ''))
   else win.loadFile(join(__dirname, '../renderer/index.html'), { query })
 }
 

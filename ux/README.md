@@ -17,6 +17,16 @@ python3 -m http.server 8789
 
 Then open http://localhost:8789/. Press Ctrl+K (⌘K on a Mac) for the command palette.
 
+To open it inside the Studio app, run this from the repo root:
+
+```sh
+npm install
+npm run ux          # builds, then runs: electron . --ux
+```
+
+In the app, the page gets `window.studio`, the bridge the app uses to run `ax` and `kubectl`. In a browser there's
+no bridge, so the app stays on demo data.
+
 ## Review links
 
 Each link opens one state of the app, from the same demo data every time.

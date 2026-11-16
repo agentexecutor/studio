@@ -25,7 +25,11 @@ so it never changes your global context.
 
 The next interface for AX Studio lives in [ux/](ux/README.md). It's a static web
 app that runs on demo data for now; this branch connects it to AX through the
-app's bridge.
+app's bridge. To open it inside the app:
+
+```sh
+npm run ux          # builds, then runs: electron . --ux
+```
 
 ## Develop
 

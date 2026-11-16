@@ -5,6 +5,8 @@ directories:
   buildResources: build-resources
 files:
   - out/**
+  - ux/**
+  - "!ux/tests/**"
   - package.json
 asar: true
 mac:
