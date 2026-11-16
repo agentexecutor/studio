@@ -21,6 +21,12 @@ AX clusters. Runs on macOS, Windows and Linux.
 The app calls the `ax` CLI and `kubectl`. It passes `--context` on every call,
 so it never changes your global context.
 
+## New UX (in progress)
+
+The next interface for AX Studio lives in [ux/](ux/README.md). It's a static web
+app that runs on demo data for now; this branch connects it to AX through the
+app's bridge.
+
 ## Develop
 
 ```sh
