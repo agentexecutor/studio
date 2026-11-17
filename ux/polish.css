@@ -1534,3 +1534,10 @@ a.byo-card, a.byo-card:hover { color: inherit; text-decoration: none; }
 .cat-reg .input { width: min(240px, 100%); }
 .cat-reg .cat-reg-status { flex-basis: 100%; margin: 0; }
 .avatar.you .svg { width: 14px; height: 14px; }
+
+/* =========================================================================
+   Live mode (live.js): pages that show real data from AX inside the Studio app.
+   They reuse the components above; these are the few pieces of their own.
+   ========================================================================= */
+.live-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.app.live .manifest { max-height: 420px; white-space: pre; }

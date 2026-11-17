@@ -102,6 +102,8 @@ export interface StudioAPI {
   containerRuntime(): Promise<ContainerRuntime>
   openYAML(defaultDir?: string): Promise<{ path: string; text: string } | null>
   saveYAML(name: string, text: string): Promise<string | null>
+  /** Parses YAML into plain values, one per document, e.g. what `ax get task <name>` prints. Rejects on a syntax error. */
+  parseYAML(text: string): Promise<unknown[]>
   onMenu(cb: (action: string) => void): () => void
 }
 

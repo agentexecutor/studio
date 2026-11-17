@@ -1310,8 +1310,11 @@ function restoreFocus(k) {
   else if (k.form) el = document.querySelector(`[data-form="${k.form}"] [type="submit"]`);
   if (el && el !== document.activeElement && !el.disabled) el.focus({ preventScroll: true });
 }
+/** Inside the Studio app, the page has a bridge to this computer and shows real data from AX (live.js). */
+function liveOn() { return typeof LIVE !== 'undefined' && LIVE.on; }
 function render(opts) {
   opts = opts || {};
+  if (liveOn()) { liveRender(opts); return; }
   /* Background refreshes (simulated agent progress, sandbox health) wait while Axel is mid-wag or mid-trick, so a click
      on him is never cut off by the page redrawing underneath. Anything the person does renders at once (see axoYield in
      the click handler). After 6 s a held refresh is overdue, and it runs in the next gap between tricks — never mid-trick. */
@@ -2175,7 +2178,8 @@ let gPending = false;
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
   trapFocus(e);
-  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (dialogState) closeDialog(); else openPalette(); return; }
+  /* The command palette and the single-key shortcuts lead to demo pages, so they're off with real data. */
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (dialogState) closeDialog(); else if (!liveOn()) openPalette(); return; }
   /* A focused dropdown handles its own keys first (arrows, Enter, Space, Escape, Tab, typing a name). */
   const selBtn = e.target && e.target.closest && e.target.closest('.sel-btn');
   if (selBtn && selKeydown(e, selBtn)) return;
@@ -2210,7 +2214,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (dialogState || mod || e.altKey) return;
+  if (dialogState || mod || e.altKey || liveOn()) return;
   /* WCAG 2.1.4: single-key shortcuts can be turned off in Settings → Accessibility. */
   if (!state.singleKeys) return;
   if (gPending) {
@@ -2319,7 +2323,7 @@ if (state.firstRun && !state.setup) {
   if (!downloadsSaved()) startDownloads(prebuiltAgents().filter((a) => a.id !== DEFAULT_AGENT).map((a) => a.id), 50000);
 }
 /* Warm start: opening Studio briefly shows the local sandbox starting, then healthy. */
-if (setupDone() && state.env.mode === 'local' && !state.firstRun) setHealth('starting', null, 2);
+if (!liveOn() && setupDone() && state.env.mode === 'local' && !state.firstRun) setHealth('starting', null, 2);
 render();
 /* Review links: …?scenario=<id> opens one prototype scenario directly. The review page (#/review) lists them all; it
    isn't linked from anywhere in the app. */

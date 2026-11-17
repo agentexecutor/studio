@@ -3,8 +3,10 @@
 The next interface for AX Studio: run coding agents in a secure sandbox on your computer or on a remote cluster,
 watch and steer them, and review their changes before they reach your code.
 
-It's a static web app (plain HTML, CSS and JavaScript, no build step). Today every page runs on demo data. Connecting
-it to AX through the Studio app is the work on this branch.
+It's a static web app (plain HTML, CSS and JavaScript, no build step), and it runs in two ways:
+
+- **In a browser** every page runs on demo data. This is the full design, for reviews.
+- **In the Studio app** it shows real data from AX, and pages that have no real source yet stay hidden.
 
 ## Run it
 
@@ -26,6 +28,24 @@ npm run ux          # builds, then runs: electron . --ux
 
 In the app, the page gets `window.studio`, the bridge the app uses to run `ax` and `kubectl`. In a browser there's
 no bridge, so the app stays on demo data.
+
+## What's connected to AX
+
+With the bridge, [live.js](live.js) takes over and shows only what AX can back today:
+
+| In the app | From |
+|---|---|
+| The clusters in your kubeconfig, and which one Studio uses | `ax ctx` |
+| AX on this computer: running, stopped or not set up | `ax local status` |
+| Your tasks and each one's state | `ax get tasks` |
+| A task's details and its task file | `ax get task <name>` |
+| Pause, resume and delete | `ax suspend task`, `ax resume task`, `ax delete task` |
+
+Studio never changes your kubeconfig: it names the cluster on every command (`--context`). The list refreshes every
+4 seconds, because AX has no call that streams changes.
+
+Not connected yet, so hidden in the app: New task, Activity, Changes, the terminal and the log, Guardrails, Settings
+and setup. If `ax` isn't installed, the app says how to install it.
 
 ## Review links
 
@@ -70,6 +90,7 @@ Every scenario is also listed on the review page, `index.html#/review`. Nothing 
 | `overlays.js` | Dialogs: command palette, health check, continue with another agent, run on a remote cluster |
 | `failures.js` | Plain-language errors and the review scenarios |
 | `app.js` | Routing, the simulated agents and every action |
+| `live.js` | The pages that show real data from AX inside the Studio app |
 | `mascot.js`, `viz.js` | Axel the axolotl and small charts |
 | `*.css` | Styles. Colour, radius and type tokens are at the top of `styles.css` |
 | `assets/` | The logo, Axel and the backdrop images |
@@ -90,4 +111,5 @@ node tests/smoke_general.js   # every view, overlay and scenario
 node tests/smoke_cuj2.js      # journey 2: deploy your first agent
 node tests/smoke_cuj3.js      # journey 3: watch, steer and unblock
 node tests/smoke_cuj45.js     # journeys 4 and 5: continue with another agent, run on a remote cluster
+node tests/smoke_live.js      # real data: a stand-in bridge answers the way the ax CLI does
 ```

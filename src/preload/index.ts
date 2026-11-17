@@ -31,6 +31,7 @@ const api: StudioAPI = {
   containerRuntime: () => ipcRenderer.invoke('containerRuntime'),
   openYAML: (dir) => ipcRenderer.invoke('openYAML', dir),
   saveYAML: (name, text) => ipcRenderer.invoke('saveYAML', name, text),
+  parseYAML: (text) => ipcRenderer.invoke('parseYAML', text),
   onMenu: (cb) => listen<string>('menu', cb),
 }
 

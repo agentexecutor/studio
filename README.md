@@ -23,9 +23,10 @@ so it never changes your global context.
 
 ## New UX (in progress)
 
-The next interface for AX Studio lives in [ux/](ux/README.md). It's a static web
-app that runs on demo data for now; this branch connects it to AX through the
-app's bridge. To open it inside the app:
+The next interface for AX Studio lives in [ux/](ux/README.md). In a browser it
+runs on demo data. Inside the app it shows real data from AX: your clusters,
+AX on this computer, your tasks and their state, with pause, resume and delete.
+The rest stays hidden until it's connected. To open it inside the app:
 
 ```sh
 npm run ux          # builds, then runs: electron . --ux

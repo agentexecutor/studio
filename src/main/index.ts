@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstruc
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { parseAllDocuments } from 'yaml'
 import * as sh from './shell'
 import { createTray, updateTray } from './tray'
 import type { PipeRequest, RunRequest, SessionRequest, StreamRequest, TraySummary } from '../shared/api'
@@ -186,6 +187,13 @@ function registerIPC() {
     writeFileSync(r.filePath, text)
     return r.filePath
   })
+  // The new UX has no build step, so it can't bundle a YAML parser; it asks for one here.
+  ipcMain.handle('parseYAML', (_e, text: string) =>
+    parseAllDocuments(text).map((doc) => {
+      if (doc.errors.length) throw new Error(doc.errors[0].message)
+      return doc.toJS()
+    }),
+  )
 }
 
 function expand(p: string) {
