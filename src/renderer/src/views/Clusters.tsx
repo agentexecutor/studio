@@ -32,6 +32,9 @@ const DOCS = {
   workerPool: 'https://github.com/agent-substrate/substrate/blob/f86fde9dfb5424c8d16f613de80469bdbef06541/docs/reference/api-guide.md#1-workerpool-the-physical-capacity',
 }
 
+/** Why the buttons that run a command are greyed out while one is running: the page runs one at a time. */
+const BUSY = 'Another command is running. Wait for it to finish, or Cancel it at the top of the page.'
+
 /** A link that opens in the browser. */
 function Doc({ to, children }: { to: keyof typeof DOCS; children: string }) {
   return <a href={DOCS[to]} target="_blank" rel="noreferrer">{children}</a>
@@ -159,7 +162,8 @@ export function Clusters() {
 
             <div className="row cluster-actions env-actions">
               <button className="btn primary" disabled={running || localBlockers.length > 0} onClick={() => void clusters.setUpLocal()}
-                title={localBlockers.length > 0 ? localBlockers.join(' ')
+                title={running ? BUSY
+                  : localBlockers.length > 0 ? localBlockers.join(' ')
                   : !exists ? 'Runs ax local start: creates a kind cluster named ax-local, installs Agent Substrate and AX on it, and makes it your current kubectl context. Downloads kind and kubectl if you lack them. Takes a few minutes.'
                   : local.state === 'Stopped' ? "Runs ax local start: starts the cluster's containers again, brings Agent Substrate and AX back up, and makes ax-local your current kubectl context."
                   : ready ? 'Runs ax local start again: checks every layer and redeploys AX with the images below. Makes ax-local your current kubectl context.'
@@ -169,21 +173,22 @@ export function Clusters() {
               </button>
               {ready && (
                 <button className="btn" disabled={running || active} onClick={() => clusters.connect(local.context)}
-                  title={active ? 'Activity, Deploy and Terminal are already using the local sandbox.'
+                  title={running ? BUSY
+                    : active ? 'Activity, Deploy and Terminal are already using the local sandbox.'
                     : 'Points Activity, Deploy and Terminal at the local sandbox and opens Activity. Nothing on the cluster changes.'}>
                   <ExternalLink size={12} />{active ? 'In Use' : 'Use Local in Studio'}
                 </button>
               )}
               {local.state === 'Running' && (
                 <button className="btn" disabled={running} onClick={() => void clusters.stopLocal()}
-                  title="Runs ax local stop: stops the cluster's containers. Its tasks stop running and the app can't reach it until you resume, but nothing is deleted.">
+                  title={running ? BUSY : "Runs ax local stop: stops the cluster's containers. Its tasks stop running and the app can't reach it until you resume, but nothing is deleted."}>
                   <Square size={12} />Stop
                 </button>
               )}
               <div className="spacer" />
               {exists && (
                 <button className="btn small ghost danger" disabled={running} onClick={() => setConfirmDelete(true)}
-                  title="Runs ax local delete: destroys the cluster with every task, workspace and snapshot in it, and removes its context from your kubeconfig. This can't be undone. Asks first.">
+                  title={running ? BUSY : "Runs ax local delete: destroys the cluster with every task, workspace and snapshot in it, and removes its context from your kubeconfig. This can't be undone. Asks first."}>
                   <Trash2 size={12} />Delete
                 </button>
               )}
@@ -356,7 +361,8 @@ function TeamCluster({ name, current, check, busy, installBlockers, onInstall, o
       {check && <CheckResult check={check} />}
       <div className="row env-context-actions">
         <button className={`btn small ${current ? '' : 'primary'}`} disabled={busy || current} onClick={() => clusters.connect(name)}
-          title={current ? 'Activity, Deploy and Terminal are already using this cluster.'
+          title={busy ? BUSY
+            : current ? 'Activity, Deploy and Terminal are already using this cluster.'
             : "Points Activity, Deploy and Terminal at this cluster and opens Activity. Nothing on the cluster changes, and neither does your kubectl context."}>
           <ExternalLink size={12} />{current ? 'Connected' : 'Connect'}
         </button>
@@ -365,14 +371,16 @@ function TeamCluster({ name, current, check, busy, installBlockers, onInstall, o
           <RefreshCw size={12} className={check?.checking ? 'spin' : ''} />{check ? 'Check Again' : 'Check'}
         </button>
         <button className="btn small ghost" disabled={busy || blockers.length > 0} onClick={onInstall}
-          title={blockers.length > 0 ? blockers.join(' ')
+          title={busy ? BUSY
+            : blockers.length > 0 ? blockers.join(' ')
             : checked && check.ax ? "Runs ax install: redeploys ax-server and ax-postgres with the images below. Asks first."
             : "Runs ax install: deploys ax-postgres and ax-server and registers ax-server with Agent Substrate, which restarts Substrate's API server and router. Asks first."}>
           <Wrench size={12} />{checked && check.ax ? 'Upgrade AX' : 'Install AX'}
         </button>
         {checked && check.ax && (
           <button className="btn small ghost danger" disabled={busy || clusters.axProblems.length > 0} onClick={onUninstall}
-            title={clusters.axProblems.length > 0 ? clusters.axProblems.join(' ')
+            title={busy ? BUSY
+              : clusters.axProblems.length > 0 ? clusters.axProblems.join(' ')
               : "Runs ax uninstall: removes ax-server and ax-postgres from the cluster and restarts Substrate's API server and router. The database's volume is kept. Asks first."}>
             <Trash2 size={12} />Uninstall AX
           </button>
