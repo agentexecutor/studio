@@ -27,9 +27,14 @@ function loginPath(): string {
 }
 
 const home = homedir()
+/**
+ * Where AX's install.sh puts `ax`, and where `ax` itself downloads kubectl and
+ * kind. The installer doesn't add it to PATH, so look there ourselves.
+ */
+const axBin = join(process.env.AX_HOME || join(home, '.ax'), 'bin')
 const extra = isWin
-  ? [join(home, 'go', 'bin'), join(home, 'scoop', 'shims')]
-  : [join(home, 'go', 'bin'), join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/local/go/bin',
+  ? [axBin, join(home, 'go', 'bin'), join(home, 'scoop', 'shims')]
+  : [axBin, join(home, 'go', 'bin'), join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/local/go/bin',
      join(home, 'google-cloud-sdk', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin']
 
 const PATH = [...new Set([...loginPath().split(delimiter), ...extra].filter(Boolean))].join(delimiter)

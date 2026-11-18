@@ -68,5 +68,6 @@ With podman and no docker, the app uses a `docker` shim
 
 ## Platform notes
 
-- **macOS/Linux:** the app reads PATH from your login shell.
+- **macOS/Linux:** the app reads PATH from your login shell, and also looks in
+  `~/.ax/bin` (or `$AX_HOME/bin`), where AX's installer puts `ax`.
 - **Windows:** cluster setup needs Git for Windows (`bash`), `make` and `go`.
