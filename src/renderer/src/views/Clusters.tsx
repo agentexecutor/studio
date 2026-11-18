@@ -62,6 +62,7 @@ export function Clusters() {
 
             <div className="layer-stack">
               {c.preflight.map((p) => <PreflightRow key={p.id} item={p} />)}
+              {c.preflight.length === 0 && <div className="caption faint">Checking this machine…</div>}
             </div>
 
             <div className="caption muted env-subhead">Local Dependencies</div>
@@ -79,6 +80,7 @@ export function Clusters() {
                   </div>
                 )
               })}
+              {c.tools.length === 0 && <div className="caption faint">Looking for ax, kubectl and kind…</div>}
             </div>
 
             <div className="caption muted env-subhead">Local Stack Layers</div>

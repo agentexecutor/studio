@@ -150,28 +150,73 @@ function stageFor(line: string): StageID | null {
 
 const gib = (bytes: number) => (bytes / GIB).toFixed(1)
 
+const COLIMA_START = 'colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs'
+
+/**
+ * macOS has no Linux kernel, so containers run in a Linux VM that one of a
+ * few apps provides. With no engine answering, this says which of them are
+ * installed and how to start one, or that there's none to start.
+ */
+async function macVMAdvice(): Promise<{ detail: string; command: string }> {
+  const [orb, orbApp, dockerApp, colima, podman] = await Promise.all([
+    window.studio.which('orbctl'),
+    window.studio.fileExists('/Applications/OrbStack.app'),
+    window.studio.fileExists('/Applications/Docker.app'),
+    window.studio.which('colima'),
+    window.studio.which('podman'),
+  ])
+  const found: { name: string; command: string }[] = []
+  if (orb || orbApp) found.push({ name: 'OrbStack', command: 'open -a OrbStack' })
+  if (dockerApp) found.push({ name: 'Docker Desktop', command: 'open -a Docker' })
+  if (colima) found.push({ name: 'Colima', command: COLIMA_START })
+  if (podman) found.push({ name: 'Podman', command: 'podman machine start' })
+  if (!found.length) {
+    return {
+      detail: 'No Linux VM for containers is installed. macOS needs one to run the sandbox locally: install OrbStack, Docker Desktop or Colima, or connect to a team cluster instead.',
+      command: `brew install docker colima && ${COLIMA_START}`,
+    }
+  }
+  const names = found.map((x) => x.name).join(', ')
+  return {
+    detail: `${names} ${found.length > 1 ? 'are' : 'is'} installed, but no Linux VM is running. Start ${found.length > 1 ? 'one' : 'it'} with at least 6 GiB of RAM, or connect to a team cluster instead.`,
+    command: found[0].command,
+  }
+}
+
+/** Which app's Linux VM a macOS Docker engine runs in, from what `docker info` says about its host. */
+function macVMName(runtime: string, hostOS: string, hostName: string): string {
+  if (runtime === 'podman') return 'Podman machine'
+  if (/orbstack/i.test(hostOS)) return 'OrbStack'
+  if (/docker desktop/i.test(hostOS)) return 'Docker Desktop'
+  if (/rancher/i.test(hostOS + hostName)) return 'Rancher Desktop'
+  if (/colima/i.test(hostName)) return 'Colima'
+  return hostOS
+}
+
 /** Checks the container engine's host, or VM on macOS, the way `ax local start` will. */
 async function checkEngine(os: string): Promise<PreflightItem> {
   const item = { id: 'container_engine', label: 'Container runtime & VM' }
   const mac = os === 'darwin'
   const { runtime } = await window.studio.containerRuntime()
-  const start = mac
-    ? { detail: 'Start OrbStack, Docker Desktop or Colima (6 GiB of RAM or more) to run sandboxes locally, or connect to a team cluster.',
-        command: 'colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs' }
-    : { detail: 'No running rootful Docker or Podman engine was found.', command: 'sudo systemctl start docker' }
-  if (!runtime) return { ...item, status: 'fail', ...start }
+  const notRunning = async (): Promise<PreflightItem> => ({
+    ...item, status: 'fail',
+    ...(mac ? await macVMAdvice() : { detail: 'No running rootful Docker or Podman engine was found.', command: 'sudo systemctl start docker' }),
+  })
+  if (!runtime) return notRunning()
 
-  // Docker and Podman name these fields differently.
+  // Kernel, memory, the host's OS and name, then the security options. Docker
+  // and Podman name the fields differently; Podman's host is always its machine.
   const format = runtime === 'podman'
-    ? '{{.Host.Kernel}}|{{.Host.MemTotal}}|{{.Host.Security.Rootless}}'
-    : '{{.KernelVersion}}|{{.MemTotal}}|{{.SecurityOptions}}'
+    ? '{{.Host.Kernel}}|{{.Host.MemTotal}}|||{{.Host.Security.Rootless}}'
+    : '{{.KernelVersion}}|{{.MemTotal}}|{{.OperatingSystem}}|{{.Name}}|{{.SecurityOptions}}'
   const r = await window.studio.run({ program: runtime, args: ['info', '--format', format] })
   const parts = r.stdout.trim().split('|')
-  if (r.status !== 0 || parts.length < 3) return { ...item, status: 'fail', ...start }
+  if (r.status !== 0 || parts.length < 5) return notRunning()
 
   const kernel = parts[0].trim()
   const memory = Number(parts[1].trim()) || 0
-  const security = parts.slice(2).join('|').trim().toLowerCase()
+  const security = parts.slice(4).join('|').trim().toLowerCase()
+  const vm = mac ? macVMName(runtime, parts[2].trim(), parts[3].trim()) : ''
   if (security === 'true' || security.includes('name=rootless')) {
     return {
       ...item, status: 'fail',
@@ -189,14 +234,15 @@ async function checkEngine(os: string): Promise<PreflightItem> {
   if (memory > 0 && memory < MIN_MEMORY) {
     return {
       ...item, status: 'fail',
-      detail: `The container host has only ${gib(memory)} GiB of RAM; Kubernetes, Agent Substrate and AX need at least ${gib(MIN_MEMORY)}.`,
-      command: mac ? 'colima stop && colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs' : undefined,
+      detail: `The ${vm ? `${vm} Linux VM` : 'container host'} has only ${gib(memory)} GiB of RAM; Kubernetes, Agent Substrate and AX need at least ${gib(MIN_MEMORY)}.`,
+      command: mac && vm === 'Colima' ? `colima stop && ${COLIMA_START}` : undefined,
     }
   }
   if (memory > 0 && memory < RECOMMENDED_MEMORY) {
-    return { ...item, status: 'warn', detail: `The container host has ${gib(memory)} GiB of RAM; with less than ${gib(RECOMMENDED_MEMORY)}, pods may stay Pending under load.` }
+    return { ...item, status: 'warn', detail: `The ${vm ? `${vm} Linux VM` : 'container host'} has ${gib(memory)} GiB of RAM; with less than ${gib(RECOMMENDED_MEMORY)}, pods may stay Pending under load.` }
   }
-  return { ...item, status: 'ok', detail: kernel && memory > 0 ? `${runtime} ready · kernel ${kernel} · ${gib(memory)} GiB RAM` : `${runtime} ready` }
+  const ready = vm ? `${runtime} ready · Linux VM: ${vm}` : `${runtime} ready`
+  return { ...item, status: 'ok', detail: kernel && memory > 0 ? `${ready} · kernel ${kernel} · ${gib(memory)} GiB RAM` : ready }
 }
 
 /** Free space in the home directory, or null where `df` can't say. */
@@ -303,28 +349,43 @@ class ClustersStore {
     await this.refresh()
   }
 
-  /** Re-runs the checks, looks at the local sandbox again and re-reads the contexts. */
+  /**
+   * Re-runs the checks, looks at the local sandbox again and re-reads the
+   * contexts. Each part shows up when it's ready; the contexts aren't waited
+   * for, since ax can take a minute to give up on an unreachable cluster.
+   */
   async refresh() {
     this.set({ loading: true })
+    void store.loadContexts()
     try {
       const { os, home } = await window.studio.platform()
-      const [arch, engine, disk, tools] = await Promise.all([
-        window.studio.run({ program: 'uname', args: ['-m'] }),
-        checkEngine(os),
-        checkDisk(home),
-        checkTools(home),
-        store.loadContexts(),
+      await Promise.all([
+        this.checkMachine(os, home),
+        checkTools(home).then((tools) => this.set({ tools, axFound: tools[0].status !== 'fail' })),
       ])
-      const cpu = arch.stdout.trim().replace('x86_64', 'amd64').replace('aarch64', 'arm64')
-      const preflight: PreflightItem[] = [
-        { id: 'os_arch', label: 'Operating system & CPU', status: 'ok', detail: cpu ? `${os}/${cpu}` : os },
-        engine,
-        ...(disk ? [disk] : []),
-      ]
-      this.set({ axFound: tools[0].status !== 'fail', preflight, tools, local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
+    } catch (e) {
+      // Say so on the page rather than leaving it empty.
+      this.set({ preflight: [{ id: 'checks', label: 'Checking this machine', status: 'fail', detail: e instanceof Error ? e.message : String(e) }] })
     } finally {
       this.set({ loading: false, loaded: true })
     }
+  }
+
+  private async checkMachine(os: string, home: string) {
+    const [arch, engine, disk] = await Promise.all([
+      window.studio.run({ program: 'uname', args: ['-m'] }),
+      checkEngine(os),
+      checkDisk(home),
+    ])
+    const cpu = arch.stdout.trim().replace('x86_64', 'amd64').replace('aarch64', 'arm64')
+    this.set({
+      preflight: [
+        { id: 'os_arch', label: 'Operating system & CPU', status: 'ok', detail: cpu ? `${os}/${cpu}` : os },
+        engine,
+        ...(disk ? [disk] : []),
+      ],
+    })
+    this.set({ local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
   }
 
   private async probeLocal(): Promise<LocalSandbox> {
