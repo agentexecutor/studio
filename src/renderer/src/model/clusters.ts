@@ -414,6 +414,11 @@ class ClustersStore {
     this.set({ local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
   }
 
+  /** Looks at the local sandbox again, and nothing else. */
+  async refreshLocal() {
+    this.set({ local: await this.probeLocal() })
+  }
+
   private async probeLocal(): Promise<LocalSandbox> {
     const { runtime } = await window.studio.containerRuntime()
     if (!runtime) return NO_SANDBOX

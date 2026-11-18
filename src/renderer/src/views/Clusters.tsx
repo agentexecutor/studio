@@ -57,6 +57,13 @@ export function Clusters() {
   const exists = local.state !== 'NotFound'
   const ready = local.state === 'Running' && full(local.ax)
   const active = exists && s.context === local.context
+  // A sandbox that's still coming up gets ready on its own; keep looking until it has.
+  const settling = !running && local.state === 'Running' && !ready
+  useEffect(() => {
+    if (!settling) return
+    const t = setInterval(() => void clusters.refreshLocal(), 5000)
+    return () => clearInterval(t)
+  }, [settling])
   const localBlockers = clusters.localBlockers
   const installBlockers = clusters.installBlockers
   const remote = s.contexts.filter((x) => !isLocalContext(x.name))
