@@ -263,17 +263,17 @@ function NewClusterForm() {
       <label className="form-row">
         <span>Server</span>
         <input className={`input mono ${f.serverImage.trim() ? '' : 'invalid'}`} value={f.serverImage} spellCheck={false}
-          placeholder="ax-server image (required)" onChange={(e) => clusters.setForm({ serverImage: e.target.value })} />
+          placeholder="required" onChange={(e) => clusters.setForm({ serverImage: e.target.value })} />
       </label>
       <label className="form-row">
         <span>Task</span>
         <input className="input mono" value={f.defaultTaskImage} spellCheck={false}
-          placeholder="default task image (optional)" onChange={(e) => clusters.setForm({ defaultTaskImage: e.target.value })} />
+          placeholder="optional" onChange={(e) => clusters.setForm({ defaultTaskImage: e.target.value })} />
       </label>
       <label className="form-row">
         <span>Runner</span>
         <input className="input mono" value={f.runnerVolumeImage} spellCheck={false}
-          placeholder="runner volume image (optional)" onChange={(e) => clusters.setForm({ runnerVolumeImage: e.target.value })} />
+          placeholder="optional" onChange={(e) => clusters.setForm({ runnerVolumeImage: e.target.value })} />
       </label>
       <div className="caption new-cluster-note">
         Runs <span className="mono">ax local start</span>{engine ? ` on ${engine}` : ''}, which downloads kind and kubectl if
