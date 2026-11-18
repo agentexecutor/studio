@@ -1,6 +1,6 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useState, type CSSProperties } from 'react'
 import {
-  Check, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
+  BookOpen, Check, ChevronDown, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
   Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
 import {
@@ -194,7 +194,7 @@ export function Clusters() {
               Skip local setup and run tasks on a shared GKE or Kubernetes cluster from your <span className="mono">~/.kube/config</span>.
               No local container VM is needed.
             </div>
-            <NewClusterGuide />
+            <NewClusterGuide open={remote.length === 0} />
             {remote.length === 0 ? (
               <div className="env-none">
                 <div className="env-none-title">No remote contexts in your kubeconfig</div>
@@ -264,10 +264,14 @@ export function Clusters() {
 }
 
 /** What a cluster needs before AX can go on it, and the order to do it in, for someone starting without one. */
-function NewClusterGuide() {
+function NewClusterGuide({ open }: { open: boolean }) {
   return (
-    <details className="env-guide">
-      <summary className="caption muted">No cluster yet? What one needs, and how to set it up</summary>
+    <details className="env-guide" open={open}>
+      <summary>
+        <BookOpen size={14} />
+        <span>No cluster yet? See what one needs and how to set it up</span>
+        <ChevronDown size={14} className="env-guide-chevron" />
+      </summary>
       <div className="env-guide-body caption">
         <div className="env-guide-head">A cluster for AX needs</div>
         <ul>
@@ -443,6 +447,11 @@ function PreflightRow({ item }: { item: PreflightItem }) {
   )
 }
 
+/**
+ * A shell command to copy, coloured by part: programs, flags, and the
+ * <placeholders> to fill in. Programs are the first word and the one after
+ * each `&&`.
+ */
 function CopyableCommand({ cmd }: { cmd: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
@@ -450,9 +459,20 @@ function CopyableCommand({ cmd }: { cmd: string }) {
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
   }
+  const words = cmd.split(' ')
   return (
-    <div className="row connect-cmd">
-      <code className="selectable">{cmd}</code>
+    <div className="row cmd-line">
+      <code className="selectable">
+        {words.map((word, i) => {
+          const kind = word === '&&' ? 'op'
+            : i === 0 || words[i - 1] === '&&' ? 'bin'
+            : word.startsWith('-') ? 'flag'
+            : /^<.*>$/.test(word) ? 'arg'
+            : ''
+          // The space sits between the words, so a line breaks there and not inside a flag.
+          return <Fragment key={i}>{i > 0 && ' '}<span className={kind && `cmd-${kind}`}>{word}</span></Fragment>
+        })}
+      </code>
       <button className="btn small icon ghost" onClick={copy} title="Copy command">
         {copied ? <Check size={12} color="var(--green)" /> : <Copy size={12} />}
       </button>
