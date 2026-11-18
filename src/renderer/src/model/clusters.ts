@@ -47,6 +47,8 @@ export interface Operation {
   kind: 'setup' | 'stop' | 'delete' | 'install'
   /** The local cluster's name, or the context AX is installed on. */
   target: string
+  /** What a setup amounts to for the sandbox as it was: setting it up, resuming, repairing or updating it. */
+  wording?: { doing: string; done: string }
   stage: StageID | null
   /** When each stage began, for the ones that have. */
   stageStarted: Partial<Record<StageID, number>>
@@ -478,8 +480,13 @@ class ClustersStore {
    * your kubeconfig. It's safe to run again on a sandbox that's already up.
    */
   async setUpLocal() {
-    const { name } = this.state.local
-    await this.exec({ kind: 'setup', target: name, stage: 'kind' }, 'Set up the local sandbox (ax local start)',
+    const { name, state, ax } = this.state.local
+    // The same command under the name its button has.
+    const [verb, doing, done] = state === 'NotFound' ? ['Set up', 'Setting up', 'Set up']
+      : state === 'Stopped' ? ['Resume', 'Resuming', 'Resumed']
+      : ax && ax.total > 0 && ax.ready >= ax.total ? ['Update', 'Updating', 'Updated']
+      : ['Repair', 'Repairing', 'Repaired']
+    await this.exec({ kind: 'setup', target: name, stage: 'kind', wording: { doing, done } }, `${verb} the local sandbox (ax local start)`,
       this.ax(['local', 'start', '--name', name, ...this.imageArgs()]))
   }
 
@@ -526,7 +533,7 @@ class ClustersStore {
     if (this.state.op) this.set({ op: { ...this.state.op, ...patch } })
   }
 
-  private async exec(op: Pick<Operation, 'kind' | 'target' | 'stage'>, title: string, command: string): Promise<boolean> {
+  private async exec(op: Pick<Operation, 'kind' | 'target' | 'stage' | 'wording'>, title: string, command: string): Promise<boolean> {
     if (this.running) return false
     const staged = op.stage !== null
     const started = Date.now()

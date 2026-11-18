@@ -304,7 +304,7 @@ function CopyableCommand({ cmd }: { cmd: string }) {
 }
 
 function LocalBadge({ state, ready, setup }: { state: LocalSandbox['state']; ready: boolean; setup: Operation | null }) {
-  const v = setup?.status === 'running' ? { h: 'warn' as Health, label: `Setting Up · ${duration(Date.now() - setup.started)}` }
+  const v = setup?.status === 'running' ? { h: 'warn' as Health, label: `${setup.wording?.doing ?? 'Setting up'} · ${duration(Date.now() - setup.started)}` }
     : ready ? { h: 'ok' as Health, label: 'Ready' }
     : state === 'Running' ? { h: 'warn' as Health, label: 'Starting / Degraded' }
     : state === 'Stopped' ? { h: 'warn' as Health, label: 'Stopped' }
@@ -386,8 +386,8 @@ function localLayers(local: LocalSandbox): Layer[] {
 function OperationBar({ op }: { op: Operation }) {
   useTick(op.status === 'running')
   const elapsed = duration((op.finished ?? Date.now()) - op.started)
-  const verb = { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on' }[op.kind]
-  const done = { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on' }[op.kind]
+  const verb = op.wording?.doing ?? { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on' }[op.kind]
+  const done = op.wording?.done ?? { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on' }[op.kind]
   const title = op.status === 'running' ? `${verb} ${op.target}` : op.status === 'ok' ? `${done} ${op.target}` : `${verb} ${op.target} failed`
   const progress = op.stage ? stageProgress(op) : null
   const StatusIcon = op.status === 'running' ? Loader : op.status === 'ok' ? CircleCheck : CircleX
