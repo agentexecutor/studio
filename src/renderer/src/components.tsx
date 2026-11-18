@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp, CircleCheck, CirclePause, CirclePlay, CircleHelp, Hourglass, OctagonX, Terminal, Trash2, type LucideIcon } from 'lucide-react'
 import { type Phase, phaseColor, phaseLabel } from './model/resources'
 
@@ -114,14 +114,14 @@ export function LogConsole({ lines, chip, onClear, clearDisabled, empty, open = 
   return (
     <div className={`console ${open ? '' : 'collapsed'}`}>
       <div className={`row console-bar ${onToggle ? 'collapsible' : ''}`} onClick={onToggle}
-        title={onToggle ? (open ? 'Collapse output' : 'Expand output') : undefined}>
+        data-tip={onToggle ? (open ? 'Collapse output' : 'Expand output') : undefined}>
         <Terminal size={13} />
         <span>Output</span>
         {chip}
         <div className="spacer" />
         <span className="faint">{lines.length} lines</span>
         <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onClear() }} disabled={clearDisabled}
-          title="Empties this output. Nothing else changes.">Clear</button>
+          data-tip="Empties this output. Nothing else changes.">Clear</button>
         {onToggle && <Chevron size={14} />}
       </div>
       {open && <div
@@ -153,3 +153,54 @@ export function since(iso?: string | number): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h`
   return `${Math.floor(s / 86400)}d`
 }
+
+/**
+ * Shows the `data-tip` of whatever the pointer rests on, drawn by the app:
+ * the system's own tooltip for `title` is a black box on some platforms and
+ * can't be styled. Mounted once; any element can then carry a `data-tip`.
+ */
+export function Tips() {
+  const [tip, setTip] = useState<{ text: string; x: number; y: number; above: boolean } | null>(null)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let current: Element | null = null
+    const hide = () => {
+      clearTimeout(timer)
+      current = null
+      setTip(null)
+    }
+    const over = (e: MouseEvent) => {
+      const el = e.target instanceof Element ? e.target.closest('[data-tip]') : null
+      if (el === current) return
+      hide()
+      if (!el) return
+      current = el
+      timer = setTimeout(() => {
+        // Read when it shows: the text may have changed while the pointer rested.
+        const text = el.getAttribute('data-tip')
+        if (!text || !el.isConnected) return
+        const r = el.getBoundingClientRect()
+        // Below the element, or above it near the bottom of the window; kept clear of the sides.
+        const above = r.bottom + 120 > window.innerHeight
+        const x = Math.min(Math.max(r.left + r.width / 2, TIP_WIDTH / 2 + 8), window.innerWidth - TIP_WIDTH / 2 - 8)
+        setTip({ text, x, y: above ? r.top - 6 : r.bottom + 6, above })
+      }, 350)
+    }
+    document.addEventListener('mouseover', over)
+    document.addEventListener('mousedown', hide)
+    document.addEventListener('scroll', hide, true)
+    document.documentElement.addEventListener('mouseleave', hide)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mouseover', over)
+      document.removeEventListener('mousedown', hide)
+      document.removeEventListener('scroll', hide, true)
+      document.documentElement.removeEventListener('mouseleave', hide)
+    }
+  }, [])
+  if (!tip) return null
+  return <div className={`tip ${tip.above ? 'above' : ''}`} style={{ left: tip.x, top: tip.y, maxWidth: TIP_WIDTH }}>{tip.text}</div>
+}
+
+const TIP_WIDTH = 320
+

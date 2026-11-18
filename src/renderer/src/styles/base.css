@@ -184,3 +184,15 @@ h2.card-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 
 .fade-in { animation: fadein .18s ease-out; }
 @keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* The app's own tooltips; see Tips in components.tsx. */
+.tip {
+  position: fixed; z-index: 300; transform: translateX(-50%); pointer-events: none;
+  padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.45; text-align: left;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16); animation: tipin .12s ease-out;
+}
+/* Opacity only: the tip is placed with a transform, which fadein would animate over. */
+@keyframes tipin { from { opacity: 0; } to { opacity: 1; } }
+.tip.above { transform: translate(-50%, -100%); }
+

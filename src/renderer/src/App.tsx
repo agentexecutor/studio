@@ -5,7 +5,7 @@ import logo from './assets/axel.svg'
 import { designer } from './model/designer'
 import { type AXContext, comparePhase, phaseLabel, shortName } from './model/resources'
 import type { TraySummary } from '@shared/api'
-import { PulseDot } from './components'
+import { PulseDot, Tips } from './components'
 import { Overview } from './views/Overview'
 import { Designer } from './views/Designer'
 import { Clusters } from './views/Clusters'
@@ -53,6 +53,7 @@ export function App() {
 
   return (
     <div className="shell">
+      <Tips />
       <aside className="sidebar">
         <div className="titlebar-drag sidebar-top" />
         <nav>
