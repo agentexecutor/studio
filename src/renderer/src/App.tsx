@@ -16,7 +16,7 @@ const SECTIONS: { id: Section; title: string; icon: LucideIcon; group: 'Overview
   { id: 'overview', title: 'Activity', icon: Gauge, group: 'Overview' },
   { id: 'designer', title: 'Deploy', icon: SquarePen, group: 'Build' },
   { id: 'terminal', title: 'Terminal', icon: SquareTerminal, group: 'Build' },
-  { id: 'clusters', title: 'Clusters', icon: Boxes, group: 'Build' },
+  { id: 'clusters', title: 'Environments', icon: Boxes, group: 'Build' },
 ]
 
 export function App() {

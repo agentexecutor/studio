@@ -11,7 +11,8 @@ AX clusters. Runs on macOS, Windows and Linux.
 - **Deploy:** build tasks with a form or raw YAML, then create them.
 - **Terminal:** sessions into running tasks over `ax ssh`, in tabs that stay
   connected while you use the rest of the app.
-- **Clusters:** create, inspect and delete local AX clusters on kind.
+- **Environments:** set up a local AX sandbox on kind, or connect to a team
+  cluster and install AX on it.
 
 | | |
 |---|---|
@@ -37,7 +38,7 @@ another `ax`, such as one you built from source, set its full path in Settings
 To refresh a screenshot, build (`npm run build`) and run:
 
 ```sh
-npx electron . --section=clusters --cluster=ax-dev --delay=7000 --screenshot=docs/screenshots/clusters.png
+npx electron . --section=clusters --delay=7000 --screenshot=docs/screenshots/clusters.png
 ```
 
 Other flags: `--context`, `--atespace`, `--task`, `--logs=expanded`, `--terminal=<command>`.
@@ -57,26 +58,27 @@ Build each OS on that OS. macOS builds are unsigned; set `mac.identity` in
 swift scripts/make-icon.swift ~/ax/assets/axel.svg build-resources/icon.icns
 ```
 
-## Clusters
+## Environments
 
-The Clusters page drives `ax`, so it needs only a running `docker` or `podman`:
+The Environments page drives `ax`. It checks this machine, then offers two
+places to run tasks:
 
-- **Create cluster** and **Start** run `ax local start`, which creates or
-  resumes a kind cluster, installs Agent Substrate and AX, and downloads kind
-  and kubectl into `~/.ax/bin` if you don't have them. The cluster becomes your
-  current kubectl context: `ax-local` for the default name, `kind-<name>`
-  otherwise.
-- **Install AX** runs `ax install` on a cluster that already has Agent
-  Substrate, whether it's a kind cluster or any other context in your
-  kubeconfig. A kind cluster without Substrate gets `ax local start` instead.
-- **Delete** runs `ax local delete`.
+- **Local Sandbox:** **Set Up Local Sandbox** runs `ax local start`, which
+  creates or resumes a kind cluster named `ax-local`, installs Agent Substrate
+  and AX, and downloads kind and kubectl into `~/.ax/bin` if you don't have
+  them. It needs only a running rootful `docker` or `podman`. The sandbox
+  becomes your current kubectl context. **Stop** and **Delete** run
+  `ax local stop` and `ax local delete`.
+- **Team clusters:** every other context in your kubeconfig. **Connect** points
+  the app at one without changing your kubectl context. **Install / Upgrade
+  AX** runs `ax install`, which needs Agent Substrate on the cluster already.
 
-`ax` has no default ax-server image yet, so the form asks for one. The app
-remembers the images you enter.
+`ax` has no default ax-server image yet, so the page asks for one before it
+sets anything up. The app remembers the images you enter.
 
 ## Platform notes
 
 - **macOS/Linux:** the app reads PATH from your login shell, and also looks in
   `~/.ax/bin` (or `$AX_HOME/bin`), where AX's installer puts `ax`.
-- **Windows:** AX has no Windows build of `ax`, so the Clusters page can't
-  create clusters there.
+- **Windows:** AX has no Windows build of `ax`, so the Environments page
+  can't set up a sandbox there.

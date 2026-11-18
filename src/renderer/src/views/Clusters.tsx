@@ -1,11 +1,12 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import {
-  Boxes, Check, Circle, CircleCheck, Copy, CircleDashed, CircleX, Cpu, ExternalLink, Layers3, Loader, Play, Plus, RefreshCw, Server,
-  Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
+  Check, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
+  Square, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
-import { clusters, contextFor, useClusters, STAGES, type Cluster, type Operation, type Replicas } from '../model/clusters'
+import { clusters, isLocalContext, useClusters, STAGES, type LocalSandbox, type Operation, type PreflightItem, type Replicas } from '../model/clusters'
+import { shortName } from '../model/resources'
 import { useStore } from '../model/store'
-import { Empty, LogConsole, PageHeader } from '../components'
+import { LogConsole, PageHeader } from '../components'
 import '../styles/console.css'
 import '../styles/clusters.css'
 
@@ -22,44 +23,133 @@ const full = (r: Replicas) => !!r && r.total > 0 && r.ready >= r.total
 
 export function Clusters() {
   const c = useClusters()
+  const s = useStore()
   useEffect(() => void clusters.init(), [])
   const running = c.op?.status === 'running'
-  const problems = clusters.problems
-  const [selected, setSelected] = useState<string | null>(new URLSearchParams(location.search).get('cluster'))
   const [outputOpen, setOutputOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   useEffect(() => { if (running) setOutputOpen(true) }, [running])
+
+  const local = c.local
+  const exists = local.state !== 'NotFound'
+  const ready = local.state === 'Running' && full(local.ax)
+  const active = exists && s.context === local.context
+  const localBlockers = clusters.localBlockers
+  const installBlockers = clusters.installBlockers
+  const remote = s.contexts.filter((x) => !isLocalContext(x.name))
 
   return (
     <div className="clusters">
       <div className={`clusters-top ${outputOpen ? '' : 'full'}`}>
-        <PageHeader title="Clusters" subtitle="Local AX clusters on kind: Kubernetes, then Agent Substrate, then the AX control plane.">
+        <PageHeader title="Environments" subtitle="Set up a local sandbox on this machine, or connect to a team Kubernetes cluster.">
           {running && <button className="btn" onClick={() => clusters.cancel()}><Square size={12} />Stop</button>}
-          <button className="btn" onClick={() => void clusters.refresh()} disabled={c.loading} title="Refresh">
-            <RefreshCw size={13} className={c.loading ? 'spin' : ''} />Refresh
+          <button className="btn" onClick={() => void clusters.refresh()} disabled={c.loading} title="Run the checks again">
+            <RefreshCw size={13} className={c.loading ? 'spin' : ''} />Check Again
           </button>
         </PageHeader>
 
-        {problems.map((p) => (
-          <div key={p} className="row problem-line"><TriangleAlert size={14} />{p}</div>
-        ))}
+        <div className="clusters-layout env-layout">
+          <div className={`card cluster-card ${active ? 'highlight' : ''}`}>
+            <div className="row cluster-head">
+              <div className="cluster-icon"><Laptop size={16} /></div>
+              <div className="cluster-name">
+                <div className="cluster-title">Local Sandbox</div>
+                <div className="faint mono cluster-ctx">context: {exists ? local.context : 'N/A'}{active && ' · active'}</div>
+              </div>
+              <div className="spacer" />
+              <LocalBadge state={local.state} ready={ready} />
+            </div>
 
-        <div className="clusters-layout">
-          <div className="cluster-grid">
-            {c.clusters.map((cl) => (
-              <ClusterCard key={cl.name} cluster={cl} selected={selected === cl.name}
-                onSelect={() => setSelected(selected === cl.name ? null : cl.name)} />
-            ))}
-            {c.loaded && c.clusters.length === 0 && problems.length === 0 && (
-              <div className="card cluster-empty">
-                <Empty icon={Boxes} title="No kind clusters yet">Create one on the right.</Empty>
+            <div className="layer-stack">
+              {c.preflight.map((p) => <PreflightRow key={p.id} item={p} />)}
+            </div>
+
+            <div className="caption muted env-subhead">Local Stack Layers</div>
+            <div className="layer-stack">
+              {localLayers(local).map((r) => {
+                const h = HEALTH[r.health]
+                return (
+                  <div key={r.id} className={`layer ${r.health}`} style={{ '--c': h.color } as CSSProperties}>
+                    <r.icon size={14} className="layer-icon" />
+                    <div className="layer-text">
+                      <div className="layer-title">{r.title}</div>
+                      <div className="layer-detail">{r.detail}</div>
+                    </div>
+                    <h.icon size={14} color={h.color} />
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="row cluster-actions env-actions">
+              <button className="btn primary" disabled={running || localBlockers.length > 0} onClick={() => void clusters.setUpLocal()}
+                title={localBlockers.length > 0 ? localBlockers.join(' ') : 'Runs ax local start; the sandbox becomes your current kubectl context'}>
+                <Play size={13} fill="currentColor" />
+                {!exists ? 'Set Up Local Sandbox' : local.state === 'Stopped' ? 'Resume Local Sandbox' : ready ? 'Reconcile Local Sandbox' : 'Repair Local Sandbox'}
+              </button>
+              {ready && !active && (
+                <button className="btn" disabled={running} onClick={() => clusters.connect(local.context)}>
+                  <ExternalLink size={12} />Use Local in Studio
+                </button>
+              )}
+              {local.state === 'Running' && (
+                <button className="btn" disabled={running} onClick={() => void clusters.stopLocal()}><Square size={12} />Stop</button>
+              )}
+              <div className="spacer" />
+              {exists && (
+                <button className="btn small ghost danger" disabled={running} onClick={() => setConfirmDelete(true)} title="Delete the local kind cluster">
+                  <Trash2 size={12} />Delete
+                </button>
+              )}
+            </div>
+            {running && c.op?.kind !== 'install' && <div className="step-progress" />}
+          </div>
+
+          <div className="card new-cluster">
+            <div className="row new-cluster-head">
+              <Server size={15} />
+              <span>Connect to a Team Cluster</span>
+            </div>
+            <div className="caption muted new-cluster-note">
+              Skip local setup and run tasks on a shared GKE or Kubernetes cluster from your <span className="mono">~/.kube/config</span>.
+              No local container VM is needed.
+            </div>
+            {remote.length === 0 ? (
+              <div className="env-none">
+                <div className="env-none-title">No remote contexts in your kubeconfig</div>
+                <div className="caption muted">Authenticate with your team cluster, then click Check Again:</div>
+                <CopyableCommand cmd="gcloud container clusters get-credentials <cluster> --region <region>" />
+              </div>
+            ) : (
+              <div className="col env-contexts">
+                {remote.map((rc) => {
+                  const current = s.context === rc.name
+                  return (
+                    <div key={rc.name} className={`card env-context ${current ? 'highlight' : ''}`}>
+                      <div className="row env-context-head">
+                        <Server size={14} className="faint" />
+                        <strong className="ellipsis" title={rc.name}>{shortName(rc.name)}</strong>
+                        {current && <span className="chip">Active</span>}
+                      </div>
+                      <div className="caption faint mono ellipsis" title={rc.name}>{rc.name}</div>
+                      <div className="row env-context-actions">
+                        <button className={`btn small ${current ? '' : 'primary'}`} disabled={running || current} onClick={() => clusters.connect(rc.name)}>
+                          <ExternalLink size={12} />{current ? 'Connected' : 'Connect'}
+                        </button>
+                        <button className="btn small ghost" disabled={running || installBlockers.length > 0} onClick={() => void clusters.installOn(rc.name)}
+                          title={installBlockers.length > 0 ? installBlockers.join(' ') : 'Runs ax install: deploys or upgrades AX on this cluster, which must already run Agent Substrate'}>
+                          <Wrench size={12} />Install / Upgrade AX
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
-          <div className="cluster-side">
-            <NewClusterForm />
-            <ExistingClusterForm />
-          </div>
         </div>
+
+        <ImagesCard disabled={running} />
 
         {c.op && <OperationBar op={c.op} />}
       </div>
@@ -67,167 +157,97 @@ export function Clusters() {
         lines={c.log}
         onClear={() => clusters.set({ log: [] })}
         clearDisabled={running}
-        empty="Create a cluster, or install AX on an existing one."
+        empty="Click 'Set Up Local Sandbox' or 'Install / Upgrade AX' to see what ax does."
         open={outputOpen}
         onToggle={() => setOutputOpen(!outputOpen)}
       />
-    </div>
-  )
-}
 
-function layers(c: Cluster): { id: string; icon: LucideIcon; title: string; detail: string; health: Health }[] {
-  const kind: Health = !c.reachable ? 'fail' : full(c.nodes) ? 'ok' : 'warn'
-  const substrate: Health = !c.reachable || !c.substrate ? 'none' : full(c.substrate) ? 'ok' : 'warn'
-  const ax: Health = !c.reachable || !c.ax ? 'none' : full(c.ax) && (!c.workers || full(c.workers)) ? 'ok' : 'warn'
-  return [
-    {
-      id: 'ax', icon: Server, title: 'AX', health: ax,
-      detail: !c.ax ? 'Not installed'
-        : `ax-server ${c.ax.ready}/${c.ax.total}${c.workers ? ` · ${c.workers.ready}/${c.workers.total} gVisor workers` : ''}`,
-    },
-    {
-      id: 'substrate', icon: Layers3, title: 'Agent Substrate', health: substrate,
-      detail: !c.substrate ? 'Not installed'
-        : `ate-api-server ${c.substrate.ready}/${c.substrate.total}${c.substrateCommit ? ` · ${c.substrateCommit.slice(0, 7)}` : ''}`,
-    },
-    {
-      id: 'kind', icon: Cpu, title: 'Kind', health: kind,
-      detail: !c.reachable ? 'Unreachable; is the container runtime running?'
-        : `${c.nodes?.ready ?? 0}/${c.nodes?.total ?? 0} nodes Ready${c.version ? ` · Kubernetes ${c.version.replace(/^v/, '')}` : ''}`,
-    },
-  ]
-}
-
-function ClusterCard({ cluster: cl, selected, onSelect }: { cluster: Cluster; selected: boolean; onSelect: () => void }) {
-  const c = useClusters()
-  const s = useStore()
-  const busy = c.op?.status === 'running'
-  const mine = busy && c.op?.cluster === cl.name
-  const rows = layers(cl)
-  const axReady = rows[0].health === 'ok'
-  const current = s.context === cl.context
-  const blockers = [...clusters.problems, ...clusters.imageProblems]
-  const blocked = blockers.length > 0
-
-  const install = () => {
-    // Mirrors clusters.install: a cluster with Substrate that ax can already reach only needs `ax install`.
-    const msg = cl.substrate && cl.inKubeconfig
-      ? `${cl.ax ? 'Reinstall' : 'Install'} AX on ${cl.name}?\n\nThis runs "ax install", which installs or upgrades the AX control plane with the images in the form.`
-      : `Install AX on ${cl.name}?\n\nThis runs "ax local start", which installs Agent Substrate, a gVisor worker pool and the AX control plane, and makes ${contextFor(cl.name)} your current kubectl context.`
-    if (confirm(msg)) void clusters.install(cl)
-  }
-  const remove = () => {
-    if (confirm(`Delete kind cluster ${cl.name}?\n\nThe cluster and everything in it are removed, and its context is dropped from your kubeconfig.`)) {
-      void clusters.remove(cl.name)
-    }
-  }
-
-  return (
-    <div className={`card cluster-card ${mine ? 'busy' : ''} ${current || selected ? 'highlight' : ''}`}>
-      <div className="row cluster-head">
-        <div className="cluster-icon"><Boxes size={16} /></div>
-        <div className="cluster-name">
-          <div className="cluster-title">{cl.name}</div>
-          <div className="faint mono cluster-ctx">{cl.context}{current && ' · in use'}</div>
-        </div>
-        <div className="spacer" />
-        <Overall rows={rows} />
-        <button className={`btn term-btn ${selected ? 'active' : ''}`} onClick={onSelect}
-          title={selected ? 'Hide terminal commands' : 'Use this cluster from a terminal'}>
-          <SquareTerminal size={14} />Terminal
-        </button>
-      </div>
-
-      <div className="layer-stack">
-        {rows.map((r) => {
-          const h = HEALTH[r.health]
-          return (
-            <div key={r.id} className={`layer ${r.health}`} style={{ '--c': h.color } as CSSProperties}>
-              <r.icon size={14} className="layer-icon" />
-              <div className="layer-text">
-                <div className="layer-title">{r.title}</div>
-                <div className="layer-detail">{r.detail}</div>
-              </div>
-              <h.icon size={14} color={h.color} />
+      {confirmDelete && (
+        <div className="modal-backdrop" onMouseDown={() => setConfirmDelete(false)}>
+          <div className="modal card fade-in" onMouseDown={(e) => e.stopPropagation()}>
+            <h3>Delete the local sandbox?</h3>
+            <p className="muted env-confirm">
+              This destroys the local kind cluster and every task and workspace in it. Remote clusters are not affected.
+            </p>
+            <div className="row env-confirm-actions">
+              <button className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              <button className="btn primary danger-fill" onClick={() => { setConfirmDelete(false); void clusters.deleteLocal() }}>
+                Delete Local Sandbox
+              </button>
             </div>
-          )
-        })}
-      </div>
-
-      {selected && <ConnectCommands cluster={cl} />}
-
-      <div className="row cluster-actions">
-        {axReady && (
-          <button className="btn small primary" disabled={busy || current} onClick={() => void clusters.open(cl)}
-            title={cl.inKubeconfig ? `Switch AX Studio to ${cl.context}` : `Add ${cl.context} to your kubeconfig and switch AX Studio to it`}>
-            <ExternalLink size={12} />{current ? 'Open' : 'Open in Studio'}
-          </button>
-        )}
-        {cl.reachable ? (
-          <button className="btn small" disabled={busy || blocked} onClick={install}
-            title={blocked ? blockers.join(' ') : undefined}>
-            {cl.ax ? <Wrench size={12} /> : <Play size={12} />}{cl.ax ? 'Reinstall AX' : 'Install AX'}
-          </button>
-        ) : (
-          <button className="btn small" disabled={busy || blocked} onClick={() => void clusters.start(cl.name)}
-            title={blocked ? blockers.join(' ') : 'Start the cluster and bring Agent Substrate and AX back up'}>
-            <Play size={12} />Start
-          </button>
-        )}
-        <div className="spacer" />
-        <button className="btn small ghost danger" disabled={busy} onClick={remove} title={`Delete ${cl.name}`}>
-          <Trash2 size={12} />Delete
-        </button>
-      </div>
-      {mine && <div className="step-progress" />}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-/** Shell commands for using the cluster from a terminal. */
-function ConnectCommands({ cluster: cl }: { cluster: Cluster }) {
+/** The images ax deploys. The server image has no default yet, so nothing can be set up without it. */
+function ImagesCard({ disabled }: { disabled: boolean }) {
   const c = useClusters()
-  const s = useStore()
-  const provider = c.runtime?.runtime === 'podman' ? 'KIND_EXPERIMENTAL_PROVIDER=podman ' : ''
-  const commands = [
-    { note: `Import ${cl.context} into your kubeconfig (adds or refreshes it and makes it current)`, cmd: `${provider}kind export kubeconfig --name ${cl.name}` },
-    ...(cl.inKubeconfig ? [{ note: 'Already imported: switch kubectl to it', cmd: `kubectl config use-context ${cl.context}` }] : []),
-    ...(cl.ax && s.axConfig ? [{ note: 'Point ax at this cluster', cmd: `ax config use-context ${cl.context}` }] : []),
-  ]
+  const problems = clusters.imageProblems
   return (
-    <div className="connect">
-      {commands.map((x) => <CommandLine key={x.cmd} note={x.note} cmd={x.cmd} />)}
+    <div className="card env-images">
+      <div className="caption muted env-subhead">
+        Installer images, passed to <span className="mono">ax local start</span> and <span className="mono">ax install</span>
+      </div>
+      <div className="form-grid">
+        <label>Server image</label>
+        <input className={`input mono ${c.images.serverImage.trim() ? '' : 'invalid'}`} value={c.images.serverImage} disabled={disabled}
+          spellCheck={false} placeholder="Required: ax-server image, by tag or @sha256 (--server-image)"
+          onChange={(e) => clusters.setImages({ serverImage: e.target.value })} />
+        <label>Default task image</label>
+        <input className="input mono" value={c.images.defaultTaskImage} disabled={disabled}
+          spellCheck={false} placeholder="Optional (--default-task-image)"
+          onChange={(e) => clusters.setImages({ defaultTaskImage: e.target.value })} />
+        <label>Runner volume image</label>
+        <input className="input mono" value={c.images.runnerVolumeImage} disabled={disabled}
+          spellCheck={false} placeholder="Optional; empty runs the runner in each task image (--runner-volume-image)"
+          onChange={(e) => clusters.setImages({ runnerVolumeImage: e.target.value })} />
+      </div>
+      {problems.map((p) => <div key={p} className="row problem-line"><TriangleAlert size={13} />{p}</div>)}
     </div>
   )
 }
 
-function CommandLine({ note, cmd }: { note: string; cmd: string }) {
+function PreflightRow({ item }: { item: PreflightItem }) {
+  const h = HEALTH[item.status]
+  return (
+    <div className={`layer preflight ${item.status}`} style={{ '--c': h.color } as CSSProperties}>
+      <div className="row preflight-head">
+        <h.icon size={14} color={h.color} />
+        <div className="layer-text">
+          <div className="layer-title">{item.label}</div>
+          <div className={`layer-detail ${item.status === 'ok' ? '' : 'wrap'}`}>{item.detail}</div>
+        </div>
+      </div>
+      {item.command && <CopyableCommand cmd={item.command} />}
+    </div>
+  )
+}
+
+function CopyableCommand({ cmd }: { cmd: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => {
     void navigator.clipboard.writeText(cmd)
     setCopied(true)
-    setTimeout(() => setCopied(false), 1200)
+    setTimeout(() => setCopied(false), 1400)
   }
   return (
-    <div className="connect-item">
-      <div className="connect-note">{note}</div>
-      <div className="row connect-cmd">
-        <code className="selectable">{cmd}</code>
-        <button className="btn small icon ghost" onClick={copy} title="Copy">
-          {copied ? <Check size={12} color="var(--green)" /> : <Copy size={12} />}
-        </button>
-      </div>
+    <div className="row connect-cmd">
+      <code className="selectable">{cmd}</code>
+      <button className="btn small icon ghost" onClick={copy} title="Copy command">
+        {copied ? <Check size={12} color="var(--green)" /> : <Copy size={12} />}
+      </button>
     </div>
   )
 }
 
-function Overall({ rows }: { rows: ReturnType<typeof layers> }) {
-  const [ax, substrate, kind] = rows.map((r) => r.health)
-  const v = kind === 'fail' ? { h: 'fail' as Health, label: 'Unreachable' }
-    : ax === 'ok' && substrate === 'ok' && kind === 'ok' ? { h: 'ok' as Health, label: 'Ready' }
-    : rows.some((r) => r.health === 'warn') ? { h: 'warn' as Health, label: 'Starting' }
-    : substrate === 'none' ? { h: 'none' as Health, label: 'Kubernetes only' }
-    : { h: 'none' as Health, label: 'No AX' }
+function LocalBadge({ state, ready }: { state: LocalSandbox['state']; ready: boolean }) {
+  const v = ready ? { h: 'ok' as Health, label: 'Ready' }
+    : state === 'Running' ? { h: 'warn' as Health, label: 'Starting / Degraded' }
+    : state === 'Stopped' ? { h: 'warn' as Health, label: 'Stopped' }
+    : { h: 'none' as Health, label: 'Not Set Up' }
   const h = HEALTH[v.h]
   return (
     <span className="badge" style={{ '--c': h.color } as CSSProperties}>
@@ -236,101 +256,27 @@ function Overall({ rows }: { rows: ReturnType<typeof layers> }) {
   )
 }
 
-function NewClusterForm() {
-  const c = useClusters()
-  const f = c.form
-  const busy = c.op?.status === 'running'
-  const nameProblem = clusters.nameProblem(f.name)
-  const blockers = [...clusters.problems, ...clusters.imageProblems]
-  const engine = c.runtime?.runtime
-
-  return (
-    <div className="card new-cluster">
-      <div className="row new-cluster-head">
-        <Plus size={15} />
-        <span>New cluster</span>
-      </div>
-      <label className="form-row">
-        <span>Name</span>
-        <input className={`input mono ${f.name && nameProblem ? 'invalid' : ''}`} value={f.name} spellCheck={false}
-          onChange={(e) => clusters.setForm({ name: e.target.value.trim().toLowerCase() })} placeholder="ax-local" />
-      </label>
-      <label className="form-row">
-        <span>Workers</span>
-        <input className="input" type="number" min={1} max={8} value={f.workers}
-          onChange={(e) => clusters.setForm({ workers: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} />
-      </label>
-      <label className="form-row">
-        <span>Server</span>
-        <input className={`input mono ${f.serverImage.trim() ? '' : 'invalid'}`} value={f.serverImage} spellCheck={false}
-          placeholder="required" onChange={(e) => clusters.setForm({ serverImage: e.target.value })} />
-      </label>
-      <label className="form-row">
-        <span>Task</span>
-        <input className="input mono" value={f.defaultTaskImage} spellCheck={false}
-          placeholder="optional" onChange={(e) => clusters.setForm({ defaultTaskImage: e.target.value })} />
-      </label>
-      <label className="form-row">
-        <span>Runner</span>
-        <input className="input mono" value={f.runnerVolumeImage} spellCheck={false}
-          placeholder="optional" onChange={(e) => clusters.setForm({ runnerVolumeImage: e.target.value })} />
-      </label>
-      <div className="caption new-cluster-note">
-        Runs <span className="mono">ax local start</span>{engine ? ` on ${engine}` : ''}, which downloads kind and kubectl if
-        you don't have them. The cluster becomes your current kubectl context,{' '}
-        <span className="mono">{contextFor(f.name || 'ax-local')}</span>. The images are also used when you install AX on a
-        cluster.
-      </div>
-      {f.name && nameProblem && <div className="row problem-line"><TriangleAlert size={13} />{nameProblem}</div>}
-      {clusters.imageProblems.map((p) => <div key={p} className="row problem-line"><TriangleAlert size={13} />{p}</div>)}
-      {clusters.warnings.map((p) => <div key={p} className="row problem-line selectable"><TriangleAlert size={13} />{p}</div>)}
-      <button className="btn primary" disabled={busy || !!nameProblem || blockers.length > 0} onClick={() => void clusters.create()}>
-        <Play size={13} fill="currentColor" />Create cluster
-      </button>
-    </div>
-  )
-}
-
-/** Installs AX on a cluster that's already running, picked from your kubeconfig. */
-function ExistingClusterForm() {
-  const c = useClusters()
-  const s = useStore()
-  const [picked, setPicked] = useState('')
-  const busy = c.op?.status === 'running'
-  // The kind clusters have their own cards, with their own Install button.
-  const local = new Set(c.clusters.map((cl) => cl.context))
-  const contexts = s.contexts.map((x) => x.name).filter((name) => !local.has(name))
-  const context = contexts.includes(picked) ? picked : contexts[0]
-  const blockers = [...(c.axFound ? [] : clusters.problems), ...clusters.imageProblems]
-  if (!context) return null
-
-  const install = () => {
-    if (confirm(`Install AX on ${context}?\n\nThis runs "ax install", which installs or upgrades the AX control plane with the images above. The cluster must already run Agent Substrate.`)) {
-      void clusters.installOn(context)
-    }
-  }
-
-  return (
-    <div className="card new-cluster">
-      <div className="row new-cluster-head">
-        <Server size={15} />
-        <span>Existing cluster</span>
-      </div>
-      <label className="form-row">
-        <span>Context</span>
-        <select className="select" value={context} onChange={(e) => setPicked(e.target.value)}>
-          {contexts.map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-      <div className="caption new-cluster-note">
-        Runs <span className="mono">ax install</span> on a cluster that already has Agent Substrate, with the images above.
-      </div>
-      <button className="btn" disabled={busy || blockers.length > 0} onClick={install}
-        title={blockers.length > 0 ? blockers.join(' ') : undefined}>
-        <Play size={13} />Install AX
-      </button>
-    </div>
-  )
+function localLayers(local: LocalSandbox): { id: string; icon: LucideIcon; title: string; detail: string; health: Health }[] {
+  const up = local.state === 'Running'
+  // What a layer says when there's nothing of it to report on.
+  const absent = local.state === 'Stopped' ? 'Stopped' : up ? 'Not installed' : 'Installed when you set up the local sandbox'
+  return [
+    {
+      id: 'kind', icon: Cpu, title: 'Kubernetes (Kind)',
+      health: up ? 'ok' : local.state === 'Stopped' ? 'warn' : 'none',
+      detail: up ? 'Running locally' : local.state === 'Stopped' ? 'Stopped; its state is kept' : 'Not created yet',
+    },
+    {
+      id: 'substrate', icon: Layers3, title: 'Agent Substrate + gVisor WorkerPool',
+      health: !up ? 'none' : full(local.substrate) ? 'ok' : 'warn',
+      detail: up && local.substrate ? `ate-api-server ${local.substrate.ready}/${local.substrate.total} available` : absent,
+    },
+    {
+      id: 'ax', icon: Server, title: 'AX Control Plane (ax-server + Postgres)',
+      health: !up ? 'none' : full(local.ax) ? 'ok' : 'warn',
+      detail: up && local.ax ? `ax-server ${local.ax.ready}/${local.ax.total} available` : absent,
+    },
+  ]
 }
 
 function OperationBar({ op }: { op: Operation }) {
@@ -342,9 +288,9 @@ function OperationBar({ op }: { op: Operation }) {
   }, [op.status])
   const secs = Math.round(((op.finished ?? Date.now()) - op.started) / 1000)
   const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s` : `${secs}s`
-  const verb = { create: 'Creating', start: 'Starting', install: 'Installing AX on', delete: 'Deleting', kubeconfig: 'Adding to kubeconfig:' }[op.kind]
-  const done = { create: 'Created', start: 'Started', install: 'Installed AX on', delete: 'Deleted', kubeconfig: 'Added to kubeconfig:' }[op.kind]
-  const title = op.status === 'running' ? `${verb} ${op.cluster}` : op.status === 'ok' ? `${done} ${op.cluster}` : `${verb} ${op.cluster} failed`
+  const verb = { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on' }[op.kind]
+  const done = { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on' }[op.kind]
+  const title = op.status === 'running' ? `${verb} ${op.target}` : op.status === 'ok' ? `${done} ${op.target}` : `${verb} ${op.target} failed`
   const currentIndex = STAGES.findIndex((s) => s.id === op.stage)
   const StatusIcon = op.status === 'running' ? Loader : op.status === 'ok' ? CircleCheck : CircleX
   const statusColor = op.status === 'running' ? 'var(--accent)' : op.status === 'ok' ? 'var(--green)' : 'var(--red)'

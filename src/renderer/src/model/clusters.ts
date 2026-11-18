@@ -1,36 +1,41 @@
 import { useSyncExternalStore } from 'react'
-import type { ContainerRuntime } from '../../../shared/api'
 import type { ConsoleLine } from '../components'
 import { store } from './store'
 
 /** Ready/total replicas, or null when the component isn't installed. */
 export type Replicas = { ready: number; total: number } | null
 
-export interface Cluster {
+/** One check of this machine before a local sandbox is set up. */
+export interface PreflightItem {
+  id: string
+  label: string
+  status: 'ok' | 'warn' | 'fail'
+  detail: string
+  /** A command that fixes a failed check. */
+  command?: string
+}
+
+/** The kind cluster `ax local` manages, with Agent Substrate and AX on it. */
+export interface LocalSandbox {
+  state: 'NotFound' | 'Stopped' | 'Running'
   name: string
   context: string
-  reachable: boolean
-  nodes: Replicas
-  version: string
   substrate: Replicas
-  substrateCommit: string
   ax: Replicas
-  workers: Replicas
-  /** Whether the cluster's context is in your kubeconfig, which ax needs to reach it. */
-  inKubeconfig: boolean
 }
 
 export type StageID = 'kind' | 'substrate' | 'workers' | 'ax'
 export const STAGES: { id: StageID; title: string }[] = [
   { id: 'kind', title: 'Kind cluster' },
   { id: 'substrate', title: 'Agent Substrate' },
-  { id: 'workers', title: 'Worker pool' },
+  { id: 'workers', title: 'gVisor WorkerPool' },
   { id: 'ax', title: 'AX control plane' },
 ]
 
 export interface Operation {
-  kind: 'create' | 'start' | 'install' | 'delete' | 'kubeconfig'
-  cluster: string
+  kind: 'setup' | 'stop' | 'delete' | 'install'
+  /** The local cluster's name, or the context AX is installed on. */
+  target: string
   stage: StageID | null
   status: 'running' | 'ok' | 'failed'
   exit?: number
@@ -38,10 +43,9 @@ export interface Operation {
   finished?: number
 }
 
-export interface NewCluster {
-  name: string
-  workers: number
-  /** The ax-server image. ax has no default for it yet, so it's required. */
+/** The images `ax local start` and `ax install` deploy. */
+export interface Images {
+  /** ax has no default for the ax-server image yet, so it's required. */
   serverImage: string
   /** Optional; empty leaves the choice to ax. */
   defaultTaskImage: string
@@ -50,27 +54,35 @@ export interface NewCluster {
 }
 
 export interface ClustersState {
-  clusters: Cluster[]
+  preflight: PreflightItem[]
+  local: LocalSandbox
   loading: boolean
   loaded: boolean
-  runtime: ContainerRuntime | null
-  /** Memory of the podman machine in MiB, on macOS and Windows. */
-  machineMemory: number | null
   /** Whether `ax` was found. It downloads kind and kubectl itself when they're missing. */
   axFound: boolean
+  images: Images
   op: Operation | null
   log: ConsoleLine[]
-  form: NewCluster
 }
 
-/** The name `ax local` uses by default. Its context is `ax-local`; any other cluster's is `kind-<name>`. */
-const DEFAULT_NAME = 'ax-local'
-export const contextFor = (name: string) => (name === DEFAULT_NAME ? DEFAULT_NAME : `kind-${name}`)
-/** Below this (MiB) the podman machine is too small for the local cluster. */
-const MIN_MACHINE_MEMORY = 6144
+/** The name `ax local` gives its cluster; the cluster's context has the same name. */
+const LOCAL_NAME = 'ax-local'
+/** Contexts that belong to the local sandbox, under its current and earlier names. */
+const LOCAL_CONTEXTS = new Set([LOCAL_NAME, `kind-${LOCAL_NAME}`, 'local', 'kind-local'])
+export const isLocalContext = (name: string) => LOCAL_CONTEXTS.has(name)
+
+const NO_SANDBOX: LocalSandbox = { state: 'NotFound', name: LOCAL_NAME, context: LOCAL_NAME, substrate: null, ax: null }
+
+const GIB = 1024 ** 3
+// The limits `ax local start` enforces on the container host (see ax's executil.ValidateContainerHost).
+const MIN_KERNEL: [number, number] = [6, 8]
+const MIN_MEMORY = 4 * GIB
+const RECOMMENDED_MEMORY = 6 * GIB
+const MIN_DISK = 8 * GIB
+const RECOMMENDED_DISK = 15 * GIB
+
 /** The images last used, so they don't have to be typed again. */
 const IMAGES_KEY = 'ax-studio.images'
-type Images = Pick<NewCluster, 'serverImage' | 'defaultTaskImage' | 'runnerVolumeImage'>
 
 function loadImages(): Images {
   const empty: Images = { serverImage: '', defaultTaskImage: '', runnerVolumeImage: '' }
@@ -80,23 +92,29 @@ function loadImages(): Images {
     return empty
   }
 }
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-export const NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
 
-/** Prints key=value lines describing kind cluster $1; kubectl reads a throwaway kubeconfig from kind. */
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/**
+ * Prints key=value lines describing the local sandbox. $1 is the container
+ * engine and $2 the AX namespace. It only reads: it asks the engine for the
+ * kind node containers, so it works before kind is installed.
+ */
 const PROBE = `
-kc=$(mktemp)
-if ! kind get kubeconfig --name "$1" > "$kc" 2>/dev/null; then echo reachable=0; rm -f "$kc"; exit 0; fi
-k() { kubectl --kubeconfig "$kc" --request-timeout=5s "$@" 2>/dev/null; }
-if ! n=$(k get nodes --no-headers); then echo reachable=0; rm -f "$kc"; exit 0; fi
-echo reachable=1
-echo "nodes=$(printf '%s\\n' "$n" | awk '$2 ~ /^Ready/ { r++ } END { print r+0 "/" NR }')"
-echo "version=$(k get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')"
-echo "substrate=$(k -n ate-system get deploy ate-api-server -o jsonpath='{.status.readyReplicas}/{.spec.replicas}')"
-echo "commit=$(k get ns ate-system -o jsonpath='{.metadata.annotations.substrate-commit}')"
-echo "ax=$(k -n ax-system get deploy ax-server -o jsonpath='{.status.readyReplicas}/{.spec.replicas}')"
-echo "workers=$(k -n ax-system get workerpool ax-workers -o jsonpath='{.status.readyReplicas}/{.spec.replicas}')"
-rm -f "$kc"
+rt=$1; ns=$2
+for name in ${LOCAL_NAME} local; do
+  nodes=$("$rt" ps -a --filter "label=io.x-k8s.kind.cluster=$name" --format '{{.Names}}' 2>/dev/null)
+  [ -n "$nodes" ] && break
+done
+if [ -z "$nodes" ]; then echo state=NotFound; exit 0; fi
+echo "name=$name"
+for n in $nodes; do
+  if [ "$("$rt" inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" != true ]; then echo state=Stopped; exit 0; fi
+done
+echo state=Running
+k() { kubectl --context "$name" --request-timeout=4s "$@" 2>/dev/null; }
+echo "substrate=$(k -n ate-system get deployment ate-api-server -o jsonpath='{.status.availableReplicas}/{.spec.replicas}')"
+echo "ax=$(k -n "$ns" get deployment ax-server -o jsonpath='{.status.availableReplicas}/{.spec.replicas}')"
 `
 
 function replicas(v: string | undefined): Replicas {
@@ -116,17 +134,78 @@ function stageFor(line: string): StageID | null {
   return null
 }
 
+const gib = (bytes: number) => (bytes / GIB).toFixed(1)
+
+/** Checks the container engine's host, or VM on macOS, the way `ax local start` will. */
+async function checkEngine(os: string): Promise<PreflightItem> {
+  const item = { id: 'container_engine', label: 'Container runtime & VM' }
+  const mac = os === 'darwin'
+  const { runtime } = await window.studio.containerRuntime()
+  const start = mac
+    ? { detail: 'Start OrbStack, Docker Desktop or Colima (6 GiB of RAM or more) to run sandboxes locally, or connect to a team cluster.',
+        command: 'colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs' }
+    : { detail: 'No running rootful Docker or Podman engine was found.', command: 'sudo systemctl start docker' }
+  if (!runtime) return { ...item, status: 'fail', ...start }
+
+  // Docker and Podman name these fields differently.
+  const format = runtime === 'podman'
+    ? '{{.Host.Kernel}}|{{.Host.MemTotal}}|{{.Host.Security.Rootless}}'
+    : '{{.KernelVersion}}|{{.MemTotal}}|{{.SecurityOptions}}'
+  const r = await window.studio.run({ program: runtime, args: ['info', '--format', format] })
+  const parts = r.stdout.trim().split('|')
+  if (r.status !== 0 || parts.length < 3) return { ...item, status: 'fail', ...start }
+
+  const kernel = parts[0].trim()
+  const memory = Number(parts[1].trim()) || 0
+  const security = parts.slice(2).join('|').trim().toLowerCase()
+  if (security === 'true' || security.includes('name=rootless')) {
+    return {
+      ...item, status: 'fail',
+      detail: `Rootless ${runtime} can't run the local sandbox; kind's node settings and Agent Substrate need a rootful engine.`,
+      command: runtime === 'podman' ? 'podman machine stop && podman machine set --rootful && podman machine start' : undefined,
+    }
+  }
+  const version = /^(\d+)\.(\d+)/.exec(kernel)
+  if (version && (Number(version[1]) < MIN_KERNEL[0] || (Number(version[1]) === MIN_KERNEL[0] && Number(version[2]) < MIN_KERNEL[1]))) {
+    return {
+      ...item, status: 'fail',
+      detail: `The container host's Linux kernel ${kernel} is older than ${MIN_KERNEL.join('.')}, which Agent Substrate needs. ${mac ? 'Upgrade your container VM.' : 'Upgrade the kernel.'}`,
+    }
+  }
+  if (memory > 0 && memory < MIN_MEMORY) {
+    return {
+      ...item, status: 'fail',
+      detail: `The container host has only ${gib(memory)} GiB of RAM; Kubernetes, Agent Substrate and AX need at least ${gib(MIN_MEMORY)}.`,
+      command: mac ? 'colima stop && colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs' : undefined,
+    }
+  }
+  if (memory > 0 && memory < RECOMMENDED_MEMORY) {
+    return { ...item, status: 'warn', detail: `The container host has ${gib(memory)} GiB of RAM; with less than ${gib(RECOMMENDED_MEMORY)}, pods may stay Pending under load.` }
+  }
+  return { ...item, status: 'ok', detail: kernel && memory > 0 ? `${runtime} ready · kernel ${kernel} · ${gib(memory)} GiB RAM` : `${runtime} ready` }
+}
+
+/** Free space in the home directory, or null where `df` can't say. */
+async function checkDisk(home: string): Promise<PreflightItem | null> {
+  const r = await window.studio.run({ program: 'df', args: ['-Pk', home] })
+  const free = Number(r.stdout.trim().split('\n')[1]?.trim().split(/\s+/)[3]) * 1024
+  if (r.status !== 0 || !(free > 0)) return null
+  const item = { id: 'disk_space', label: 'Available disk space' }
+  if (free < MIN_DISK) return { ...item, status: 'fail', detail: `${gib(free)} GiB free; the kind and Substrate images need at least ${gib(MIN_DISK)}.` }
+  if (free < RECOMMENDED_DISK) return { ...item, status: 'warn', detail: `${gib(free)} GiB free; ${gib(RECOMMENDED_DISK)} or more is recommended.` }
+  return { ...item, status: 'ok', detail: `${gib(free)} GiB free` }
+}
+
 class ClustersStore {
   state: ClustersState = {
-    clusters: [],
+    preflight: [],
+    local: NO_SANDBOX,
     loading: false,
     loaded: false,
-    runtime: null,
-    machineMemory: null,
     axFound: true,
+    images: loadImages(),
     op: null,
     log: [],
-    form: { name: '', workers: 1, ...loadImages() },
   }
   private listeners = new Set<() => void>()
   private lineID = 1
@@ -144,87 +223,72 @@ class ClustersStore {
     for (const l of this.listeners) l()
   }
 
-  setForm(patch: Partial<NewCluster>) {
-    const form = { ...this.state.form, ...patch }
-    const { serverImage, defaultTaskImage, runnerVolumeImage } = form
-    localStorage.setItem(IMAGES_KEY, JSON.stringify({ serverImage, defaultTaskImage, runnerVolumeImage }))
-    this.set({ form })
+  setImages(patch: Partial<Images>) {
+    const images = { ...this.state.images, ...patch }
+    localStorage.setItem(IMAGES_KEY, JSON.stringify(images))
+    this.set({ images })
   }
 
   get running() {
     return this.state.op?.status === 'running'
   }
 
-  /** For the kind commands this page runs itself. ax works out the container runtime on its own. */
-  private env(): Record<string, string> {
-    return this.state.runtime?.env ?? {}
-  }
-
   async init() {
-    const runtime = await window.studio.containerRuntime()
-    this.set({ runtime })
-    if (runtime.runtime === 'podman') {
-      const r = await window.studio.run({ program: 'podman', args: ['machine', 'inspect', '--format', '{{.Resources.Memory}}'] })
-      const mib = parseInt(r.stdout, 10)
-      this.set({ machineMemory: r.status === 0 && mib > 0 ? mib : null })
-    }
     await this.refresh()
   }
 
+  /** Re-runs the checks, looks at the local sandbox again and re-reads the contexts. */
   async refresh() {
-    // Looked up every time: ax puts kind in ~/.ax/bin the first time it creates a cluster.
-    const [ax, kind] = await Promise.all([window.studio.which(store.state.settings.axPath), window.studio.which('kind')])
-    this.set({ axFound: !!ax })
-    if (!kind || !this.state.runtime?.runtime) {
-      this.set({ clusters: [], loaded: true })
-      return
-    }
     this.set({ loading: true })
     try {
-      const env = this.env()
-      const [list, ctxs] = await Promise.all([
-        window.studio.run({ program: 'kind', args: ['get', 'clusters'], env }),
-        window.studio.run({ program: 'kubectl', args: ['config', 'get-contexts', '-o', 'name'] }),
+      const { os, home } = await window.studio.platform()
+      const [ax, arch, engine, disk] = await Promise.all([
+        window.studio.which(store.state.settings.axPath),
+        window.studio.run({ program: 'uname', args: ['-m'] }),
+        checkEngine(os),
+        checkDisk(home),
+        store.loadContexts(),
       ])
-      const names = list.status === 0 ? list.stdout.split('\n').map((l) => l.trim()).filter((l) => l && !l.includes(' ')) : []
-      const contexts = new Set(ctxs.stdout.split('\n').map((l) => l.trim()))
-      const clusters = await Promise.all(names.map(async (name): Promise<Cluster> => {
-        const r = await window.studio.run({ program: '/bin/sh', args: ['-c', PROBE, 'probe', name], env })
-        const kv = Object.fromEntries(r.stdout.split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
-        // ax renames kind-ax-local to ax-local; a cluster made by kind alone keeps the kind- name.
-        const context = [contextFor(name), `kind-${name}`].find((x) => contexts.has(x)) ?? contextFor(name)
-        return {
-          name,
-          context,
-          reachable: kv.reachable === '1',
-          nodes: replicas(kv.nodes),
-          version: kv.version ?? '',
-          substrate: replicas(kv.substrate),
-          substrateCommit: kv.commit ?? '',
-          ax: replicas(kv.ax),
-          workers: replicas(kv.workers),
-          inKubeconfig: contexts.has(context),
-        }
-      }))
-      const form = this.state.form.name ? this.state.form : { ...this.state.form, name: freeName(names) }
-      this.set({ clusters, form })
+      const cpu = arch.stdout.trim().replace('x86_64', 'amd64').replace('aarch64', 'arm64')
+      const preflight: PreflightItem[] = [
+        { id: 'os_arch', label: 'Operating system & CPU', status: 'ok', detail: cpu ? `${os}/${cpu}` : os },
+        engine,
+        ...(disk ? [disk] : []),
+      ]
+      this.set({ axFound: !!ax, preflight, local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
     } finally {
       this.set({ loading: false, loaded: true })
     }
   }
 
-  /** What stops this page from doing anything with ax. */
-  get problems(): string[] {
-    const p: string[] = []
-    const { axFound, runtime } = this.state
-    if (!axFound) p.push(`ax was not found (${store.state.settings.axPath}). Set its path in Settings.`)
-    if (runtime && !runtime.runtime) p.push('Neither docker nor podman is installed; a local cluster needs one.')
-    return p
+  private async probeLocal(): Promise<LocalSandbox> {
+    const { runtime } = await window.studio.containerRuntime()
+    if (!runtime) return NO_SANDBOX
+    const r = await window.studio.run({ program: '/bin/sh', args: ['-c', PROBE, 'probe', runtime, 'ax-system'] })
+    const kv = Object.fromEntries(r.stdout.split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
+    const state = kv.state === 'Running' || kv.state === 'Stopped' ? kv.state : 'NotFound'
+    const name: string = kv.name || LOCAL_NAME
+    return { state, name, context: name, substrate: replicas(kv.substrate), ax: replicas(kv.ax) }
   }
 
-  /** What's wrong with the images in the form. They apply to creating a cluster and to installing AX. */
+  /** What stops a local sandbox from being set up. */
+  get localBlockers(): string[] {
+    const p = this.state.preflight.filter((x) => x.status === 'fail').map((x) => x.detail)
+    return [...this.axProblems, ...p, ...this.imageProblems]
+  }
+
+  /** What stops AX from being installed on a cluster. */
+  get installBlockers(): string[] {
+    return [...this.axProblems, ...this.imageProblems]
+  }
+
+  private get axProblems(): string[] {
+    return this.state.axFound ? [] : [`ax was not found (${store.state.settings.axPath}). Set its path in Settings.`]
+  }
+
+  /** What's wrong with the images. They apply to the local sandbox and to installing AX on a cluster. */
   get imageProblems(): string[] {
-    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.form
+    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.images
     const p: string[] = []
     if (!serverImage.trim()) p.push('Set the ax-server image; ax has no default for it yet.')
     for (const [label, value] of [['The server image', serverImage], ['The task image', defaultTaskImage], ['The runner volume image', runnerVolumeImage]]) {
@@ -234,27 +298,13 @@ class ClustersStore {
     return p
   }
 
-  /** Likely failures that don't block creating a cluster. */
-  get warnings(): string[] {
-    const mib = this.state.machineMemory
-    if (mib === null || mib >= MIN_MACHINE_MEMORY) return []
-    return [`The podman machine has ${Math.round(mib / 1024)} GiB of memory; the local cluster needs about ${MIN_MACHINE_MEMORY / 1024} GiB. Run: podman machine stop && podman machine set --memory 8192 && podman machine start`]
-  }
-
-  nameProblem(name: string): string | null {
-    if (!name) return 'Name the cluster.'
-    if (!NAME_RE.test(name)) return 'Use lowercase letters, digits and dashes.'
-    if (this.state.clusters.some((c) => c.name === name)) return `A kind cluster named ${name} already exists.`
-    return null
-  }
-
-  /** An `ax` command line for the shell that runs cluster steps. */
+  /** An `ax` command line for the shell that runs these steps. */
   private ax(args: string[]): string {
     return [store.state.settings.axPath, ...args].map(shq).join(' ')
   }
 
   private imageArgs(): string[] {
-    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.form
+    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.images
     const args: string[] = []
     if (serverImage.trim()) args.push('--server-image', serverImage.trim())
     if (defaultTaskImage.trim()) args.push('--default-task-image', defaultTaskImage.trim())
@@ -264,69 +314,34 @@ class ClustersStore {
 
   /**
    * `ax local start` creates the kind cluster or starts a stopped one, installs
-   * Agent Substrate and AX, and makes the cluster's context the current one
-   * in your kubeconfig. It's safe to run again on a cluster that's already up.
+   * Agent Substrate and AX, and makes the cluster's context the current one in
+   * your kubeconfig. It's safe to run again on a sandbox that's already up.
    */
-  private localStart(name: string): string {
-    return this.ax(['local', 'start', '--name', name, '--workers', String(this.state.form.workers), ...this.imageArgs()])
+  async setUpLocal() {
+    const { name } = this.state.local
+    await this.exec({ kind: 'setup', target: name, stage: 'kind' }, 'Set up the local sandbox (ax local start)',
+      this.ax(['local', 'start', '--name', name, ...this.imageArgs()]))
+  }
+
+  /** Stops the cluster's containers; its state is kept. */
+  async stopLocal() {
+    const { name } = this.state.local
+    await this.exec({ kind: 'stop', target: name, stage: null }, 'Stop the local sandbox (ax local stop)', this.ax(['local', 'stop', '--name', name]))
+  }
+
+  async deleteLocal() {
+    const { name } = this.state.local
+    await this.exec({ kind: 'delete', target: name, stage: null }, 'Delete the local sandbox (ax local delete)', this.ax(['local', 'delete', '--name', name]))
   }
 
   /** `ax install` installs or upgrades AX on a cluster that already runs Agent Substrate. */
-  private installOnContext(context: string): string {
-    return this.ax(['--context', context, 'install', ...this.imageArgs()])
-  }
-
-  async create() {
-    const { name } = this.state.form
-    await this.exec({ kind: 'create', cluster: name, stage: 'kind' }, `Create ${name}`, this.localStart(name))
-  }
-
-  /** Brings a stopped cluster back up. */
-  async start(name: string) {
-    await this.exec({ kind: 'start', cluster: name, stage: 'kind' }, `Start ${name}`, this.localStart(name))
-  }
-
-  /**
-   * Installs AX on a kind cluster. A running cluster with Substrate only needs
-   * `ax install`; one without it, or one ax can't reach through your
-   * kubeconfig yet, gets the whole of `ax local start`.
-   */
-  async install(c: Cluster) {
-    const direct = !!c.substrate && c.inKubeconfig
-    await this.exec({ kind: 'install', cluster: c.name, stage: direct ? 'ax' : 'kind' }, `Install AX on ${c.name}`,
-      direct ? this.installOnContext(c.context) : this.localStart(c.name))
-  }
-
-  /** Installs AX on any cluster in your kubeconfig that already runs Agent Substrate. */
   async installOn(context: string) {
-    await this.exec({ kind: 'install', cluster: context, stage: 'ax' }, `Install AX on ${context}`, this.installOnContext(context))
+    await this.exec({ kind: 'install', target: context, stage: null }, `Install AX on ${context} (ax install)`,
+      this.ax(['--context', context, 'install', ...this.imageArgs()]))
   }
 
-  async remove(name: string) {
-    await this.exec({ kind: 'delete', cluster: name, stage: null }, `Delete ${name}`, this.ax(['local', 'delete', '--name', name]))
-  }
-
-  /** Adds kind-<name> to your kubeconfig (keeping its current context) so ax can use it. */
-  async addToKubeconfig(name: string): Promise<boolean> {
-    const tmp = `$TMPDIR/ax-studio-kind-${name}.yaml`
-    const ok = await this.exec({ kind: 'kubeconfig', cluster: name, stage: null }, `Add kind-${name} to kubeconfig`, [
-      'set -e',
-      'ORIG=${KUBECONFIG:-$HOME/.kube/config}; ORIG=${ORIG%%:*}',
-      `TMPDIR=\${TMPDIR:-/tmp}; kind get kubeconfig --name ${shq(name)} > "${tmp}"`,
-      mergeScript(tmp),
-      `rm -f "${tmp}"`,
-      `echo "kind-${name} added to $ORIG"`,
-    ].join('\n'), this.env())
-    return ok
-  }
-
-  async open(c: Cluster) {
-    let context = c.context
-    if (!c.inKubeconfig) {
-      if (!(await this.addToKubeconfig(c.name))) return
-      context = `kind-${c.name}`
-    }
-    await store.loadContexts()
+  /** Points the rest of the app at a context. Your kubectl context stays as it is. */
+  connect(context: string) {
     store.setScope({ context })
     store.setSection('overview')
   }
@@ -351,7 +366,7 @@ class ClustersStore {
     if (this.state.op) this.set({ op: { ...this.state.op, ...patch } })
   }
 
-  private async exec(op: Pick<Operation, 'kind' | 'cluster' | 'stage'>, title: string, command: string, env: Record<string, string> = {}): Promise<boolean> {
+  private async exec(op: Pick<Operation, 'kind' | 'target' | 'stage'>, title: string, command: string): Promise<boolean> {
     if (this.running) return false
     const staged = op.stage !== null
     this.set({ op: { ...op, status: 'running', started: Date.now() }, log: [] })
@@ -371,35 +386,15 @@ class ClustersStore {
         offExit()
         resolve(e.status)
       })
-      void window.studio.stream({ id: streamID, commandLine: command, cwd, env })
+      void window.studio.stream({ id: streamID, commandLine: command, cwd })
     })
     const ok = status === 0
     this.patchOp({ status: ok ? 'ok' : 'failed', exit: status, finished: Date.now() })
     this.append(ok ? `✓ ${title} done` : `✗ ${title} failed (exit ${status})`, ok ? 'ok' : 'fail')
-    if (ok && op.kind === 'create') this.setForm({ name: '' })
-    void this.refresh()
-    // ax adds, renames and removes contexts; let the rest of the app see them.
-    if (op.kind !== 'kubeconfig') void store.loadContexts()
+    // ax adds and removes contexts and tasks; refresh re-reads the contexts too.
+    void this.refresh().then(() => store.refresh(true))
     return ok
   }
-}
-
-/**
- * Merges the kubeconfig at $1 into $ORIG. kubectl keeps the first file's
- * current-context, so yours is unchanged; the old file is kept as a backup.
- */
-function mergeScript(src: string): string {
-  return [
-    'mkdir -p "$(dirname "$ORIG")"',
-    '[ -f "$ORIG" ] && cp "$ORIG" "$ORIG.ax-studio.bak"',
-    `KUBECONFIG="$ORIG:${src}" kubectl config view --flatten > "$ORIG.ax-studio.tmp"`,
-    'mv "$ORIG.ax-studio.tmp" "$ORIG"',
-  ].join('\n')
-}
-
-function freeName(taken: string[]): string {
-  if (!taken.includes(DEFAULT_NAME)) return DEFAULT_NAME
-  for (let i = 2; ; i++) if (!taken.includes(`${DEFAULT_NAME}-${i}`)) return `${DEFAULT_NAME}-${i}`
 }
 
 export const clusters = new ClustersStore()
