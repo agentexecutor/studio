@@ -90,6 +90,21 @@ func InspectLocalCluster(ctx context.Context, r Runner, rt ContainerRuntime, clu
 	if len(nodes) == 0 {
 		return st
 	}
+	if entries, err := ListContexts(""); err == nil {
+		hasKubeCtx := false
+		hasKindPrefix := false
+		for _, e := range entries {
+			if e.Name == kubeCtx {
+				hasKubeCtx = true
+			}
+			if e.Name == "kind-"+clusterName {
+				hasKindPrefix = true
+			}
+		}
+		if !hasKubeCtx && hasKindPrefix {
+			kubeCtx = "kind-" + clusterName
+		}
+	}
 	st.Name = clusterName
 	st.KubeContext = kubeCtx
 

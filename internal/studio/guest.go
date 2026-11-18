@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/agentexecutor/studio/internal/kube"
 	"github.com/google/ax/pkg/apis/v1alpha1"
@@ -48,7 +49,18 @@ type PushBranchResult struct {
 // dialAXForContext returns a client for the ax-server of kubeCtx. The caller
 // closes the connection.
 func (s *Server) dialAXForContext(kubeCtx string) (v1alpha1.AXClient, *grpc.ClientConn, error) {
+	// Resolving may start a port-forward. Requests for the same context take
+	// turns, so two of them never start two.
+	s.dialMu.Lock()
+	lock := s.dialLocks[kubeCtx]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.dialLocks[kubeCtx] = lock
+	}
+	s.dialMu.Unlock()
+	lock.Lock()
 	serverURL, err := s.resolveServer(kube.TunnelOptions{Context: kubeCtx, Namespace: s.axNamespace})
+	lock.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}

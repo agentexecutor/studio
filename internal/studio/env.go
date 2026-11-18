@@ -100,6 +100,17 @@ type EnvStatusResponse struct {
 	Operation         *EnvOpSnapshot   `json:"operation,omitempty"`
 }
 
+// hasContainerCLI reports whether a docker or podman command is on PATH,
+// running or not.
+func (s *Server) hasContainerCLI() bool {
+	for _, name := range []string{"docker", "podman"} {
+		if _, err := s.runner.LookPath(name); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func freeDiskSpaceBytes(dir string) uint64 {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(dir, &st); err != nil || st.Bsize <= 0 {
@@ -139,6 +150,10 @@ func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
 		if runtime.GOOS == "darwin" {
 			fixCmd = "colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs"
 			detail = "Start OrbStack, Docker Desktop, or Colima (>= 6 GiB RAM) to run sandboxes locally, or connect directly to a team cluster."
+		} else if !s.hasContainerCLI() {
+			// There is no engine to start: neither one is installed.
+			fixCmd = ""
+			detail = "Docker or Podman isn't installed. Install Docker, or Podman in rootful mode, and start it. Or connect directly to a team cluster."
 		}
 		resp.Preflight = append(resp.Preflight, PreflightItem{
 			ID:      "container_engine",
@@ -271,9 +286,16 @@ func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
 
 	s.opMu.Lock()
 	if s.currentOp != nil {
-		cp := *s.currentOp
-		cp.Logs = append([]string(nil), s.currentOp.Logs...)
-		resp.Operation = &cp
+		if s.currentOp.Action == "local-up" && s.currentOp.Status == "failed" &&
+			resp.Local.State == kube.StateRunning &&
+			strings.Contains(resp.Local.SubstrateStatus, "available") &&
+			strings.Contains(resp.Local.AXStatus, "available") {
+			s.currentOp = nil
+		} else {
+			cp := *s.currentOp
+			cp.Logs = append([]string(nil), s.currentOp.Logs...)
+			resp.Operation = &cp
+		}
 	}
 	s.opMu.Unlock()
 
@@ -359,12 +381,26 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 // target, streaming its output to the UI, and responds with the operation.
 func (s *Server) runAXOperation(w http.ResponseWriter, action, target, stage string, args []string) {
 	snap, err := s.startEnvOperation(action, target, stage, func(opCtx context.Context, logWriter *opLogWriter) error {
-		_, runErr := s.runner.Run(opCtx, kube.Spec{
+		res, runErr := s.runner.Run(opCtx, kube.Spec{
 			Name:   s.axBinary,
 			Args:   args,
 			Stdout: logWriter,
 			Stderr: logWriter,
 		})
+		if runErr != nil && action == "local-up" && strings.Contains(res.Stdout+res.Stderr, "nodes is forbidden") {
+			_, _ = logWriter.Write([]byte("==> Waiting for Kubernetes API server RBAC warm-up and retrying...\n"))
+			select {
+			case <-time.After(2 * time.Second):
+			case <-opCtx.Done():
+				return opCtx.Err()
+			}
+			_, runErr = s.runner.Run(opCtx, kube.Spec{
+				Name:   s.axBinary,
+				Args:   args,
+				Stdout: logWriter,
+				Stderr: logWriter,
+			})
+		}
 		return runErr
 	})
 	if err != nil {

@@ -20,10 +20,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"syscall"
@@ -48,6 +50,7 @@ Flags:
   --addr string          Explicit loopback address (overrides --port, e.g. "127.0.0.1:8080")
   -n, --namespace string AX system namespace on Kubernetes clusters (default: "ax-system")
   --ax-bin string        Explicit path to the ax CLI binary (defaults to ~/.ax/bin/ax or PATH)
+  --ux-dir string        Serve the web UI from this directory instead of the built-in copy (for working on ux/)
   --no-open              Do not open a browser automatically (for SSH/remote sessions or scripts)
   --version              Print version and exit`
 
@@ -56,6 +59,7 @@ type cliFlags struct {
 	addr        string
 	axNamespace string
 	axBin       string
+	uxDir       string
 	noOpen      bool
 	showVersion bool
 	help        bool
@@ -71,6 +75,7 @@ func parseArgs(args []string) (cliFlags, error) {
 	fs.StringVar(&out.axNamespace, "n", v1alpha1.DefaultSystemNamespace, "AX system namespace")
 	fs.StringVar(&out.axNamespace, "namespace", v1alpha1.DefaultSystemNamespace, "AX system namespace")
 	fs.StringVar(&out.axBin, "ax-bin", "", "explicit path to ax CLI")
+	fs.StringVar(&out.uxDir, "ux-dir", "", "serve the web UI from this directory")
 	fs.BoolVar(&out.noOpen, "no-open", false, "do not open browser")
 	fs.BoolVar(&out.showVersion, "version", false, "print version")
 	fs.BoolVar(&out.help, "h", false, "help")
@@ -115,10 +120,21 @@ func run(args []string) error {
 		addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(parsed.port))
 	}
 
+	// The web UI has no build step, so a checkout's ux directory can be served
+	// as it is: edit a file and reload the page.
+	var uxFS iofs.FS
+	if parsed.uxDir != "" {
+		if _, err := os.Stat(filepath.Join(parsed.uxDir, "index.html")); err != nil {
+			return fmt.Errorf("--ux-dir %q has no index.html: %w", parsed.uxDir, err)
+		}
+		uxFS = os.DirFS(parsed.uxDir)
+	}
+
 	srv, err := studio.NewServer(studio.Options{
 		Addr:        addr,
 		AXNamespace: parsed.axNamespace,
 		AXBinary:    parsed.axBin,
+		UXFS:        uxFS,
 		OnListening: func(boundURL string) {
 			fmt.Printf("==> AX Studio running at %s (press Ctrl-C to stop)\n", boundURL)
 			if !parsed.noOpen && os.Getenv("AX_STUDIO_NO_OPEN") != "1" {

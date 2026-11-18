@@ -155,7 +155,9 @@ func (s *Server) collectTaskChanges(ctx context.Context, kubeCtx, atespace, task
 	}
 
 	branchOut, _, _, _ := s.guestExec(ctx, atespace, taskName, kubeCtx, s.axNamespace, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"}, repoDir)
-	statusOut, _, code, stErr := s.guestExec(ctx, atespace, taskName, kubeCtx, s.axNamespace, []string{"git", "status", "--porcelain"}, repoDir)
+	// Every untracked file is listed. By default git lists a new directory
+	// as one entry, and the files in it would be missing from the changes.
+	statusOut, _, code, stErr := s.guestExec(ctx, atespace, taskName, kubeCtx, s.axNamespace, []string{"git", "status", "--porcelain", "--untracked-files=all"}, repoDir)
 	if stErr != nil || code != 0 {
 		return &TaskChangesResponse{
 			TaskName:  taskName,

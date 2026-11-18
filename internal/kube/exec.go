@@ -114,10 +114,13 @@ func (OSRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 	return res, nil
 }
 
-// BinDir returns the managed AX tool directory (~/.ax/bin or $AX_BIN_DIR).
+// BinDir returns the managed AX tool directory (~/.ax/bin, $AX_HOME/bin, or $AX_BIN_DIR).
 func BinDir() string {
 	if dir := strings.TrimSpace(os.Getenv("AX_BIN_DIR")); dir != "" {
 		return dir
+	}
+	if axHome := strings.TrimSpace(os.Getenv("AX_HOME")); axHome != "" {
+		return filepath.Join(axHome, "bin")
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, ".ax", "bin")

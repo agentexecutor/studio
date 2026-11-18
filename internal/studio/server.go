@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/agentexecutor/studio/internal/kube"
+	"github.com/agentexecutor/studio/ux"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 )
 
@@ -46,15 +47,22 @@ const (
 	sessionCookieName = "ax_studio_session"
 	csrfHeaderName    = "X-AX-CSRF-Token"
 	sessionTTL        = 12 * time.Hour
-	maxJSONBodyBytes  = 2 * 1024 * 1024 // 2 MiB cap for YAML manifests / API requests
+	// classicPrefix is where the React pages are served.
+	classicPrefix    = "/classic"
+	maxJSONBodyBytes = 2 * 1024 * 1024 // 2 MiB cap for YAML manifests / API requests
 )
 
 // Options configures a local AX Studio server instance.
 type Options struct {
-	Addr          string
-	AXNamespace   string
-	AXBinary      string
-	StaticFS      fs.FS
+	Addr        string
+	AXNamespace string
+	AXBinary    string
+	// StaticFS holds the built React pages, served under /classic/. It
+	// defaults to the embedded build.
+	StaticFS fs.FS
+	// UXFS holds the web UI served at the root. It defaults to the files
+	// embedded from the ux directory.
+	UXFS          fs.FS
 	Runner        kube.Runner
 	ResolveServer ServerResolver
 	GuestExec     GuestExecFunc
@@ -74,6 +82,7 @@ type Server struct {
 	axNamespace    string
 	axBinary       string
 	staticFS       fs.FS
+	uxFS           fs.FS
 	runner         kube.Runner
 	resolveServer  ServerResolver
 	guestExec      GuestExecFunc
@@ -96,6 +105,11 @@ type Server struct {
 
 	sessMu   sync.Mutex
 	sessions map[string]*liveSession
+
+	// dialMu guards dialLocks, which holds one lock per kube context so that
+	// only one caller at a time finds or starts the tunnel to its ax-server.
+	dialMu    sync.Mutex
+	dialLocks map[string]*sync.Mutex
 }
 
 // NewServer constructs a configured AX Studio server and initializes its
@@ -116,6 +130,11 @@ func NewServer(opts Options) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("loading embedded studio assets: %w", err)
 		}
+	}
+
+	uxFS := opts.UXFS
+	if uxFS == nil {
+		uxFS = ux.FS
 	}
 
 	runner := opts.Runner
@@ -163,6 +182,7 @@ func NewServer(opts Options) (*Server, error) {
 		axNamespace:    axNS,
 		axBinary:       axBin,
 		staticFS:       staticFS,
+		uxFS:           uxFS,
 		runner:         runner,
 		resolveServer:  resolver,
 		guestExec:      guestExec,
@@ -177,6 +197,7 @@ func NewServer(opts Options) (*Server, error) {
 		shutdownCtx:    shutCtx,
 		shutdownCancel: shutCancel,
 		sessions:       make(map[string]*liveSession),
+		dialLocks:      make(map[string]*sync.Mutex),
 	}, nil
 }
 
@@ -222,6 +243,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/env/install", s.requireMutatingAuth(s.handleRemoteInstall))
 	mux.HandleFunc("/api/env/context", s.requireMutatingAuth(s.handleSelectContext))
 	mux.HandleFunc("/api/secrets/credential", s.requireMutatingAuth(s.handleCreateCredentialSecret))
+	mux.HandleFunc("/api/tasks", s.requireSession(s.handleListTasks))
+	mux.HandleFunc("/api/tasks/get", s.requireSession(s.handleGetTask))
+	mux.HandleFunc("/api/tasks/suspend", s.requireMutatingAuth(s.handleTaskAction("suspend")))
+	mux.HandleFunc("/api/tasks/resume", s.requireMutatingAuth(s.handleTaskAction("resume")))
+	mux.HandleFunc("/api/tasks/delete", s.requireMutatingAuth(s.handleTaskAction("delete")))
 	mux.HandleFunc("/api/tasks/changes", s.requireSession(s.handleTaskChanges))
 	mux.HandleFunc("/api/tasks/discard-file", s.requireMutatingAuth(s.handleDiscardFile))
 	mux.HandleFunc("/api/tasks/apply-local", s.requireMutatingAuth(s.handleApplyLocal))
@@ -232,10 +258,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions/interrupt", s.requireMutatingAuth(s.handleSessionInterrupt))
 	mux.HandleFunc("/api/sessions/eof", s.requireMutatingAuth(s.handleSessionEOF))
 	mux.HandleFunc("/api/sessions/close", s.requireMutatingAuth(s.handleSessionClose))
-	mux.Handle("/", s.serveSPA())
+	// The web UI is served at the root. The React pages it is replacing stay
+	// at /classic/ until it covers what they do.
+	mux.HandleFunc("/env.js", s.handleEnvJS)
+	mux.Handle(classicPrefix+"/", http.StripPrefix(classicPrefix, s.serveSPA()))
+	mux.Handle("/", s.serveUX())
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		setSecurityHeaders(w, strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz")
+		setSecurityHeaders(w, strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" || r.URL.Path == "/env.js")
 
 		// Strict HTTP method allow-list (GET, HEAD, and POST only).
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodPost {
@@ -502,6 +532,57 @@ func (s *Server) serveSPA() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "<!doctype html><html><head><title>AX Studio</title></head><body><h1>AX Studio</h1><p>Frontend bundle not built; run <code>make build</code>.</p></body></html>")
 	})
+}
+
+// serveUX serves the web UI at the root. The UI keeps its place in the URL
+// fragment, so every other path is a file or a 404.
+func (s *Server) serveUX() http.Handler {
+	fileServer := http.FileServer(http.FS(s.uxFS))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// The page and its scripts change with every build of this binary
+		// and carry no version in their names, so the browser must ask again.
+		w.Header().Set("Cache-Control", "no-cache")
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+// hasClassicUI reports whether the React pages were built into this binary.
+func (s *Server) hasClassicUI() bool {
+	f, err := s.staticFS.Open("index.html")
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+// handleEnvJS serves /env.js, the script that tells the web UI a Studio
+// server is behind the page. Without it (the copy in the ux directory, sent
+// by a plain web server) the UI runs on demo data.
+func (s *Server) handleEnvJS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	env := map[string]any{"server": true}
+	if s.hasClassicUI() {
+		env["classic"] = classicPrefix + "/"
+	}
+	payload, err := json.Marshal(env)
+	if err != nil {
+		http.Error(w, "encoding environment", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "window.AX_STUDIO = %s;\n", payload)
 }
 
 func decodeJSONBody(r *http.Request, dst any) error {

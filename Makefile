@@ -49,6 +49,7 @@ dist: ui
 
 test:
 	npm run typecheck
+	@set -e; for suite in ux/tests/smoke_*.cjs; do echo "==> node $$suite"; node "$$suite" > /dev/null || { node "$$suite" | tail -n 20; exit 1; }; done
 	go test -race -count=1 ./...
 
 verify: test

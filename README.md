@@ -2,7 +2,9 @@
 
 Local web application for [AX](https://github.com/google/ax): set up local or remote agent clusters, compose tasks with guardrails, monitor live execution, review and apply sandbox Git diffs locally, continue multi-turn sessions, and promote tasks across Kubernetes clusters.
 
-AX Studio ships as a **single Go binary (`ax-studio`)** with an embedded React + TypeScript frontend served strictly on `http://127.0.0.1:8080`.
+AX Studio ships as a **single Go binary (`ax-studio`)** with an embedded web frontend served strictly on `http://127.0.0.1:8080`.
+
+> **The interface is changing.** The new UX in [`ux/`](ux/README.md) is served at `/`. It covers setup, the task list, a task's result and changes, New task, follow-ups and running on another cluster. The React pages it replaces are still served at `/classic/` for what it doesn't cover yet: the terminal and Guardrails. The screenshot and the workflows below describe the React pages.
 
 ![Activity](docs/screenshots/overview.png)
 
@@ -59,12 +61,18 @@ Stopping `ax studio` (`Ctrl-C`) closes only the local web server; any local Kind
 
 ## Development & Building from Source
 
-Building from source compiles the TypeScript/React frontend (`src/`) into `internal/studio/dist/` and embeds it into the single `bin/ax-studio` Go binary (requires Go `1.27+` and Node.js `20+`):
+Building from source compiles the TypeScript/React frontend (`src/`) into `internal/studio/dist/` and embeds it, with the new UX in `ux/`, into the single `bin/ax-studio` Go binary (requires Go `1.27+` and Node.js `20+`):
 
 ```bash
 make build                           # Installs frontend deps if needed, builds UI, and compiles bin/ax-studio
 ./bin/ax-studio                      # Run locally built binary
-make verify                          # TypeScript check + Go race tests + gofmt + go vet
+make verify                          # TypeScript check + UI smoke tests + Go race tests + gofmt + go vet
+```
+
+The new UX has no build step. To work on it, serve it from disk so a reload shows your edit (see [`ux/README.md`](ux/README.md)):
+
+```bash
+./bin/ax-studio --ux-dir ux
 ```
 
 ## Security Model

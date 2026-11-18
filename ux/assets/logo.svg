@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="AX Studio">
+  <title>AX Studio</title>
+  <style>
+    .bg0 { stop-color: #0E1A28; }
+    .bg1 { stop-color: #070D14; }
+    .rim { stroke: #FFFFFF; stroke-opacity: .12; }
+    @media (prefers-color-scheme: dark) {
+      .bg0 { stop-color: #132336; }
+      .bg1 { stop-color: #08101A; }
+      .rim { stroke: #5CCBF9; stroke-opacity: .34; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="ax-bg" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" class="bg0" stop-color="#0E1A28"/>
+      <stop offset="100%" class="bg1" stop-color="#070D14"/>
+    </linearGradient>
+    <linearGradient id="ax-water" x1="16" y1="16" x2="16" y2="31" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="#14B8A6" stop-opacity=".05"/>
+    </linearGradient>
+    <linearGradient id="ax-wave" x1="4" y1="24" x2="26" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="56%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#7DD3FC"/>
+    </linearGradient>
+    <linearGradient id="ax-rose" x1="11" y1="7" x2="27" y2="23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FBCFE8"/>
+      <stop offset="100%" stop-color="#E4769D"/>
+    </linearGradient>
+  </defs>
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="url(#ax-bg)"/>
+  <path d="M0.75 18.8 Q8.5 16.5 16 18.8 T31.25 18.8 V22.25 A9 9 0 0 1 22.25 31.25 H9.75 A9 9 0 0 1 0.75 22.25 Z" fill="url(#ax-water)"/>
+  <path d="M15.82 18.38 Q16.07 18.0 16.37 18.34 L18.04 20.24 Q18.34 20.58 18.09 20.96 L16.15 23.86 Q15.79 24.4 15.14 24.4 L12.44 24.4 Q11.79 24.4 12.15 23.86 Z" fill="#EEF4F9"/>
+  <path d="M22.93 7.74 Q23.29 7.2 23.94 7.2 L26.64 7.2 Q27.29 7.2 26.93 7.74 L21.97 15.14 Q21.72 15.52 21.42 15.18 L19.76 13.28 Q19.46 12.94 19.71 12.56 Z" fill="url(#ax-rose)"/>
+  <path d="M4.85 24.4 Q4.2 24.4 4.44 23.8 L10.78 8.16 Q11.66 5.98 13.21 7.75 L27.37 23.91 Q27.8 24.4 27.15 24.4 L24.03 24.4 Q23.38 24.4 22.95 23.91 L13.11 12.66 Q12.72 12.22 12.5 12.76 L8.02 23.8 Q7.78 24.4 7.13 24.4 Z" fill="url(#ax-wave)"/>
+  <path d="M11.15 19.41 Q11.36 18.9 11.91 18.9 L13.42 18.9 Q13.97 18.9 13.66 19.36 L12.27 21.44 Q11.96 21.9 11.41 21.9 L10.69 21.9 Q10.14 21.9 10.35 21.39 Z" fill="url(#ax-rose)"/>
+  <rect class="rim" x="0.75" y="0.75" width="30.5" height="30.5" rx="9" fill="none" stroke-width="1.2"/>
+</svg>
