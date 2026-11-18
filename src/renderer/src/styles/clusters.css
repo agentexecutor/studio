@@ -72,7 +72,8 @@
 .env-subhead { font-weight: 600; }
 .env-actions { margin-top: 2px; flex-wrap: wrap; gap: 8px; }
 .layer.preflight { flex-direction: column; align-items: stretch; gap: 6px; }
-.preflight-head { gap: 8px; }
+.preflight-head { gap: 10px; }
+.layer-status { flex: none; }
 .layer-detail.wrap { white-space: normal; }
 .tool-version { margin-left: 7px; font-size: 11.5px; font-weight: 400; color: var(--text-2); }
 .env-contexts { gap: 8px; max-height: 360px; overflow-y: auto; }

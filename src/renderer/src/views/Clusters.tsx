@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type CSSProperties } from 'react'
 import {
-  BookOpen, Check, ChevronDown, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
-  Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
+  BookOpen, Check, ChevronDown, Circle, CircleCheck, CircleDashed, CircleX, Container, Copy, Cpu, Database, ExternalLink, HardDrive, Laptop, Layers3,
+  Loader, Monitor, Network, Play, RefreshCw, Server, ShieldCheck, Square, SquareTerminal, Tag, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
 import {
   clusters, isLocalContext, stageProgress, useClusters, STAGES,
@@ -133,7 +133,7 @@ export function Clusters() {
                     <SquareTerminal size={14} className="layer-icon" />
                     <div className="layer-text">
                       <div className="layer-title">{t.name}{t.version && <span className="mono tool-version">{t.version}</span>}</div>
-                      <div className="layer-detail wrap" data-tip={t.detail}>{t.detail}</div>
+                      <div className="layer-detail wrap">{t.detail}</div>
                     </div>
                     <h.icon size={14} color={h.color} />
                   </div>
@@ -151,7 +151,8 @@ export function Clusters() {
                     <r.icon size={14} className="layer-icon" />
                     <div className="layer-text">
                       <div className="layer-title">{r.title}</div>
-                      <div className={`layer-detail ${r.busy ? "" : "wrap"}`} data-tip={r.detail}>{r.detail}</div>
+                      {/* A step being run stays on one line, so its tip carries the rest of it. */}
+                      <div className={`layer-detail ${r.busy ? '' : 'wrap'}`} data-tip={r.busy ? r.detail : undefined}>{r.detail}</div>
                     </div>
                     {r.time && <span className="num layer-time">{r.time}</span>}
                     <h.icon size={14} color={h.color} className={r.busy ? 'spin' : ''} />
@@ -481,16 +482,29 @@ function ImagesCard({ disabled }: { disabled: boolean }) {
   )
 }
 
+/** What each check is about, by its id. The row's status goes on the right, as on every other row. */
+const CHECK_ICONS: Record<string, LucideIcon> = {
+  os_arch: Monitor,
+  container_engine: Container,
+  disk_space: HardDrive,
+  version: Tag,
+  nodes: Network,
+  apis: ShieldCheck,
+  storage: Database,
+}
+
 function PreflightRow({ item }: { item: PreflightItem }) {
   const h = HEALTH[item.status]
+  const Icon = CHECK_ICONS[item.id] ?? Server
   return (
     <div className={`layer preflight ${item.status}`} style={{ '--c': h.color } as CSSProperties}>
       <div className="row preflight-head">
-        <h.icon size={14} color={h.color} />
+        <Icon size={14} className="layer-icon" />
         <div className="layer-text">
           <div className="layer-title">{item.label}</div>
           <div className={`layer-detail ${item.status === 'ok' ? '' : 'wrap'}`}>{item.detail}</div>
         </div>
+        <h.icon size={14} color={h.color} className="layer-status" />
       </div>
       {item.command && <CopyableCommand cmd={item.command} />}
     </div>
