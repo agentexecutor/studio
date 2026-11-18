@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import {
   Check, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
-  Square, Trash2, TriangleAlert, Wrench, type LucideIcon,
+  Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
 import { clusters, isLocalContext, useClusters, STAGES, type LocalSandbox, type Operation, type PreflightItem, type Replicas } from '../model/clusters'
 import { shortName } from '../model/resources'
@@ -62,6 +62,23 @@ export function Clusters() {
 
             <div className="layer-stack">
               {c.preflight.map((p) => <PreflightRow key={p.id} item={p} />)}
+            </div>
+
+            <div className="caption muted env-subhead">Local Dependencies</div>
+            <div className="layer-stack">
+              {c.tools.map((t) => {
+                const h = HEALTH[t.status]
+                return (
+                  <div key={t.name} className={`layer ${t.status}`} style={{ '--c': h.color } as CSSProperties}>
+                    <SquareTerminal size={14} className="layer-icon" />
+                    <div className="layer-text">
+                      <div className="layer-title">{t.name}{t.version && <span className="mono tool-version">{t.version}</span>}</div>
+                      <div className="layer-detail wrap" title={t.detail}>{t.detail}</div>
+                    </div>
+                    <h.icon size={14} color={h.color} />
+                  </div>
+                )
+              })}
             </div>
 
             <div className="caption muted env-subhead">Local Stack Layers</div>

@@ -74,6 +74,7 @@
 .layer.preflight { flex-direction: column; align-items: stretch; gap: 6px; }
 .preflight-head { gap: 8px; }
 .layer-detail.wrap { white-space: normal; }
+.tool-version { margin-left: 7px; font-size: 11.5px; font-weight: 400; color: var(--text-2); }
 .env-contexts { gap: 8px; max-height: 360px; overflow-y: auto; }
 .env-context { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .env-context-head { gap: 8px; }

@@ -15,6 +15,17 @@ export interface PreflightItem {
   command?: string
 }
 
+/** A command-line tool the local sandbox depends on. */
+export interface Tool {
+  name: string
+  /** Empty when the tool isn't installed or doesn't say. */
+  version: string
+  /** `none` is a tool that's missing but that ax downloads when it's needed. */
+  status: 'ok' | 'warn' | 'fail' | 'none'
+  /** Where it is, or what happens without it. */
+  detail: string
+}
+
 /** The kind cluster `ax local` manages, with Agent Substrate and AX on it. */
 export interface LocalSandbox {
   state: 'NotFound' | 'Stopped' | 'Running'
@@ -55,6 +66,7 @@ export interface Images {
 
 export interface ClustersState {
   preflight: PreflightItem[]
+  tools: Tool[]
   local: LocalSandbox
   loading: boolean
   loaded: boolean
@@ -80,6 +92,8 @@ const MIN_MEMORY = 4 * GIB
 const RECOMMENDED_MEMORY = 6 * GIB
 const MIN_DISK = 8 * GIB
 const RECOMMENDED_DISK = 15 * GIB
+/** ax uses the kind on PATH only from v0.<this>; otherwise it keeps its own in ~/.ax/bin (ax's executil.EnsureKind). */
+const MIN_KIND_MINOR = 32
 
 /** The images last used, so they don't have to be typed again. */
 const IMAGES_KEY = 'ax-studio.images'
@@ -196,9 +210,61 @@ async function checkDisk(home: string): Promise<PreflightItem | null> {
   return { ...item, status: 'ok', detail: `${gib(free)} GiB free` }
 }
 
+/** What `program args` reports as its version, or '' if it can't be run. */
+async function versionOf(program: string, args: string[], pattern: RegExp): Promise<string> {
+  const r = await window.studio.run({ program, args })
+  return r.status === 0 ? (pattern.exec(r.stdout)?.[1] ?? '') : ''
+}
+
+const kindVersion = (program: string) => versionOf(program, ['version'], /kind (v[\w.-]+)/)
+
+function kindIsRecent(version: string): boolean {
+  const m = /^v(\d+)\.(\d+)/.exec(version)
+  return !!m && (Number(m[1]) > 0 || Number(m[2]) >= MIN_KIND_MINOR)
+}
+
+/**
+ * The command-line tools the local sandbox needs, as ax will find them: ax
+ * itself, and the kubectl and kind it uses or downloads into ~/.ax/bin.
+ */
+async function checkTools(home: string): Promise<Tool[]> {
+  const short = (path: string) => (path.startsWith(home) ? `~${path.slice(home.length)}` : path)
+  const downloaded = 'Not installed. ax downloads it into ~/.ax/bin when you set up the local sandbox.'
+  const axPath = store.state.settings.axPath
+  const [ax, kubectl, kind] = await Promise.all([window.studio.which(axPath), window.studio.which('kubectl'), window.studio.which('kind')])
+
+  const axTool: Tool = ax
+    ? { name: 'ax', version: await versionOf(ax, ['version'], /ax version (.+)/), status: 'ok', detail: short(ax) }
+    : { name: 'ax', version: '', status: 'fail', detail: `Not found (${axPath}). Set its path in Settings.` }
+
+  const kubectlTool: Tool = kubectl
+    ? { name: 'kubectl', version: await versionOf(kubectl, ['version', '--client'], /Client Version:\s*(\S+)/), status: 'ok', detail: short(kubectl) }
+    : { name: 'kubectl', version: '', status: 'none', detail: downloaded }
+
+  const onPath = kind ? await kindVersion(kind) : ''
+  let kindTool: Tool
+  if (kind && kindIsRecent(onPath)) {
+    kindTool = { name: 'kind', version: onPath, status: 'ok', detail: short(kind) }
+  } else {
+    // ax passes over a kind that's too old for one of its own.
+    const tooOld = kind ? `The kind ${onPath} at ${short(kind)} is older than v0.${MIN_KIND_MINOR}.0` : ''
+    const own = `${home}/.ax/bin/kind`
+    const ownVersion = own !== kind && (await window.studio.fileExists(own)) ? await kindVersion(own) : ''
+    if (kindIsRecent(ownVersion)) {
+      kindTool = { name: 'kind', version: ownVersion, status: 'ok', detail: tooOld ? `${short(own)}. ${tooOld}, so ax uses its own.` : short(own) }
+    } else if (kind) {
+      kindTool = { name: 'kind', version: onPath, status: 'warn', detail: `${tooOld}. ax downloads a newer one into ~/.ax/bin when you set up the local sandbox.` }
+    } else {
+      kindTool = { name: 'kind', version: '', status: 'none', detail: downloaded }
+    }
+  }
+  return [axTool, kubectlTool, kindTool]
+}
+
 class ClustersStore {
   state: ClustersState = {
     preflight: [],
+    tools: [],
     local: NO_SANDBOX,
     loading: false,
     loaded: false,
@@ -242,11 +308,11 @@ class ClustersStore {
     this.set({ loading: true })
     try {
       const { os, home } = await window.studio.platform()
-      const [ax, arch, engine, disk] = await Promise.all([
-        window.studio.which(store.state.settings.axPath),
+      const [arch, engine, disk, tools] = await Promise.all([
         window.studio.run({ program: 'uname', args: ['-m'] }),
         checkEngine(os),
         checkDisk(home),
+        checkTools(home),
         store.loadContexts(),
       ])
       const cpu = arch.stdout.trim().replace('x86_64', 'amd64').replace('aarch64', 'arm64')
@@ -255,7 +321,7 @@ class ClustersStore {
         engine,
         ...(disk ? [disk] : []),
       ]
-      this.set({ axFound: !!ax, preflight, local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
+      this.set({ axFound: tools[0].status !== 'fail', preflight, tools, local: engine.status === 'fail' ? NO_SANDBOX : await this.probeLocal() })
     } finally {
       this.set({ loading: false, loaded: true })
     }
