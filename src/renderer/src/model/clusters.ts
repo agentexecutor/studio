@@ -32,6 +32,12 @@ export interface LocalSandbox {
   state: 'NotFound' | 'Stopped' | 'Running'
   name: string
   context: string
+  /**
+   * Whether kubectl can look inside a running cluster. Without the cluster's
+   * context in the kubeconfig, or an API server that answers, what's installed
+   * on it is unknown rather than missing.
+   */
+  access: 'ok' | 'no-context' | 'unreachable'
   substrate: Replicas
   ax: Replicas
 }
@@ -129,7 +135,7 @@ const LOCAL_NAME = 'ax-local'
 const LOCAL_CONTEXTS = new Set([LOCAL_NAME, `kind-${LOCAL_NAME}`, 'local', 'kind-local'])
 export const isLocalContext = (name: string) => LOCAL_CONTEXTS.has(name)
 
-const NO_SANDBOX: LocalSandbox = { state: 'NotFound', name: LOCAL_NAME, context: LOCAL_NAME, substrate: null, ax: null }
+const NO_SANDBOX: LocalSandbox = { state: 'NotFound', name: LOCAL_NAME, context: LOCAL_NAME, access: 'ok', substrate: null, ax: null }
 
 const NO_CHECK: ClusterCheck = { checking: false, requirements: [], substrate: null, router: null, workerPools: { ready: 0, total: 0 }, ax: null, axImage: '' }
 
@@ -177,7 +183,9 @@ for n in $nodes; do
   if [ "$("$rt" inspect -f '{{.State.Running}}' "$n" 2>/dev/null)" != true ]; then echo state=Stopped; exit 0; fi
 done
 echo state=Running
+if ! kubectl config get-contexts "$name" >/dev/null 2>&1; then echo access=no-context; exit 0; fi
 k() { kubectl --context "$name" --request-timeout=4s "$@" 2>/dev/null; }
+if ! k get --raw=/version >/dev/null; then echo access=unreachable; exit 0; fi
 echo "substrate=$(k -n ate-system get deployment ate-api-server -o jsonpath='{.status.availableReplicas}/{.spec.replicas}')"
 echo "ax=$(k -n "$ns" get deployment ax-server -o jsonpath='{.status.availableReplicas}/{.spec.replicas}')"
 `
@@ -453,7 +461,8 @@ class ClustersStore {
     const kv = Object.fromEntries(r.stdout.split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
     const state = kv.state === 'Running' || kv.state === 'Stopped' ? kv.state : 'NotFound'
     const name: string = kv.name || LOCAL_NAME
-    return { state, name, context: name, substrate: replicas(kv.substrate), ax: replicas(kv.ax) }
+    const access = kv.access === 'no-context' || kv.access === 'unreachable' ? kv.access : 'ok'
+    return { state, name, context: name, access, substrate: replicas(kv.substrate), ax: replicas(kv.ax) }
   }
 
   private setCheck(context: string, check: ClusterCheck) {

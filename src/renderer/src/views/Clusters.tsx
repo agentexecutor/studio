@@ -111,7 +111,7 @@ export function Clusters() {
                 <div className="faint mono cluster-ctx">context: {exists ? local.context : 'N/A'}{active && ' · active'}</div>
               </div>
               <div className="spacer" />
-              <LocalBadge state={local.state} ready={ready} setup={setup} />
+              <LocalBadge local={local} ready={ready} setup={setup} />
             </div>
 
             <div className="layer-stack">
@@ -146,7 +146,7 @@ export function Clusters() {
                     <r.icon size={14} className="layer-icon" />
                     <div className="layer-text">
                       <div className="layer-title">{r.title}</div>
-                      <div className="layer-detail" title={r.detail}>{r.detail}</div>
+                      <div className={`layer-detail ${r.busy ? "" : "wrap"}`} title={r.detail}>{r.detail}</div>
                     </div>
                     {r.time && <span className="num layer-time">{r.time}</span>}
                     <h.icon size={14} color={h.color} className={r.busy ? 'spin' : ''} />
@@ -460,9 +460,12 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   )
 }
 
-function LocalBadge({ state, ready, setup }: { state: LocalSandbox['state']; ready: boolean; setup: Operation | null }) {
+function LocalBadge({ local, ready, setup }: { local: LocalSandbox; ready: boolean; setup: Operation | null }) {
+  const { state } = local
   const v = setup?.status === 'running' ? { h: 'warn' as Health, label: `${setup.wording?.doing ?? 'Setting up'} · ${duration(Date.now() - setup.started)}` }
     : ready ? { h: 'ok' as Health, label: 'Ready' }
+    : state === 'Running' && local.access === 'no-context' ? { h: 'warn' as Health, label: 'Not in Kubeconfig' }
+    : state === 'Running' && local.access === 'unreachable' ? { h: 'warn' as Health, label: 'Not Answering' }
     : state === 'Running' ? { h: 'warn' as Health, label: 'Starting / Degraded' }
     : state === 'Stopped' ? { h: 'warn' as Health, label: 'Stopped' }
     : { h: 'none' as Health, label: 'Not Set Up' }
@@ -519,13 +522,19 @@ function setupLayers(op: Operation): Layer[] {
 
 function localLayers(local: LocalSandbox): Layer[] {
   const up = local.state === 'Running'
-  // What a layer says when there's nothing of it to report on.
-  const absent = local.state === 'Stopped' ? 'Stopped' : up ? 'Not installed' : 'Installed when you set up the local sandbox'
+  // What a layer says when there's nothing of it to report on. A cluster kubectl can't look into isn't one with nothing installed.
+  const absent = local.state === 'Stopped' ? 'Stopped'
+    : !up ? 'Installed when you set up the local sandbox'
+    : local.access === 'no-context' ? `Unknown: the ${local.context} context isn't in your kubeconfig. Repair Local Sandbox puts it back.`
+    : local.access === 'unreachable' ? "Unknown: the cluster's API server isn't answering."
+    : 'Not installed'
   return [
     {
       id: 'kind', icon: Cpu, title: LAYER_TITLES.kind,
       health: up ? 'ok' : local.state === 'Stopped' ? 'warn' : 'none',
-      detail: up ? 'Running locally' : local.state === 'Stopped' ? 'Stopped; its state is kept' : 'Not created yet',
+      detail: !up ? (local.state === 'Stopped' ? 'Stopped; its state is kept' : 'Not created yet')
+        : local.access === 'no-context' ? 'Its containers are running, but your kubeconfig has no context for it'
+        : 'Running locally',
     },
     {
       id: 'substrate', icon: Layers3, title: LAYER_TITLES.substrate,
