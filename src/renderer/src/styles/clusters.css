@@ -88,4 +88,8 @@
 .env-confirm { margin: 0 0 18px; line-height: 1.5; }
 .env-confirm-actions { justify-content: flex-end; gap: 8px; }
 .btn.primary.danger-fill { background: var(--red); border-color: var(--red); }
+.env-op { margin: 0 0 14px; }
+.op-step { flex: 0 1 auto; min-width: 0; }
+.layer.busy { background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.layer-time { flex: none; font-size: 11.5px; color: var(--text-2); }
 

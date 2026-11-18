@@ -3,7 +3,10 @@ import {
   Check, Circle, CircleCheck, CircleDashed, CircleX, Copy, Cpu, ExternalLink, Laptop, Layers3, Loader, Play, RefreshCw, Server,
   Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
-import { clusters, isLocalContext, useClusters, STAGES, type LocalSandbox, type Operation, type PreflightItem, type Replicas } from '../model/clusters'
+import {
+  clusters, isLocalContext, stageProgress, useClusters, STAGES,
+  type LocalSandbox, type Operation, type PreflightItem, type Replicas, type StageProgress,
+} from '../model/clusters'
 import { shortName } from '../model/resources'
 import { useStore } from '../model/store'
 import { LogConsole, PageHeader } from '../components'
@@ -21,6 +24,22 @@ const HEALTH: Record<Health, { icon: LucideIcon; color: string }> = {
 
 const full = (r: Replicas) => !!r && r.total > 0 && r.ready >= r.total
 
+/** "42s" or "3m 07s". */
+function duration(ms: number): string {
+  const secs = Math.round(ms / 1000)
+  return secs >= 60 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s` : `${secs}s`
+}
+
+/** Re-renders every second while `on`, so elapsed times keep counting. */
+function useTick(on: boolean) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!on) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [on])
+}
+
 export function Clusters() {
   const c = useClusters()
   const s = useStore()
@@ -29,8 +48,12 @@ export function Clusters() {
   const [outputOpen, setOutputOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   useEffect(() => { if (running) setOutputOpen(true) }, [running])
+  useTick(running)
 
   const local = c.local
+  // While the sandbox is being set up, and until its result is dismissed, the layers show the setup itself.
+  const setup = c.op?.kind === 'setup' ? c.op : null
+  const layers = setup ? setupLayers(setup) : localLayers(local)
   const exists = local.state !== 'NotFound'
   const ready = local.state === 'Running' && full(local.ax)
   const active = exists && s.context === local.context
@@ -48,6 +71,8 @@ export function Clusters() {
           </button>
         </PageHeader>
 
+        {c.op && <OperationBar op={c.op} />}
+
         <div className="clusters-layout env-layout">
           <div className={`card cluster-card ${active ? 'highlight' : ''}`}>
             <div className="row cluster-head">
@@ -57,7 +82,7 @@ export function Clusters() {
                 <div className="faint mono cluster-ctx">context: {exists ? local.context : 'N/A'}{active && ' · active'}</div>
               </div>
               <div className="spacer" />
-              <LocalBadge state={local.state} ready={ready} />
+              <LocalBadge state={local.state} ready={ready} setup={setup} />
             </div>
 
             <div className="layer-stack">
@@ -85,16 +110,17 @@ export function Clusters() {
 
             <div className="caption muted env-subhead">Local Stack Layers</div>
             <div className="layer-stack">
-              {localLayers(local).map((r) => {
-                const h = HEALTH[r.health]
+              {layers.map((r) => {
+                const h = r.busy ? { icon: Loader, color: 'var(--accent)' } : HEALTH[r.health]
                 return (
-                  <div key={r.id} className={`layer ${r.health}`} style={{ '--c': h.color } as CSSProperties}>
+                  <div key={r.id} className={`layer ${r.busy ? 'busy' : r.health}`} style={{ '--c': h.color } as CSSProperties}>
                     <r.icon size={14} className="layer-icon" />
                     <div className="layer-text">
                       <div className="layer-title">{r.title}</div>
-                      <div className="layer-detail">{r.detail}</div>
+                      <div className="layer-detail" title={r.detail}>{r.detail}</div>
                     </div>
-                    <h.icon size={14} color={h.color} />
+                    {r.time && <span className="num layer-time">{r.time}</span>}
+                    <h.icon size={14} color={h.color} className={r.busy ? 'spin' : ''} />
                   </div>
                 )
               })}
@@ -169,8 +195,6 @@ export function Clusters() {
         </div>
 
         <ImagesCard disabled={running} />
-
-        {c.op && <OperationBar op={c.op} />}
       </div>
       <LogConsole
         lines={c.log}
@@ -262,8 +286,9 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   )
 }
 
-function LocalBadge({ state, ready }: { state: LocalSandbox['state']; ready: boolean }) {
-  const v = ready ? { h: 'ok' as Health, label: 'Ready' }
+function LocalBadge({ state, ready, setup }: { state: LocalSandbox['state']; ready: boolean; setup: Operation | null }) {
+  const v = setup?.status === 'running' ? { h: 'warn' as Health, label: `Setting Up · ${duration(Date.now() - setup.started)}` }
+    : ready ? { h: 'ok' as Health, label: 'Ready' }
     : state === 'Running' ? { h: 'warn' as Health, label: 'Starting / Degraded' }
     : state === 'Stopped' ? { h: 'warn' as Health, label: 'Stopped' }
     : { h: 'none' as Health, label: 'Not Set Up' }
@@ -275,23 +300,66 @@ function LocalBadge({ state, ready }: { state: LocalSandbox['state']; ready: boo
   )
 }
 
-function localLayers(local: LocalSandbox): { id: string; icon: LucideIcon; title: string; detail: string; health: Health }[] {
+interface Layer {
+  id: string
+  icon: LucideIcon
+  title: string
+  detail: string
+  health: Health
+  /** Being set up right now. */
+  busy?: boolean
+  /** How long setting it up took, or has taken so far. */
+  time?: string
+}
+
+const LAYER_TITLES = {
+  kind: 'Kubernetes (Kind)',
+  substrate: 'Agent Substrate + gVisor WorkerPool',
+  ax: 'AX Control Plane (ax-server + Postgres)',
+}
+
+/** The layers while `ax local start` runs: which are done, which one it's on, and how long each took. */
+function setupLayers(op: Operation): Layer[] {
+  const p = stageProgress(op)
+  // Substrate and its worker pool are one layer here, two stages in ax's output.
+  const substrate: StageProgress = {
+    state: p.substrate.state === 'ok' ? p.workers.state === 'idle' ? 'running' : p.workers.state : p.substrate.state,
+    ms: p.substrate.ms + p.workers.ms,
+  }
+  const layer = (id: keyof typeof LAYER_TITLES, icon: LucideIcon, s: StageProgress, doing: string): Layer => ({
+    id, icon, title: LAYER_TITLES[id],
+    health: s.state === 'ok' ? 'ok' : s.state === 'failed' ? 'fail' : 'none',
+    busy: s.state === 'running',
+    time: s.ms > 0 ? duration(s.ms) : undefined,
+    detail: s.state === 'running' ? (op.step ?? doing)
+      : s.state === 'failed' ? `Failed${op.step ? `: ${op.step.replace(/\.+$/, '')}` : ''}. See the output below.`
+      : s.state === 'idle' ? (op.status === 'failed' ? 'Not reached' : 'Waiting')
+      : s.ms > 0 ? 'Done' : 'Already in place',
+  })
+  return [
+    layer('kind', Cpu, p.kind, 'Creating the kind cluster…'),
+    layer('substrate', Layers3, substrate, 'Installing Agent Substrate…'),
+    layer('ax', Server, p.ax, 'Installing AX…'),
+  ]
+}
+
+function localLayers(local: LocalSandbox): Layer[] {
   const up = local.state === 'Running'
   // What a layer says when there's nothing of it to report on.
   const absent = local.state === 'Stopped' ? 'Stopped' : up ? 'Not installed' : 'Installed when you set up the local sandbox'
   return [
     {
-      id: 'kind', icon: Cpu, title: 'Kubernetes (Kind)',
+      id: 'kind', icon: Cpu, title: LAYER_TITLES.kind,
       health: up ? 'ok' : local.state === 'Stopped' ? 'warn' : 'none',
       detail: up ? 'Running locally' : local.state === 'Stopped' ? 'Stopped; its state is kept' : 'Not created yet',
     },
     {
-      id: 'substrate', icon: Layers3, title: 'Agent Substrate + gVisor WorkerPool',
+      id: 'substrate', icon: Layers3, title: LAYER_TITLES.substrate,
       health: !up ? 'none' : full(local.substrate) ? 'ok' : 'warn',
       detail: up && local.substrate ? `ate-api-server ${local.substrate.ready}/${local.substrate.total} available` : absent,
     },
     {
-      id: 'ax', icon: Server, title: 'AX Control Plane (ax-server + Postgres)',
+      id: 'ax', icon: Server, title: LAYER_TITLES.ax,
       health: !up ? 'none' : full(local.ax) ? 'ok' : 'warn',
       detail: up && local.ax ? `ax-server ${local.ax.ready}/${local.ax.total} available` : absent,
     },
@@ -299,41 +367,36 @@ function localLayers(local: LocalSandbox): { id: string; icon: LucideIcon; title
 }
 
 function OperationBar({ op }: { op: Operation }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    if (op.status !== 'running') return
-    const t = setInterval(() => tick((n) => n + 1), 1000)
-    return () => clearInterval(t)
-  }, [op.status])
-  const secs = Math.round(((op.finished ?? Date.now()) - op.started) / 1000)
-  const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s` : `${secs}s`
+  useTick(op.status === 'running')
+  const elapsed = duration((op.finished ?? Date.now()) - op.started)
   const verb = { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on' }[op.kind]
   const done = { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on' }[op.kind]
   const title = op.status === 'running' ? `${verb} ${op.target}` : op.status === 'ok' ? `${done} ${op.target}` : `${verb} ${op.target} failed`
-  const currentIndex = STAGES.findIndex((s) => s.id === op.stage)
+  const progress = op.stage ? stageProgress(op) : null
   const StatusIcon = op.status === 'running' ? Loader : op.status === 'ok' ? CircleCheck : CircleX
   const statusColor = op.status === 'running' ? 'var(--accent)' : op.status === 'ok' ? 'var(--green)' : 'var(--red)'
 
   return (
-    <div className="card op-bar">
+    <div className="card op-bar env-op">
       <div className="row op-head">
         <StatusIcon size={15} color={statusColor} className={op.status === 'running' ? 'spin' : ''} />
         <span className="op-title">{title}</span>
         <span className="faint num">{elapsed}{op.status === 'failed' && op.exit !== undefined ? ` · exit ${op.exit}` : ''}</span>
+        {op.status === 'running' && op.step && <span className="caption muted ellipsis op-step" title={op.step}>{op.step}</span>}
         <div className="spacer" />
         {op.status !== 'running' && <button className="btn small ghost" onClick={() => clusters.set({ op: null })}>Dismiss</button>}
       </div>
-      {op.stage && (
+      {progress && (
         <div className="op-stages">
-          {STAGES.map((s, i) => {
-            const state = op.status === 'ok' || i < currentIndex ? 'ok'
-              : i > currentIndex ? 'idle'
-              : op.status === 'failed' ? 'failed' : 'running'
+          {STAGES.map((s) => {
+            const { state, ms } = progress[s.id]
             const Icon = state === 'ok' ? CircleCheck : state === 'failed' ? CircleX : state === 'running' ? Loader : Circle
             return (
               <div key={s.id} className={`op-stage ${state}`}>
                 <Icon size={13} className={state === 'running' ? 'spin' : ''} />
                 <span>{s.title}</span>
+                <div className="spacer" />
+                {ms > 0 && <span className="num">{duration(ms)}</span>}
               </div>
             )
           })}

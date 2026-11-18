@@ -48,10 +48,35 @@ export interface Operation {
   /** The local cluster's name, or the context AX is installed on. */
   target: string
   stage: StageID | null
+  /** When each stage began, for the ones that have. */
+  stageStarted: Partial<Record<StageID, number>>
+  /** The step ax last announced, e.g. "Deploying ax-server (…)...". */
+  step?: string
   status: 'running' | 'ok' | 'failed'
   exit?: number
   started: number
   finished?: number
+}
+
+export interface StageProgress {
+  state: 'idle' | 'running' | 'ok' | 'failed'
+  /** How long the stage has taken; 0 for one that hasn't run or had nothing to do. */
+  ms: number
+}
+
+/** Where each stage of a staged operation stands, and how long it has taken. */
+export function stageProgress(op: Operation, now = Date.now()): Record<StageID, StageProgress> {
+  const current = STAGES.findIndex((x) => x.id === op.stage)
+  const end = op.finished ?? now
+  const out = {} as Record<StageID, StageProgress>
+  STAGES.forEach((stage, i) => {
+    const started = op.stageStarted[stage.id]
+    // A stage ends when the next one that ran begins.
+    const next = STAGES.slice(i + 1).map((x) => op.stageStarted[x.id]).find((t) => t !== undefined)
+    const state = op.status === 'ok' || i < current ? 'ok' : i > current ? 'idle' : op.status === 'failed' ? 'failed' : 'running'
+    out[stage.id] = { state, ms: started === undefined ? 0 : Math.max(0, (next ?? end) - started) }
+  })
+  return out
 }
 
 /** The images `ax local start` and `ax install` deploy. */
@@ -195,8 +220,9 @@ function macVMName(runtime: string, hostOS: string, hostName: string): string {
 
 /** Checks the container engine's host, or VM on macOS, the way `ax local start` will. */
 async function checkEngine(os: string): Promise<PreflightItem> {
-  const item = { id: 'container_engine', label: 'Container runtime & VM' }
   const mac = os === 'darwin'
+  // Only macOS puts a Linux VM under the engine; on Linux it runs on the host's own kernel.
+  const item = { id: 'container_engine', label: mac ? 'Container runtime & VM' : 'Container runtime' }
   const { runtime } = await window.studio.containerRuntime()
   const notRunning = async (): Promise<PreflightItem> => ({
     ...item, status: 'fail',
@@ -421,6 +447,8 @@ class ClustersStore {
     for (const [label, value] of [['The server image', serverImage], ['The task image', defaultTaskImage], ['The runner volume image', runnerVolumeImage]]) {
       const v = value.trim()
       if (v && (v.startsWith('-') || /\s/.test(v))) p.push(`${label} is not an image reference.`)
+      // ax only finds this out at its last step, after the cluster and Substrate are up.
+      else if (v.includes('sha256:') && !/@sha256:[0-9a-f]{64}$/.test(v)) p.push(`${label} must give its digest as name@sha256:<64 hex digits>.`)
     }
     return p
   }
@@ -496,7 +524,8 @@ class ClustersStore {
   private async exec(op: Pick<Operation, 'kind' | 'target' | 'stage'>, title: string, command: string): Promise<boolean> {
     if (this.running) return false
     const staged = op.stage !== null
-    this.set({ op: { ...op, status: 'running', started: Date.now() }, log: [] })
+    const started = Date.now()
+    this.set({ op: { ...op, stageStarted: op.stage ? { [op.stage]: started } : {}, status: 'running', started }, log: [] })
     this.append(`▶ ${title}`, 'start')
     const streamID = `clusters-${++this.streamID}`
     const cwd = (await window.studio.platform()).home
@@ -504,8 +533,13 @@ class ClustersStore {
       const offLine = window.studio.onStreamLine((l) => {
         if (l.id !== streamID) return
         this.append(l.line)
+        if (l.line.startsWith('==> ')) this.patchOp({ step: l.line.slice(4) })
         const stage = staged ? stageFor(l.line) : null
-        if (stage) this.patchOp({ stage })
+        const now = this.state.op
+        // Stages only move forward; a later line that names an earlier layer doesn't go back.
+        if (stage && now && STAGES.findIndex((x) => x.id === stage) > STAGES.findIndex((x) => x.id === now.stage)) {
+          this.patchOp({ stage, stageStarted: { ...now.stageStarted, [stage]: Date.now() } })
+        }
       })
       const offExit = window.studio.onStreamExit((e) => {
         if (e.id !== streamID) return
