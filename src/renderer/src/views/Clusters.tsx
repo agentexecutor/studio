@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import {
   clusters, isLocalContext, stageProgress, useClusters, STAGES,
-  type LocalSandbox, type Operation, type PreflightItem, type Replicas, type StageProgress,
+  type ClusterCheck, type LocalSandbox, type Operation, type PreflightItem, type Replicas, type StageProgress,
 } from '../model/clusters'
 import { shortName } from '../model/resources'
 import { useStore } from '../model/store'
@@ -23,6 +23,19 @@ const HEALTH: Record<Health, { icon: LucideIcon; color: string }> = {
 }
 
 const full = (r: Replicas) => !!r && r.total > 0 && r.ready >= r.total
+
+// Where AX's and Agent Substrate's documentation covers a cluster that isn't the local sandbox.
+const DOCS = {
+  prerequisites: 'https://github.com/google/ax/blob/main/docs/local_installer.md#remote-cluster-prerequisites-for-step-5',
+  substrateSetup: 'https://github.com/google/ax/blob/main/docs/installation.md#substrate-setup',
+  substrateInstall: 'https://github.com/agent-substrate/substrate/blob/f86fde9dfb5424c8d16f613de80469bdbef06541/docs/guides/operator-install.md',
+  workerPool: 'https://github.com/agent-substrate/substrate/blob/f86fde9dfb5424c8d16f613de80469bdbef06541/docs/reference/api-guide.md#1-workerpool-the-physical-capacity',
+}
+
+/** A link that opens in the browser. */
+function Doc({ to, children }: { to: keyof typeof DOCS; children: string }) {
+  return <a href={DOCS[to]} target="_blank" rel="noreferrer">{children}</a>
+}
 
 /** "42s" or "3m 07s". */
 function duration(ms: number): string {
@@ -47,6 +60,7 @@ export function Clusters() {
   const running = c.op?.status === 'running'
   const [outputOpen, setOutputOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmInstall, setConfirmInstall] = useState<string | null>(null)
   useEffect(() => { if (running) setOutputOpen(true) }, [running])
   useTick(running)
 
@@ -64,6 +78,10 @@ export function Clusters() {
     const t = setInterval(() => void clusters.refreshLocal(), 5000)
     return () => clearInterval(t)
   }, [settling])
+  // The cluster the app is using is worth a look without being asked; the others wait for Check.
+  useEffect(() => {
+    if (s.context && !isLocalContext(s.context) && !clusters.state.checks[s.context]) void clusters.checkCluster(s.context)
+  }, [s.context])
   const localBlockers = clusters.localBlockers
   const installBlockers = clusters.installBlockers
   const remote = s.contexts.filter((x) => !isLocalContext(x.name))
@@ -176,6 +194,7 @@ export function Clusters() {
               Skip local setup and run tasks on a shared GKE or Kubernetes cluster from your <span className="mono">~/.kube/config</span>.
               No local container VM is needed.
             </div>
+            <NewClusterGuide />
             {remote.length === 0 ? (
               <div className="env-none">
                 <div className="env-none-title">No remote contexts in your kubeconfig</div>
@@ -184,28 +203,10 @@ export function Clusters() {
               </div>
             ) : (
               <div className="col env-contexts">
-                {remote.map((rc) => {
-                  const current = s.context === rc.name
-                  return (
-                    <div key={rc.name} className={`card env-context ${current ? 'highlight' : ''}`}>
-                      <div className="row env-context-head">
-                        <Server size={14} className="faint" />
-                        <strong className="ellipsis" title={rc.name}>{shortName(rc.name)}</strong>
-                        {current && <span className="chip">Active</span>}
-                      </div>
-                      <div className="caption faint mono ellipsis" title={rc.name}>{rc.name}</div>
-                      <div className="row env-context-actions">
-                        <button className={`btn small ${current ? '' : 'primary'}`} disabled={running || current} onClick={() => clusters.connect(rc.name)}>
-                          <ExternalLink size={12} />{current ? 'Connected' : 'Connect'}
-                        </button>
-                        <button className="btn small ghost" disabled={running || installBlockers.length > 0} onClick={() => void clusters.installOn(rc.name)}
-                          title={installBlockers.length > 0 ? installBlockers.join(' ') : 'Runs ax install: deploys or upgrades AX on this cluster, which must already run Agent Substrate'}>
-                          <Wrench size={12} />Install / Upgrade AX
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
+                {remote.map((rc) => (
+                  <TeamCluster key={rc.name} name={rc.name} current={s.context === rc.name} check={c.checks[rc.name]}
+                    busy={running} installBlockers={installBlockers} onInstall={() => setConfirmInstall(rc.name)} />
+                ))}
               </div>
             )}
           </div>
@@ -221,6 +222,26 @@ export function Clusters() {
         open={outputOpen}
         onToggle={() => setOutputOpen(!outputOpen)}
       />
+
+      {confirmInstall && (
+        <div className="modal-backdrop" onMouseDown={() => setConfirmInstall(null)}>
+          <div className="modal card fade-in" onMouseDown={(e) => e.stopPropagation()}>
+            <h3>{c.checks[confirmInstall]?.ax ? 'Upgrade' : 'Install'} AX on {shortName(confirmInstall)}?</h3>
+            <p className="muted env-confirm">
+              This runs <span className="mono">ax install</span> with the images below. It creates
+              the <span className="mono">ax-system</span> namespace, deploys ax-postgres and ax-server, and registers ax-server
+              with Agent Substrate. The first time, registering restarts Substrate's API server and router, which everyone
+              on the cluster shares.
+            </p>
+            <div className="row env-confirm-actions">
+              <button className="btn" onClick={() => setConfirmInstall(null)}>Cancel</button>
+              <button className="btn primary" onClick={() => { const context = confirmInstall; setConfirmInstall(null); void clusters.installOn(context) }}>
+                {c.checks[confirmInstall]?.ax ? 'Upgrade AX' : 'Install AX'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <div className="modal-backdrop" onMouseDown={() => setConfirmDelete(false)}>
@@ -238,6 +259,142 @@ export function Clusters() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** What a cluster needs before AX can go on it, and the order to do it in, for someone starting without one. */
+function NewClusterGuide() {
+  return (
+    <details className="env-guide">
+      <summary className="caption muted">No cluster yet? What one needs, and how to set it up</summary>
+      <div className="env-guide-body caption">
+        <div className="env-guide-head">A cluster for AX needs</div>
+        <ul>
+          <li>GKE 1.37+ or Kubernetes 1.36+, with <span className="mono">ClusterTrustBundle</span> and <span className="mono">PodCertificateRequest</span> enabled</li>
+          <li>Agent Substrate v1.0.0 in <span className="mono">ate-system</span>, with a ready gVisor WorkerPool</li>
+          <li>a snapshot location configured on Substrate for the whole cluster, such as a GCS bucket</li>
+          <li>a default StorageClass for ax-postgres's 10Gi volume</li>
+          <li>credentials in your kubeconfig that can manage <span className="mono">ax-system</span> and change Substrate's allowlists in <span className="mono">ate-system</span></li>
+        </ul>
+        <div>The full list is in AX's <Doc to="prerequisites">remote cluster prerequisites</Doc>.</div>
+
+        <div className="env-guide-head">To set one up</div>
+        <ol>
+          <li>
+            Create the cluster and get its credentials. It then shows up below after Check Again.
+            <CopyableCommand cmd="gcloud container clusters get-credentials <cluster> --region <region>" />
+          </li>
+          <li>
+            Install Agent Substrate and create a WorkerPool. ax doesn't do this on a remote cluster; follow
+            Substrate's <Doc to="substrateInstall">operator install guide</Doc> and <Doc to="workerPool">WorkerPool guide</Doc>,
+            with the settings AX needs from <Doc to="substrateSetup">Substrate setup</Doc>.
+            <CopyableCommand cmd="kubectl get workerpools -A" />
+          </li>
+          <li>Click Check on the cluster below, then Install AX.</li>
+        </ol>
+      </div>
+    </details>
+  )
+}
+
+/** A cluster from the kubeconfig: connect to it, check what's on it, and install AX once Substrate is there. */
+function TeamCluster({ name, current, check, busy, installBlockers, onInstall }: {
+  name: string
+  current: boolean
+  check: ClusterCheck | undefined
+  busy: boolean
+  installBlockers: string[]
+  onInstall: () => void
+}) {
+  const checked = !!check && !check.checking && !check.error
+  // ax install needs Substrate there already; everything else it can be tried without.
+  const blockers = !checked ? ['Check the cluster first.']
+    : !check.substrate ? ['Agent Substrate has to be installed on the cluster first.']
+    : installBlockers
+  return (
+    <div className={`card env-context ${current ? 'highlight' : ''}`}>
+      <div className="row env-context-head">
+        <Server size={14} className="faint" />
+        <strong className="ellipsis" title={name}>{shortName(name)}</strong>
+        {current && <span className="chip">Active</span>}
+      </div>
+      <div className="caption faint mono ellipsis" title={name}>{name}</div>
+      {check && <CheckResult check={check} />}
+      <div className="row env-context-actions">
+        <button className={`btn small ${current ? '' : 'primary'}`} disabled={busy || current} onClick={() => clusters.connect(name)}>
+          <ExternalLink size={12} />{current ? 'Connected' : 'Connect'}
+        </button>
+        <button className="btn small" disabled={check?.checking} onClick={() => void clusters.checkCluster(name)}
+          title="Look at the cluster with kubectl: what it offers, and whether Agent Substrate and AX are on it">
+          <RefreshCw size={12} className={check?.checking ? 'spin' : ''} />{check ? 'Check Again' : 'Check'}
+        </button>
+        <button className="btn small ghost" disabled={busy || blockers.length > 0} onClick={onInstall}
+          title={blockers.length > 0 ? blockers.join(' ') : 'Runs ax install on this cluster'}>
+          <Wrench size={12} />{checked && check.ax ? 'Upgrade AX' : 'Install AX'}
+        </button>
+        <div className="spacer" />
+        {check && !check.checking && <button className="btn small ghost" onClick={() => clusters.clearCheck(name)}>Hide</button>}
+      </div>
+    </div>
+  )
+}
+
+/** What a check found, as the cluster's own requirements and then the two layers, with what to do next. */
+function CheckResult({ check }: { check: ClusterCheck }) {
+  if (check.error) {
+    return (
+      <div className="env-check">
+        <div className="row problem-line"><TriangleAlert size={13} />Couldn't reach the cluster: {check.error}</div>
+        <div className="caption muted">If your credentials have expired, get them again:</div>
+        <CopyableCommand cmd="gcloud container clusters get-credentials <cluster> --region <region>" />
+      </div>
+    )
+  }
+  if (check.requirements.length === 0) return <div className="caption faint env-check">Checking the cluster…</div>
+
+  const substrateUp = full(check.substrate) && full(check.router)
+  const layers: Layer[] = [
+    {
+      id: 'substrate', icon: Layers3, title: 'Agent Substrate',
+      health: !check.substrate ? 'none' : substrateUp && check.workerPools.ready > 0 ? 'ok' : 'warn',
+      detail: !check.substrate ? 'Not installed'
+        : `ate-api-server ${check.substrate.ready}/${check.substrate.total} · ${check.workerPools.ready}/${check.workerPools.total} WorkerPools ready`,
+    },
+    {
+      id: 'ax', icon: Server, title: 'AX',
+      health: !check.ax ? 'none' : full(check.ax) ? 'ok' : 'warn',
+      detail: !check.ax ? 'Not installed' : `ax-server ${check.ax.ready}/${check.ax.total} · ${check.axImage}`,
+    },
+  ]
+  const failed = check.requirements.some((r) => r.status === 'fail')
+  return (
+    <div className="env-check">
+      <div className="layer-stack">
+        {check.requirements.map((r) => <PreflightRow key={r.id} item={r} />)}
+        {layers.map((r) => {
+          const h = HEALTH[r.health]
+          return (
+            <div key={r.id} className={`layer ${r.health}`} style={{ '--c': h.color } as CSSProperties}>
+              <r.icon size={14} className="layer-icon" />
+              <div className="layer-text">
+                <div className="layer-title">{r.title}</div>
+                <div className="layer-detail" title={r.detail}>{r.detail}</div>
+              </div>
+              <h.icon size={14} color={h.color} />
+            </div>
+          )
+        })}
+      </div>
+      <div className="caption muted env-next">
+        {failed ? <>This cluster doesn't meet what AX needs. See the <Doc to="prerequisites">prerequisites</Doc>.</>
+          : !check.substrate ? <>Next: install Agent Substrate. ax can't do that on a remote cluster; follow the <Doc to="substrateInstall">operator install guide</Doc> and <Doc to="substrateSetup">the settings AX needs</Doc>, then check again.</>
+          : !substrateUp ? 'Agent Substrate is installed but not all of it is ready yet.'
+          : check.workerPools.ready === 0 ? <>Next: create a gVisor WorkerPool; tasks can't start without one. See the <Doc to="workerPool">WorkerPool guide</Doc>.</>
+          : !check.ax ? 'Next: Install AX.'
+          : full(check.ax) ? 'AX is installed and ready. Connect to use it.'
+          : 'AX is installed but ax-server is not ready yet.'}
+      </div>
     </div>
   )
 }

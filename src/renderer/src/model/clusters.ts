@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { ConsoleLine } from '../components'
+import { errorSummary } from './resources'
 import { store } from './store'
 
 /** Ready/total replicas, or null when the component isn't installed. */
@@ -33,6 +34,22 @@ export interface LocalSandbox {
   context: string
   substrate: Replicas
   ax: Replicas
+}
+
+/** What a look at a cluster in the kubeconfig found: whether it can run AX, and how far along it is. */
+export interface ClusterCheck {
+  checking: boolean
+  /** Why the cluster couldn't be reached. The rest is empty then. */
+  error?: string
+  /** What the cluster itself has to offer before Agent Substrate and AX can run on it. */
+  requirements: PreflightItem[]
+  /** Substrate's API server and router. */
+  substrate: Replicas
+  router: Replicas
+  /** Worker pools with every replica ready, out of all the pools. */
+  workerPools: { ready: number; total: number }
+  ax: Replicas
+  axImage: string
 }
 
 export type StageID = 'kind' | 'substrate' | 'workers' | 'ax'
@@ -95,6 +112,8 @@ export interface ClustersState {
   preflight: PreflightItem[]
   tools: Tool[]
   local: LocalSandbox
+  /** The clusters that have been checked, by context. */
+  checks: Record<string, ClusterCheck>
   loading: boolean
   loaded: boolean
   /** Whether `ax` was found. It downloads kind and kubectl itself when they're missing. */
@@ -111,6 +130,11 @@ const LOCAL_CONTEXTS = new Set([LOCAL_NAME, `kind-${LOCAL_NAME}`, 'local', 'kind
 export const isLocalContext = (name: string) => LOCAL_CONTEXTS.has(name)
 
 const NO_SANDBOX: LocalSandbox = { state: 'NotFound', name: LOCAL_NAME, context: LOCAL_NAME, substrate: null, ax: null }
+
+const NO_CHECK: ClusterCheck = { checking: false, requirements: [], substrate: null, router: null, workerPools: { ready: 0, total: 0 }, ax: null, axImage: '' }
+
+/** The oldest Kubernetes that Agent Substrate and AX support. */
+const MIN_KUBERNETES: [number, number] = [1, 36]
 
 const GIB = 1024 ** 3
 // The limits `ax local start` enforces on the container host (see ax's executil.ValidateContainerHost).
@@ -340,6 +364,7 @@ class ClustersStore {
     preflight: [],
     tools: [],
     local: NO_SANDBOX,
+    checks: {},
     loading: false,
     loaded: false,
     axFound: true,
@@ -429,6 +454,97 @@ class ClustersStore {
     const state = kv.state === 'Running' || kv.state === 'Stopped' ? kv.state : 'NotFound'
     const name: string = kv.name || LOCAL_NAME
     return { state, name, context: name, substrate: replicas(kv.substrate), ax: replicas(kv.ax) }
+  }
+
+  private setCheck(context: string, check: ClusterCheck) {
+    this.set({ checks: { ...this.state.checks, [context]: check } })
+  }
+
+  /** Forgets what a check found, which folds its cluster's row back up. */
+  clearCheck(context: string) {
+    const { [context]: _, ...checks } = this.state.checks
+    this.set({ checks })
+  }
+
+  /**
+   * Looks at a cluster in the kubeconfig: whether it answers, whether it meets
+   * what Agent Substrate and AX need, and whether each is installed. It only
+   * reads, with kubectl.
+   */
+  async checkCluster(context: string) {
+    this.setCheck(context, { ...(this.state.checks[context] ?? NO_CHECK), checking: true, error: undefined })
+    const k = (args: string[]) => window.studio.run({ program: 'kubectl', args: ['--context', context, '--request-timeout=10s', ...args] })
+    const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean)
+
+    // kubectl prints its own version even when the cluster doesn't answer.
+    const version = await k(['version', '-o', 'json'])
+    let server = ''
+    try {
+      server = JSON.parse(version.stdout).serverVersion?.gitVersion ?? ''
+    } catch {
+      // No JSON at all: kubectl itself failed.
+    }
+    if (version.status !== 0 || !server) {
+      this.setCheck(context, { ...NO_CHECK, error: errorSummary('', version.stderr) })
+      return
+    }
+
+    const [nodes, apis, storage, substrate, pools, ax] = await Promise.all([
+      k(['get', 'nodes', '-o', 'jsonpath={range .items[*]}{.status.nodeInfo.kernelVersion}|{.status.nodeInfo.architecture}|{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}']),
+      k(['api-resources', '--api-group=certificates.k8s.io', '-o', 'name']),
+      k(['get', 'storageclass', '-o', 'jsonpath={range .items[*]}{.metadata.name}|{.metadata.annotations.storageclass\\.kubernetes\\.io/is-default-class}{"\\n"}{end}']),
+      k(['-n', 'ate-system', 'get', 'deployment', 'ate-api-server', 'atenet-router', '-o', 'jsonpath={range .items[*]}{.metadata.name}|{.status.availableReplicas}/{.spec.replicas}{"\\n"}{end}']),
+      k(['get', 'workerpools', '-A', '-o', 'jsonpath={range .items[*]}{.status.readyReplicas}/{.spec.replicas}{"\\n"}{end}']),
+      k(['-n', 'ax-system', 'get', 'deployment', 'ax-server', '-o', 'jsonpath={.status.availableReplicas}/{.spec.replicas}|{.spec.template.spec.containers[0].image}']),
+    ])
+
+    const requirements: PreflightItem[] = []
+    const v = /^v(\d+)\.(\d+)/.exec(server)
+    const tooOld = !!v && (Number(v[1]) < MIN_KUBERNETES[0] || (Number(v[1]) === MIN_KUBERNETES[0] && Number(v[2]) < MIN_KUBERNETES[1]))
+    requirements.push({
+      id: 'version', label: 'Kubernetes version', status: tooOld ? 'fail' : 'ok',
+      detail: tooOld ? `${server}; Agent Substrate and AX need ${MIN_KUBERNETES.join('.')} or newer.` : server,
+    })
+
+    const nodeRows = lines(nodes.stdout).map((l) => l.split('|'))
+    const readyNodes = nodeRows.filter((n) => n[2] === 'True').length
+    const kernels = [...new Set(nodeRows.map((n) => n[0]))]
+    const oldKernel = kernels.find((kernel) => {
+      const m = /^(\d+)\.(\d+)/.exec(kernel)
+      return !!m && (Number(m[1]) < MIN_KERNEL[0] || (Number(m[1]) === MIN_KERNEL[0] && Number(m[2]) < MIN_KERNEL[1]))
+    })
+    const arch = [...new Set(nodeRows.map((n) => n[1]))].join(', ')
+    requirements.push(nodeRows.length === 0
+      ? { id: 'nodes', label: 'Nodes', status: 'warn', detail: errorSummary(nodes.stdout, nodes.stderr) }
+      : oldKernel
+        // Not a failure: a vendor kernel can carry the feature without the version.
+        ? { id: 'nodes', label: 'Nodes', status: 'warn', detail: `${readyNodes}/${nodeRows.length} Ready · kernel ${oldKernel} is older than ${MIN_KERNEL.join('.')}, which Substrate's image cache needs unless the vendor backported it.` }
+        : { id: 'nodes', label: 'Nodes', status: readyNodes === nodeRows.length ? 'ok' : 'warn', detail: `${readyNodes}/${nodeRows.length} Ready · kernel ${kernels[0]} · ${arch}` })
+
+    const missing = ['clustertrustbundles', 'podcertificaterequests'].filter((name) => !lines(apis.stdout).some((l) => l.startsWith(`${name}.`)))
+    requirements.push({
+      id: 'apis', label: 'Certificate APIs', status: missing.length ? 'fail' : 'ok',
+      detail: missing.length ? `The cluster doesn't serve ${missing.join(' or ')}. Enable ClusterTrustBundle and PodCertificateRequest.` : 'ClusterTrustBundle and PodCertificateRequest are served',
+    })
+
+    const defaults = lines(storage.stdout).map((l) => l.split('|')).filter((x) => x[1] === 'true').map((x) => x[0])
+    requirements.push({
+      id: 'storage', label: 'Default StorageClass', status: defaults.length ? 'ok' : 'warn',
+      detail: defaults.length ? defaults.join(', ') : "None. ax-postgres needs one for its 10Gi volume, or a volume you provision yourself.",
+    })
+
+    const deployments = Object.fromEntries(lines(substrate.stdout).map((l) => l.split('|')))
+    const poolRows = lines(pools.stdout).map(replicas)
+    const [axReplicas = '', axImage = ''] = ax.stdout.trim().split('|')
+    this.setCheck(context, {
+      checking: false,
+      requirements,
+      substrate: replicas(deployments['ate-api-server']),
+      router: replicas(deployments['atenet-router']),
+      workerPools: { ready: poolRows.filter((r) => !!r && r.total > 0 && r.ready >= r.total).length, total: poolRows.length },
+      ax: replicas(axReplicas),
+      axImage,
+    })
   }
 
   /** What stops a local sandbox from being set up. */

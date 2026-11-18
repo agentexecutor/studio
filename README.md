@@ -70,8 +70,12 @@ places to run tasks:
   becomes your current kubectl context. **Stop** and **Delete** run
   `ax local stop` and `ax local delete`.
 - **Team clusters:** every other context in your kubeconfig. **Connect** points
-  the app at one without changing your kubectl context. **Install / Upgrade
-  AX** runs `ax install`, which needs Agent Substrate on the cluster already.
+  the app at one without changing your kubectl context. **Check** looks at a
+  cluster with `kubectl`, read-only: whether it meets what Agent Substrate and
+  AX need, and whether each is installed, with what to do next. **Install AX**
+  runs `ax install` once Agent Substrate is there; `ax` can't install Substrate
+  on a remote cluster, so the page links to Substrate's guides for that. A
+  fold-out lists what a new cluster needs.
 
 `ax` has no default ax-server image yet, so the page asks for one before it
 sets anything up. The app remembers the images you enter.
