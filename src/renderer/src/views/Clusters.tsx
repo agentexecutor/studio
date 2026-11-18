@@ -3,7 +3,7 @@ import {
   Boxes, Check, Circle, CircleCheck, Copy, CircleDashed, CircleX, Cpu, ExternalLink, Layers3, Loader, Play, Plus, RefreshCw, Server,
   Square, SquareTerminal, Trash2, TriangleAlert, Wrench, type LucideIcon,
 } from 'lucide-react'
-import { clusters, useClusters, STAGES, type Cluster, type Operation, type Replicas } from '../model/clusters'
+import { clusters, contextFor, useClusters, STAGES, type Cluster, type Operation, type Replicas } from '../model/clusters'
 import { useStore } from '../model/store'
 import { Empty, LogConsole, PageHeader } from '../components'
 import '../styles/console.css'
@@ -51,11 +51,14 @@ export function Clusters() {
             ))}
             {c.loaded && c.clusters.length === 0 && problems.length === 0 && (
               <div className="card cluster-empty">
-                <Empty icon={Boxes} title="No kind clusters yet">Create one on the right; it takes about ten minutes the first time.</Empty>
+                <Empty icon={Boxes} title="No kind clusters yet">Create one on the right.</Empty>
               </div>
             )}
           </div>
-          <NewClusterForm />
+          <div className="cluster-side">
+            <NewClusterForm />
+            <ExistingClusterForm />
+          </div>
         </div>
 
         {c.op && <OperationBar op={c.op} />}
@@ -103,17 +106,18 @@ function ClusterCard({ cluster: cl, selected, onSelect }: { cluster: Cluster; se
   const rows = layers(cl)
   const axReady = rows[0].health === 'ok'
   const current = s.context === cl.context
-  const buildBlocked = clusters.buildProblems.length > 0
+  const blockers = [...clusters.problems, ...clusters.imageProblems]
+  const blocked = blockers.length > 0
 
   const install = () => {
-    const reinstall = !!cl.ax
-    const msg = reinstall
-      ? `Reinstall AX on ${cl.name}?\n\nThis rebuilds AX and recreates its Postgres, so existing tasks and workspaces are deleted. Substrate is reinstalled if its version differs from the one AX is built against.`
-      : `Install AX on ${cl.name}?\n\nThis installs Agent Substrate${cl.substrate ? ' (reinstalling it if its version differs from the one AX is built against)' : ''}, a gVisor worker pool and the AX control plane.`
-    if (confirm(msg)) void clusters.install(cl.name)
+    // Mirrors clusters.install: a cluster with Substrate that ax can already reach only needs `ax install`.
+    const msg = cl.substrate && cl.inKubeconfig
+      ? `${cl.ax ? 'Reinstall' : 'Install'} AX on ${cl.name}?\n\nThis runs "ax install", which installs or upgrades the AX control plane with the images in the form.`
+      : `Install AX on ${cl.name}?\n\nThis runs "ax local start", which installs Agent Substrate, a gVisor worker pool and the AX control plane, and makes ${contextFor(cl.name)} your current kubectl context.`
+    if (confirm(msg)) void clusters.install(cl)
   }
   const remove = () => {
-    if (confirm(`Delete kind cluster ${cl.name}?\n\nThe cluster and everything in it are removed, and kind-${cl.name} is dropped from your kubeconfig.`)) {
+    if (confirm(`Delete kind cluster ${cl.name}?\n\nThe cluster and everything in it are removed, and its context is dropped from your kubeconfig.`)) {
       void clusters.remove(cl.name)
     }
   }
@@ -159,10 +163,15 @@ function ClusterCard({ cluster: cl, selected, onSelect }: { cluster: Cluster; se
             <ExternalLink size={12} />{current ? 'Open' : 'Open in Studio'}
           </button>
         )}
-        {cl.reachable && (
-          <button className="btn small" disabled={busy || buildBlocked} onClick={install}
-            title={buildBlocked ? clusters.buildProblems.join(' ') : undefined}>
+        {cl.reachable ? (
+          <button className="btn small" disabled={busy || blocked} onClick={install}
+            title={blocked ? blockers.join(' ') : undefined}>
             {cl.ax ? <Wrench size={12} /> : <Play size={12} />}{cl.ax ? 'Reinstall AX' : 'Install AX'}
+          </button>
+        ) : (
+          <button className="btn small" disabled={busy || blocked} onClick={() => void clusters.start(cl.name)}
+            title={blocked ? blockers.join(' ') : 'Start the cluster and bring Agent Substrate and AX back up'}>
+            <Play size={12} />Start
           </button>
         )}
         <div className="spacer" />
@@ -232,7 +241,7 @@ function NewClusterForm() {
   const f = c.form
   const busy = c.op?.status === 'running'
   const nameProblem = clusters.nameProblem(f.name)
-  const blockers = [...clusters.problems, ...clusters.buildProblems]
+  const blockers = [...clusters.problems, ...clusters.imageProblems]
   const engine = c.runtime?.runtime
 
   return (
@@ -244,7 +253,7 @@ function NewClusterForm() {
       <label className="form-row">
         <span>Name</span>
         <input className={`input mono ${f.name && nameProblem ? 'invalid' : ''}`} value={f.name} spellCheck={false}
-          onChange={(e) => clusters.setForm({ name: e.target.value.trim().toLowerCase() })} placeholder="ax-dev" />
+          onChange={(e) => clusters.setForm({ name: e.target.value.trim().toLowerCase() })} placeholder="ax-local" />
       </label>
       <label className="form-row">
         <span>Workers</span>
@@ -252,20 +261,73 @@ function NewClusterForm() {
           onChange={(e) => clusters.setForm({ workers: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} />
       </label>
       <label className="form-row">
-        <span>Substrate</span>
-        <input className="input mono" value={f.substrateRef} spellCheck={false} placeholder="version in AX's go.mod"
-          onChange={(e) => clusters.setForm({ substrateRef: e.target.value })} />
+        <span>Server</span>
+        <input className={`input mono ${f.serverImage.trim() ? '' : 'invalid'}`} value={f.serverImage} spellCheck={false}
+          placeholder="ax-server image (required)" onChange={(e) => clusters.setForm({ serverImage: e.target.value })} />
+      </label>
+      <label className="form-row">
+        <span>Task</span>
+        <input className="input mono" value={f.defaultTaskImage} spellCheck={false}
+          placeholder="default task image (optional)" onChange={(e) => clusters.setForm({ defaultTaskImage: e.target.value })} />
+      </label>
+      <label className="form-row">
+        <span>Runner</span>
+        <input className="input mono" value={f.runnerVolumeImage} spellCheck={false}
+          placeholder="runner volume image (optional)" onChange={(e) => clusters.setForm({ runnerVolumeImage: e.target.value })} />
       </label>
       <div className="caption new-cluster-note">
-        Runs <span className="mono">hack/setup-e2e-kind.sh</span> from your AX repo with a local registry on localhost:5001
-        {engine ? ` and ${engine}` : ''}. The cluster is added to your kubeconfig as <span className="mono">kind-{f.name || 'name'}</span>;
-        your current context stays as it is.
+        Runs <span className="mono">ax local start</span>{engine ? ` on ${engine}` : ''}, which downloads kind and kubectl if
+        you don't have them. The cluster becomes your current kubectl context,{' '}
+        <span className="mono">{contextFor(f.name || 'ax-local')}</span>. The images are also used when you install AX on a
+        cluster.
       </div>
       {f.name && nameProblem && <div className="row problem-line"><TriangleAlert size={13} />{nameProblem}</div>}
-      {clusters.buildProblems.map((p) => <div key={p} className="row problem-line"><TriangleAlert size={13} />{p}</div>)}
+      {clusters.imageProblems.map((p) => <div key={p} className="row problem-line"><TriangleAlert size={13} />{p}</div>)}
       {clusters.warnings.map((p) => <div key={p} className="row problem-line selectable"><TriangleAlert size={13} />{p}</div>)}
       <button className="btn primary" disabled={busy || !!nameProblem || blockers.length > 0} onClick={() => void clusters.create()}>
         <Play size={13} fill="currentColor" />Create cluster
+      </button>
+    </div>
+  )
+}
+
+/** Installs AX on a cluster that's already running, picked from your kubeconfig. */
+function ExistingClusterForm() {
+  const c = useClusters()
+  const s = useStore()
+  const [picked, setPicked] = useState('')
+  const busy = c.op?.status === 'running'
+  // The kind clusters have their own cards, with their own Install button.
+  const local = new Set(c.clusters.map((cl) => cl.context))
+  const contexts = s.contexts.map((x) => x.name).filter((name) => !local.has(name))
+  const context = contexts.includes(picked) ? picked : contexts[0]
+  const blockers = [...(c.axFound ? [] : clusters.problems), ...clusters.imageProblems]
+  if (!context) return null
+
+  const install = () => {
+    if (confirm(`Install AX on ${context}?\n\nThis runs "ax install", which installs or upgrades the AX control plane with the images above. The cluster must already run Agent Substrate.`)) {
+      void clusters.installOn(context)
+    }
+  }
+
+  return (
+    <div className="card new-cluster">
+      <div className="row new-cluster-head">
+        <Server size={15} />
+        <span>Existing cluster</span>
+      </div>
+      <label className="form-row">
+        <span>Context</span>
+        <select className="select" value={context} onChange={(e) => setPicked(e.target.value)}>
+          {contexts.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+      <div className="caption new-cluster-note">
+        Runs <span className="mono">ax install</span> on a cluster that already has Agent Substrate, with the images above.
+      </div>
+      <button className="btn" disabled={busy || blockers.length > 0} onClick={install}
+        title={blockers.length > 0 ? blockers.join(' ') : undefined}>
+        <Play size={13} />Install AX
       </button>
     </div>
   )
@@ -280,8 +342,8 @@ function OperationBar({ op }: { op: Operation }) {
   }, [op.status])
   const secs = Math.round(((op.finished ?? Date.now()) - op.started) / 1000)
   const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s` : `${secs}s`
-  const verb = { create: 'Creating', install: 'Installing AX on', delete: 'Deleting', kubeconfig: 'Adding to kubeconfig:' }[op.kind]
-  const done = { create: 'Created', install: 'Installed AX on', delete: 'Deleted', kubeconfig: 'Added to kubeconfig:' }[op.kind]
+  const verb = { create: 'Creating', start: 'Starting', install: 'Installing AX on', delete: 'Deleting', kubeconfig: 'Adding to kubeconfig:' }[op.kind]
+  const done = { create: 'Created', start: 'Started', install: 'Installed AX on', delete: 'Deleted', kubeconfig: 'Added to kubeconfig:' }[op.kind]
   const title = op.status === 'running' ? `${verb} ${op.cluster}` : op.status === 'ok' ? `${done} ${op.cluster}` : `${verb} ${op.cluster} failed`
   const currentIndex = STAGES.findIndex((s) => s.id === op.stage)
   const StatusIcon = op.status === 'running' ? Loader : op.status === 'ok' ? CircleCheck : CircleX

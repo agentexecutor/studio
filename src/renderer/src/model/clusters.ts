@@ -16,7 +16,7 @@ export interface Cluster {
   substrateCommit: string
   ax: Replicas
   workers: Replicas
-  /** Whether kind-<name> is in your kubeconfig, which ax needs to reach it. */
+  /** Whether the cluster's context is in your kubeconfig, which ax needs to reach it. */
   inKubeconfig: boolean
 }
 
@@ -29,7 +29,7 @@ export const STAGES: { id: StageID; title: string }[] = [
 ]
 
 export interface Operation {
-  kind: 'create' | 'install' | 'delete' | 'kubeconfig'
+  kind: 'create' | 'start' | 'install' | 'delete' | 'kubeconfig'
   cluster: string
   stage: StageID | null
   status: 'running' | 'ok' | 'failed'
@@ -41,7 +41,12 @@ export interface Operation {
 export interface NewCluster {
   name: string
   workers: number
-  substrateRef: string
+  /** The ax-server image. ax has no default for it yet, so it's required. */
+  serverImage: string
+  /** Optional; empty leaves the choice to ax. */
+  defaultTaskImage: string
+  /** Optional; empty leaves the choice to ax. */
+  runnerVolumeImage: string
 }
 
 export interface ClustersState {
@@ -51,16 +56,30 @@ export interface ClustersState {
   runtime: ContainerRuntime | null
   /** Memory of the podman machine in MiB, on macOS and Windows. */
   machineMemory: number | null
-  tools: Record<'kind' | 'kubectl' | 'go' | 'bash', boolean>
-  scriptFound: boolean
+  /** Whether `ax` was found. It downloads kind and kubectl itself when they're missing. */
+  axFound: boolean
   op: Operation | null
   log: ConsoleLine[]
   form: NewCluster
 }
 
-const SCRIPT = 'hack/setup-e2e-kind.sh'
-/** Below this (MiB) the podman machine OOM-kills rustc while building Substrate's envoy image. */
+/** The name `ax local` uses by default. Its context is `ax-local`; any other cluster's is `kind-<name>`. */
+const DEFAULT_NAME = 'ax-local'
+export const contextFor = (name: string) => (name === DEFAULT_NAME ? DEFAULT_NAME : `kind-${name}`)
+/** Below this (MiB) the podman machine is too small for the local cluster. */
 const MIN_MACHINE_MEMORY = 6144
+/** The images last used, so they don't have to be typed again. */
+const IMAGES_KEY = 'ax-studio.images'
+type Images = Pick<NewCluster, 'serverImage' | 'defaultTaskImage' | 'runnerVolumeImage'>
+
+function loadImages(): Images {
+  const empty: Images = { serverImage: '', defaultTaskImage: '', runnerVolumeImage: '' }
+  try {
+    return { ...empty, ...JSON.parse(localStorage.getItem(IMAGES_KEY) ?? '{}') }
+  } catch {
+    return empty
+  }
+}
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 export const NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
 
@@ -87,13 +106,13 @@ function replicas(v: string | undefined): Replicas {
   return { ready: Number(r) || 0, total: Number(t) || 0 }
 }
 
-/** Which of the setup script's "==> " progress lines starts which stage. */
+/** Which of ax's "==> " progress lines starts which stage. */
 function stageFor(line: string): StageID | null {
   if (!line.startsWith('==> ')) return null
   if (/Kind cluster/.test(line)) return 'kind'
-  if (/Installing Substrate|Substrate .* already installed/.test(line)) return 'substrate'
-  if (/WorkerPool|ax-workers/.test(line)) return 'workers'
-  if (/Building ax|Deploying ax-postgres/.test(line)) return 'ax'
+  if (/WorkerPool/.test(line)) return 'workers'
+  if (/Substrate permissions|ax-postgres|ax-server|AX is ready/.test(line)) return 'ax'
+  if (/Substrate/.test(line)) return 'substrate'
   return null
 }
 
@@ -104,11 +123,10 @@ class ClustersStore {
     loaded: false,
     runtime: null,
     machineMemory: null,
-    tools: { kind: true, kubectl: true, go: true, bash: true },
-    scriptFound: true,
+    axFound: true,
     op: null,
     log: [],
-    form: { name: '', workers: 2, substrateRef: '' },
+    form: { name: '', workers: 1, ...loadImages() },
   }
   private listeners = new Set<() => void>()
   private lineID = 1
@@ -127,31 +145,24 @@ class ClustersStore {
   }
 
   setForm(patch: Partial<NewCluster>) {
-    this.set({ form: { ...this.state.form, ...patch } })
+    const form = { ...this.state.form, ...patch }
+    const { serverImage, defaultTaskImage, runnerVolumeImage } = form
+    localStorage.setItem(IMAGES_KEY, JSON.stringify({ serverImage, defaultTaskImage, runnerVolumeImage }))
+    this.set({ form })
   }
 
   get running() {
     return this.state.op?.status === 'running'
   }
 
-  private async repoDir(): Promise<string> {
-    return store.state.settings.repoPath.replace(/^~/, (await window.studio.platform()).home)
-  }
-
+  /** For the kind commands this page runs itself. ax works out the container runtime on its own. */
   private env(): Record<string, string> {
     return this.state.runtime?.env ?? {}
   }
 
   async init() {
-    const [runtime, kind, kubectl, go, bash, scriptFound] = await Promise.all([
-      window.studio.containerRuntime(),
-      window.studio.which('kind'),
-      window.studio.which('kubectl'),
-      window.studio.which('go'),
-      window.studio.which('bash'),
-      window.studio.fileExists(`${store.state.settings.repoPath}/${SCRIPT}`),
-    ])
-    this.set({ runtime, tools: { kind: !!kind, kubectl: !!kubectl, go: !!go, bash: !!bash }, scriptFound })
+    const runtime = await window.studio.containerRuntime()
+    this.set({ runtime })
     if (runtime.runtime === 'podman') {
       const r = await window.studio.run({ program: 'podman', args: ['machine', 'inspect', '--format', '{{.Resources.Memory}}'] })
       const mib = parseInt(r.stdout, 10)
@@ -161,7 +172,10 @@ class ClustersStore {
   }
 
   async refresh() {
-    if (!this.state.tools.kind || !this.state.runtime?.runtime) {
+    // Looked up every time: ax puts kind in ~/.ax/bin the first time it creates a cluster.
+    const [ax, kind] = await Promise.all([window.studio.which(store.state.settings.axPath), window.studio.which('kind')])
+    this.set({ axFound: !!ax })
+    if (!kind || !this.state.runtime?.runtime) {
       this.set({ clusters: [], loaded: true })
       return
     }
@@ -177,9 +191,11 @@ class ClustersStore {
       const clusters = await Promise.all(names.map(async (name): Promise<Cluster> => {
         const r = await window.studio.run({ program: '/bin/sh', args: ['-c', PROBE, 'probe', name], env })
         const kv = Object.fromEntries(r.stdout.split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
+        // ax renames kind-ax-local to ax-local; a cluster made by kind alone keeps the kind- name.
+        const context = [contextFor(name), `kind-${name}`].find((x) => contexts.has(x)) ?? contextFor(name)
         return {
           name,
-          context: `kind-${name}`,
+          context,
           reachable: kv.reachable === '1',
           nodes: replicas(kv.nodes),
           version: kv.version ?? '',
@@ -187,7 +203,7 @@ class ClustersStore {
           substrateCommit: kv.commit ?? '',
           ax: replicas(kv.ax),
           workers: replicas(kv.workers),
-          inKubeconfig: contexts.has(`kind-${name}`),
+          inKubeconfig: contexts.has(context),
         }
       }))
       const form = this.state.form.name ? this.state.form : { ...this.state.form, name: freeName(names) }
@@ -197,21 +213,24 @@ class ClustersStore {
     }
   }
 
+  /** What stops this page from doing anything with ax. */
   get problems(): string[] {
     const p: string[] = []
-    const { tools, runtime } = this.state
-    if (!tools.kind) p.push('kind is not installed (https://kind.sigs.k8s.io).')
-    if (runtime && !runtime.runtime) p.push('Neither docker nor podman is installed.')
-    if (!tools.kubectl) p.push('kubectl is not installed.')
+    const { axFound, runtime } = this.state
+    if (!axFound) p.push(`ax was not found (${store.state.settings.axPath}). Set its path in Settings.`)
+    if (runtime && !runtime.runtime) p.push('Neither docker nor podman is installed; a local cluster needs one.')
     return p
   }
 
-  /** Problems that only block creating or installing (they build AX and Substrate from source). */
-  get buildProblems(): string[] {
+  /** What's wrong with the images in the form. They apply to creating a cluster and to installing AX. */
+  get imageProblems(): string[] {
+    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.form
     const p: string[] = []
-    if (!this.state.scriptFound) p.push(`${SCRIPT} not found in ${store.state.settings.repoPath} (set the AX repo in Settings).`)
-    if (!this.state.tools.go) p.push('Go is not installed; Substrate and AX are built from source.')
-    if (!this.state.tools.bash) p.push('bash is required to run the setup script.')
+    if (!serverImage.trim()) p.push('Set the ax-server image; ax has no default for it yet.')
+    for (const [label, value] of [['The server image', serverImage], ['The task image', defaultTaskImage], ['The runner volume image', runnerVolumeImage]]) {
+      const v = value.trim()
+      if (v && (v.startsWith('-') || /\s/.test(v))) p.push(`${label} is not an image reference.`)
+    }
     return p
   }
 
@@ -219,7 +238,7 @@ class ClustersStore {
   get warnings(): string[] {
     const mib = this.state.machineMemory
     if (mib === null || mib >= MIN_MACHINE_MEMORY) return []
-    return [`The podman machine has ${Math.round(mib / 1024)} GiB of memory; building Agent Substrate needs about ${MIN_MACHINE_MEMORY / 1024} GiB and is killed with less. Run: podman machine stop && podman machine set --memory 8192 && podman machine start`]
+    return [`The podman machine has ${Math.round(mib / 1024)} GiB of memory; the local cluster needs about ${MIN_MACHINE_MEMORY / 1024} GiB. Run: podman machine stop && podman machine set --memory 8192 && podman machine start`]
   }
 
   nameProblem(name: string): string | null {
@@ -229,58 +248,86 @@ class ClustersStore {
     return null
   }
 
+  /** An `ax` command line for the shell that runs cluster steps. */
+  private ax(args: string[]): string {
+    return [store.state.settings.axPath, ...args].map(shq).join(' ')
+  }
+
+  private imageArgs(): string[] {
+    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state.form
+    const args: string[] = []
+    if (serverImage.trim()) args.push('--server-image', serverImage.trim())
+    if (defaultTaskImage.trim()) args.push('--default-task-image', defaultTaskImage.trim())
+    if (runnerVolumeImage.trim()) args.push('--runner-volume-image', runnerVolumeImage.trim())
+    return args
+  }
+
   /**
-   * Runs AX's own setup script for the cluster. It creates the kind cluster if
-   * needed, installs Substrate at the version AX is built against, builds and
-   * deploys AX, then merges kind-<name> into your kubeconfig without changing
-   * its current context. AX_SNAPSHOTS_BUCKET is cleared so a value exported
-   * for a real cluster in the user's shell doesn't replace the script's kind
-   * default.
+   * `ax local start` creates the kind cluster or starts a stopped one, installs
+   * Agent Substrate and AX, and makes the cluster's context the current one
+   * in your kubeconfig. It's safe to run again on a cluster that's already up.
    */
-  private setupCommand(name: string, workers: number, substrateRef: string): string {
-    const tmp = `.tmp/kubeconfig-${name}`
-    return [
-      'set -e',
-      'ORIG=${KUBECONFIG:-$HOME/.kube/config}; ORIG=${ORIG%%:*}',
-      `KUBECONFIG="$PWD/${tmp}" KIND_CLUSTER_NAME=${shq(name)} AX_WORKER_REPLICAS=${workers} AX_SNAPSHOTS_BUCKET=` +
-        `${substrateRef ? ` SUBSTRATE_REF=${shq(substrateRef)}` : ''} bash ${SCRIPT}`,
-      `printf '\\n==> Adding context kind-%s to %s\\n' ${shq(name)} "$ORIG"`,
-      mergeScript(tmp),
-    ].join('\n')
+  private localStart(name: string): string {
+    return this.ax(['local', 'start', '--name', name, '--workers', String(this.state.form.workers), ...this.imageArgs()])
+  }
+
+  /** `ax install` installs or upgrades AX on a cluster that already runs Agent Substrate. */
+  private installOnContext(context: string): string {
+    return this.ax(['--context', context, 'install', ...this.imageArgs()])
   }
 
   async create() {
-    const { name, workers, substrateRef } = this.state.form
-    await this.exec({ kind: 'create', cluster: name }, `Create ${name}`, this.setupCommand(name, workers, substrateRef.trim()))
+    const { name } = this.state.form
+    await this.exec({ kind: 'create', cluster: name, stage: 'kind' }, `Create ${name}`, this.localStart(name))
   }
 
-  async install(name: string) {
-    await this.exec({ kind: 'install', cluster: name }, `Install AX on ${name}`, this.setupCommand(name, this.state.form.workers, this.state.form.substrateRef.trim()))
+  /** Brings a stopped cluster back up. */
+  async start(name: string) {
+    await this.exec({ kind: 'start', cluster: name, stage: 'kind' }, `Start ${name}`, this.localStart(name))
+  }
+
+  /**
+   * Installs AX on a kind cluster. A running cluster with Substrate only needs
+   * `ax install`; one without it, or one ax can't reach through your
+   * kubeconfig yet, gets the whole of `ax local start`.
+   */
+  async install(c: Cluster) {
+    const direct = !!c.substrate && c.inKubeconfig
+    await this.exec({ kind: 'install', cluster: c.name, stage: direct ? 'ax' : 'kind' }, `Install AX on ${c.name}`,
+      direct ? this.installOnContext(c.context) : this.localStart(c.name))
+  }
+
+  /** Installs AX on any cluster in your kubeconfig that already runs Agent Substrate. */
+  async installOn(context: string) {
+    await this.exec({ kind: 'install', cluster: context, stage: 'ax' }, `Install AX on ${context}`, this.installOnContext(context))
   }
 
   async remove(name: string) {
-    await this.exec({ kind: 'delete', cluster: name }, `Delete ${name}`,
-      `kind delete cluster --name ${shq(name)} && rm -f .tmp/kubeconfig-${name}`)
+    await this.exec({ kind: 'delete', cluster: name, stage: null }, `Delete ${name}`, this.ax(['local', 'delete', '--name', name]))
   }
 
   /** Adds kind-<name> to your kubeconfig (keeping its current context) so ax can use it. */
   async addToKubeconfig(name: string): Promise<boolean> {
     const tmp = `$TMPDIR/ax-studio-kind-${name}.yaml`
-    const ok = await this.exec({ kind: 'kubeconfig', cluster: name }, `Add kind-${name} to kubeconfig`, [
+    const ok = await this.exec({ kind: 'kubeconfig', cluster: name, stage: null }, `Add kind-${name} to kubeconfig`, [
       'set -e',
       'ORIG=${KUBECONFIG:-$HOME/.kube/config}; ORIG=${ORIG%%:*}',
       `TMPDIR=\${TMPDIR:-/tmp}; kind get kubeconfig --name ${shq(name)} > "${tmp}"`,
       mergeScript(tmp),
       `rm -f "${tmp}"`,
       `echo "kind-${name} added to $ORIG"`,
-    ].join('\n'))
+    ].join('\n'), this.env())
     return ok
   }
 
   async open(c: Cluster) {
-    if (!c.inKubeconfig && !(await this.addToKubeconfig(c.name))) return
+    let context = c.context
+    if (!c.inKubeconfig) {
+      if (!(await this.addToKubeconfig(c.name))) return
+      context = `kind-${c.name}`
+    }
     await store.loadContexts()
-    store.setScope({ context: c.context })
+    store.setScope({ context })
     store.setSection('overview')
   }
 
@@ -304,13 +351,13 @@ class ClustersStore {
     if (this.state.op) this.set({ op: { ...this.state.op, ...patch } })
   }
 
-  private async exec(op: Pick<Operation, 'kind' | 'cluster'>, title: string, command: string): Promise<boolean> {
+  private async exec(op: Pick<Operation, 'kind' | 'cluster' | 'stage'>, title: string, command: string, env: Record<string, string> = {}): Promise<boolean> {
     if (this.running) return false
-    const staged = op.kind === 'create' || op.kind === 'install'
-    this.set({ op: { ...op, stage: staged ? 'kind' : null, status: 'running', started: Date.now() }, log: [] })
+    const staged = op.stage !== null
+    this.set({ op: { ...op, status: 'running', started: Date.now() }, log: [] })
     this.append(`▶ ${title}`, 'start')
     const streamID = `clusters-${++this.streamID}`
-    const cwd = await this.repoDir()
+    const cwd = (await window.studio.platform()).home
     const status = await new Promise<number>((resolve) => {
       const offLine = window.studio.onStreamLine((l) => {
         if (l.id !== streamID) return
@@ -324,13 +371,15 @@ class ClustersStore {
         offExit()
         resolve(e.status)
       })
-      void window.studio.stream({ id: streamID, commandLine: command, cwd, env: this.env() })
+      void window.studio.stream({ id: streamID, commandLine: command, cwd, env })
     })
     const ok = status === 0
     this.patchOp({ status: ok ? 'ok' : 'failed', exit: status, finished: Date.now() })
     this.append(ok ? `✓ ${title} done` : `✗ ${title} failed (exit ${status})`, ok ? 'ok' : 'fail')
     if (ok && op.kind === 'create') this.setForm({ name: '' })
     void this.refresh()
+    // ax adds, renames and removes contexts; let the rest of the app see them.
+    if (op.kind !== 'kubeconfig') void store.loadContexts()
     return ok
   }
 }
@@ -349,8 +398,8 @@ function mergeScript(src: string): string {
 }
 
 function freeName(taken: string[]): string {
-  if (!taken.includes('ax-dev')) return 'ax-dev'
-  for (let i = 2; ; i++) if (!taken.includes(`ax-dev-${i}`)) return `ax-dev-${i}`
+  if (!taken.includes(DEFAULT_NAME)) return DEFAULT_NAME
+  for (let i = 2; ; i++) if (!taken.includes(`${DEFAULT_NAME}-${i}`)) return `${DEFAULT_NAME}-${i}`
 }
 
 export const clusters = new ClustersStore()

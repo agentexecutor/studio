@@ -19,7 +19,8 @@ AX clusters. Runs on macOS, Windows and Linux.
 | ![Clusters](docs/screenshots/clusters.png) **Clusters** | ![Task logs](docs/screenshots/logs.png) **Task logs** |
 
 The app calls the `ax` CLI and `kubectl`. It passes `--context` on every call,
-so it never changes your global context.
+so browsing and managing tasks never changes your global context. Creating or
+starting a local cluster does: `ax local start` makes that cluster current.
 
 ## Develop
 
@@ -28,6 +29,10 @@ npm install
 npm run dev         # hot-reloading app
 npm run typecheck
 ```
+
+The app uses the `ax` on your PATH or in `~/.ax/bin`. To develop against
+another `ax`, such as one you built from source, set its full path in Settings
+(⌘,).
 
 To refresh a screenshot, build (`npm run build`) and run:
 
@@ -54,20 +59,24 @@ swift scripts/make-icon.swift ~/ax/assets/axel.svg build-resources/icon.icns
 
 ## Clusters
 
-> [!NOTE]
-> Cluster creation is a prototype. Ideally, once AX Studio is installed on a
-> laptop, it won't need any external dependencies.
+The Clusters page drives `ax`, so it needs only a running `docker` or `podman`:
 
-Creating a cluster runs the AX repo's `hack/setup-e2e-kind.sh`, which needs
-`make`, `go` and `docker` or `podman`. The app then merges the `kind-<name>`
-context into your kubeconfig and saves a `.ax-studio.bak` backup. Reinstalling
-AX deletes existing tasks and workspaces.
+- **Create cluster** and **Start** run `ax local start`, which creates or
+  resumes a kind cluster, installs Agent Substrate and AX, and downloads kind
+  and kubectl into `~/.ax/bin` if you don't have them. The cluster becomes your
+  current kubectl context: `ax-local` for the default name, `kind-<name>`
+  otherwise.
+- **Install AX** runs `ax install` on a cluster that already has Agent
+  Substrate, whether it's a kind cluster or any other context in your
+  kubeconfig. A kind cluster without Substrate gets `ax local start` instead.
+- **Delete** runs `ax local delete`.
 
-With podman and no docker, the app uses a `docker` shim
-([docker-shim.sh](src/main/docker-shim.sh)).
+`ax` has no default ax-server image yet, so the form asks for one. The app
+remembers the images you enter.
 
 ## Platform notes
 
 - **macOS/Linux:** the app reads PATH from your login shell, and also looks in
   `~/.ax/bin` (or `$AX_HOME/bin`), where AX's installer puts `ax`.
-- **Windows:** cluster setup needs Git for Windows (`bash`), `make` and `go`.
+- **Windows:** AX has no Windows build of `ax`, so the Clusters page can't
+  create clusters there.

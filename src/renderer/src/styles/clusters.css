@@ -30,11 +30,12 @@
 
 .cluster-actions { gap: 6px; }
 
-.new-cluster { padding: 14px; display: flex; flex-direction: column; gap: 10px; position: sticky; top: 0; }
+.cluster-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; }
+.new-cluster { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .new-cluster-head { gap: 7px; font-weight: 600; color: var(--text); }
 .new-cluster-head svg { color: var(--accent); }
 .form-row { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 8px; color: var(--text-2); }
-.form-row .input { width: 100%; min-width: 0; }
+.form-row .input, .form-row .select { width: 100%; min-width: 0; }
 .new-cluster-note { line-height: 1.45; }
 .new-cluster .problem-line { margin-top: 0; font-size: 12px; align-items: flex-start; }
 .new-cluster .problem-line svg { flex: none; margin-top: 2px; }
