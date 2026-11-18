@@ -72,7 +72,11 @@ export function Clusters() {
     <div className="clusters">
       <div className={`clusters-top ${outputOpen ? '' : 'full'}`}>
         <PageHeader title="Environments" subtitle="Set up a local sandbox on this machine, or connect to a team Kubernetes cluster.">
-          {running && <button className="btn" onClick={() => clusters.cancel()}><Square size={12} />Stop</button>}
+          {running && (
+            <button className="btn" onClick={() => clusters.cancel()} title="Interrupt the command that's running">
+              <CircleX size={13} />Cancel
+            </button>
+          )}
           <button className="btn" onClick={() => void clusters.refresh()} disabled={c.loading} title="Run the checks again">
             <RefreshCw size={13} className={c.loading ? 'spin' : ''} />Check Again
           </button>
@@ -135,17 +139,23 @@ export function Clusters() {
 
             <div className="row cluster-actions env-actions">
               <button className="btn primary" disabled={running || localBlockers.length > 0} onClick={() => void clusters.setUpLocal()}
-                title={localBlockers.length > 0 ? localBlockers.join(' ') : 'Runs ax local start; the sandbox becomes your current kubectl context'}>
+                title={localBlockers.length > 0 ? localBlockers.join(' ')
+                  : ready ? 'Runs ax local start again: checks every layer and redeploys AX with the images below'
+                  : 'Runs ax local start; the sandbox becomes your current kubectl context'}>
                 <Play size={13} fill="currentColor" />
-                {!exists ? 'Set Up Local Sandbox' : local.state === 'Stopped' ? 'Resume Local Sandbox' : ready ? 'Reconcile Local Sandbox' : 'Repair Local Sandbox'}
+                {!exists ? 'Set Up Local Sandbox' : local.state === 'Stopped' ? 'Resume Local Sandbox' : ready ? 'Update Local Sandbox' : 'Repair Local Sandbox'}
               </button>
-              {ready && !active && (
-                <button className="btn" disabled={running} onClick={() => clusters.connect(local.context)}>
-                  <ExternalLink size={12} />Use Local in Studio
+              {ready && (
+                <button className="btn" disabled={running || active} onClick={() => clusters.connect(local.context)}
+                  title={active ? 'Activity, Deploy and Terminal are using the local sandbox' : 'Point Activity, Deploy and Terminal at the local sandbox'}>
+                  <ExternalLink size={12} />{active ? 'In Use' : 'Use Local in Studio'}
                 </button>
               )}
               {local.state === 'Running' && (
-                <button className="btn" disabled={running} onClick={() => void clusters.stopLocal()}><Square size={12} />Stop</button>
+                <button className="btn" disabled={running} onClick={() => void clusters.stopLocal()}
+                  title="Stop the cluster's containers and keep its state; Resume starts it again">
+                  <Square size={12} />Stop
+                </button>
               )}
               <div className="spacer" />
               {exists && (
