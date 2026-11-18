@@ -67,7 +67,7 @@ export const STAGES: { id: StageID; title: string }[] = [
 ]
 
 export interface Operation {
-  kind: 'setup' | 'stop' | 'delete' | 'install'
+  kind: 'setup' | 'stop' | 'delete' | 'install' | 'uninstall'
   /** The local cluster's name, or the context AX is installed on. */
   target: string
   /** What a setup amounts to for the sandbox as it was: setting it up, resuming, repairing or updating it. */
@@ -567,7 +567,8 @@ class ClustersStore {
     return [...this.axProblems, ...this.imageProblems]
   }
 
-  private get axProblems(): string[] {
+  /** What stops any ax command from running: ax itself being missing. */
+  get axProblems(): string[] {
     return this.state.axFound ? [] : [`ax was not found (${store.state.settings.axPath}). Set its path in Settings.`]
   }
 
@@ -632,6 +633,15 @@ class ClustersStore {
       this.ax(['--context', context, 'install', ...this.imageArgs()]))
   }
 
+  /**
+   * `ax uninstall` removes ax-server and ax-postgres from a cluster and takes
+   * ax-server off Agent Substrate's allowlists. It keeps the database's volume.
+   */
+  async uninstallFrom(context: string) {
+    await this.exec({ kind: 'uninstall', target: context, stage: null }, `Uninstall AX from ${context} (ax uninstall)`,
+      this.ax(['--context', context, 'uninstall']))
+  }
+
   /** Points the rest of the app at a context. Your kubectl context stays as it is. */
   connect(context: string) {
     store.setScope({ context })
@@ -691,6 +701,8 @@ class ClustersStore {
     this.append(ok ? `✓ ${title} done` : `✗ ${title} failed (exit ${status})`, ok ? 'ok' : 'fail')
     // ax adds and removes contexts and tasks; refresh re-reads the contexts too.
     void this.refresh().then(() => store.refresh(true))
+    // What a check found about the cluster is out of date now.
+    if (op.kind === 'install' || op.kind === 'uninstall') void this.checkCluster(op.target)
     return ok
   }
 }

@@ -73,7 +73,8 @@ places to run tasks:
   the app at one without changing your kubectl context. **Check** looks at a
   cluster with `kubectl`, read-only: whether it meets what Agent Substrate and
   AX need, and whether each is installed, with what to do next. **Install AX**
-  runs `ax install` once Agent Substrate is there; `ax` can't install Substrate
+  runs `ax install` once Agent Substrate is there, and **Uninstall AX** runs
+  `ax uninstall`, which keeps the database's volume; `ax` can't install Substrate
   on a remote cluster, so the page links to Substrate's guides for that. A
   fold-out lists what a new cluster needs.
 

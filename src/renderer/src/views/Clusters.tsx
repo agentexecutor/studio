@@ -60,7 +60,7 @@ export function Clusters() {
   const running = c.op?.status === 'running'
   const [outputOpen, setOutputOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmInstall, setConfirmInstall] = useState<string | null>(null)
+  const [confirmCluster, setConfirmCluster] = useState<{ context: string; action: 'install' | 'uninstall' } | null>(null)
   useEffect(() => { if (running) setOutputOpen(true) }, [running])
   useTick(running)
 
@@ -91,11 +91,13 @@ export function Clusters() {
       <div className={`clusters-top ${outputOpen ? '' : 'full'}`}>
         <PageHeader title="Environments" subtitle="Set up a local sandbox on this machine, or connect to a team Kubernetes cluster.">
           {running && (
-            <button className="btn" onClick={() => clusters.cancel()} title="Interrupt the command that's running">
+            <button className="btn" onClick={() => clusters.cancel()}
+              title="Interrupts the command that's running. What it has already done stays done, so a setup may be left half finished; running it again picks up from there.">
               <CircleX size={13} />Cancel
             </button>
           )}
-          <button className="btn" onClick={() => void clusters.refresh()} disabled={c.loading} title="Run the checks again">
+          <button className="btn" onClick={() => void clusters.refresh()} disabled={c.loading}
+            title="Checks this machine and the local sandbox again and re-reads your kubeconfig. It only looks; nothing is changed.">
             <RefreshCw size={13} className={c.loading ? 'spin' : ''} />Check Again
           </button>
         </PageHeader>
@@ -158,31 +160,35 @@ export function Clusters() {
             <div className="row cluster-actions env-actions">
               <button className="btn primary" disabled={running || localBlockers.length > 0} onClick={() => void clusters.setUpLocal()}
                 title={localBlockers.length > 0 ? localBlockers.join(' ')
-                  : ready ? 'Runs ax local start again: checks every layer and redeploys AX with the images below'
-                  : 'Runs ax local start; the sandbox becomes your current kubectl context'}>
+                  : !exists ? 'Runs ax local start: creates a kind cluster named ax-local, installs Agent Substrate and AX on it, and makes it your current kubectl context. Downloads kind and kubectl if you lack them. Takes a few minutes.'
+                  : local.state === 'Stopped' ? "Runs ax local start: starts the cluster's containers again, brings Agent Substrate and AX back up, and makes ax-local your current kubectl context."
+                  : ready ? 'Runs ax local start again: checks every layer and redeploys AX with the images below. Makes ax-local your current kubectl context.'
+                  : "Runs ax local start: puts the cluster's context back in your kubeconfig, checks every layer and installs what's missing. Makes ax-local your current kubectl context."}>
                 <Play size={13} fill="currentColor" />
                 {!exists ? 'Set Up Local Sandbox' : local.state === 'Stopped' ? 'Resume Local Sandbox' : ready ? 'Update Local Sandbox' : 'Repair Local Sandbox'}
               </button>
               {ready && (
                 <button className="btn" disabled={running || active} onClick={() => clusters.connect(local.context)}
-                  title={active ? 'Activity, Deploy and Terminal are using the local sandbox' : 'Point Activity, Deploy and Terminal at the local sandbox'}>
+                  title={active ? 'Activity, Deploy and Terminal are already using the local sandbox.'
+                    : 'Points Activity, Deploy and Terminal at the local sandbox and opens Activity. Nothing on the cluster changes.'}>
                   <ExternalLink size={12} />{active ? 'In Use' : 'Use Local in Studio'}
                 </button>
               )}
               {local.state === 'Running' && (
                 <button className="btn" disabled={running} onClick={() => void clusters.stopLocal()}
-                  title="Stop the cluster's containers and keep its state; Resume starts it again">
+                  title="Runs ax local stop: stops the cluster's containers. Its tasks stop running and the app can't reach it until you resume, but nothing is deleted.">
                   <Square size={12} />Stop
                 </button>
               )}
               <div className="spacer" />
               {exists && (
-                <button className="btn small ghost danger" disabled={running} onClick={() => setConfirmDelete(true)} title="Delete the local kind cluster">
+                <button className="btn small ghost danger" disabled={running} onClick={() => setConfirmDelete(true)}
+                  title="Runs ax local delete: destroys the cluster with every task, workspace and snapshot in it, and removes its context from your kubeconfig. This can't be undone. Asks first.">
                   <Trash2 size={12} />Delete
                 </button>
               )}
             </div>
-            {running && c.op?.kind !== 'install' && <div className="step-progress" />}
+            {running && c.op && c.op.kind !== 'install' && c.op.kind !== 'uninstall' && <div className="step-progress" />}
           </div>
 
           <div className="card new-cluster">
@@ -205,7 +211,9 @@ export function Clusters() {
               <div className="col env-contexts">
                 {remote.map((rc) => (
                   <TeamCluster key={rc.name} name={rc.name} current={s.context === rc.name} check={c.checks[rc.name]}
-                    busy={running} installBlockers={installBlockers} onInstall={() => setConfirmInstall(rc.name)} />
+                    busy={running} installBlockers={installBlockers}
+                    onInstall={() => setConfirmCluster({ context: rc.name, action: 'install' })}
+                    onUninstall={() => setConfirmCluster({ context: rc.name, action: 'uninstall' })} />
                 ))}
               </div>
             )}
@@ -223,10 +231,10 @@ export function Clusters() {
         onToggle={() => setOutputOpen(!outputOpen)}
       />
 
-      {confirmInstall && (
-        <div className="modal-backdrop" onMouseDown={() => setConfirmInstall(null)}>
+      {confirmCluster?.action === 'install' && (
+        <div className="modal-backdrop" onMouseDown={() => setConfirmCluster(null)}>
           <div className="modal card fade-in" onMouseDown={(e) => e.stopPropagation()}>
-            <h3>{c.checks[confirmInstall]?.ax ? 'Upgrade' : 'Install'} AX on {shortName(confirmInstall)}?</h3>
+            <h3>{c.checks[confirmCluster.context]?.ax ? 'Upgrade' : 'Install'} AX on {shortName(confirmCluster.context)}?</h3>
             <p className="muted env-confirm">
               This runs <span className="mono">ax install</span> with the images below. It creates
               the <span className="mono">ax-system</span> namespace, deploys ax-postgres and ax-server, and registers ax-server
@@ -234,9 +242,29 @@ export function Clusters() {
               on the cluster shares.
             </p>
             <div className="row env-confirm-actions">
-              <button className="btn" onClick={() => setConfirmInstall(null)}>Cancel</button>
-              <button className="btn primary" onClick={() => { const context = confirmInstall; setConfirmInstall(null); void clusters.installOn(context) }}>
-                {c.checks[confirmInstall]?.ax ? 'Upgrade AX' : 'Install AX'}
+              <button className="btn" onClick={() => setConfirmCluster(null)}>Cancel</button>
+              <button className="btn primary" onClick={() => { const { context } = confirmCluster; setConfirmCluster(null); void clusters.installOn(context) }}>
+                {c.checks[confirmCluster.context]?.ax ? 'Upgrade AX' : 'Install AX'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmCluster?.action === 'uninstall' && (
+        <div className="modal-backdrop" onMouseDown={() => setConfirmCluster(null)}>
+          <div className="modal card fade-in" onMouseDown={(e) => e.stopPropagation()}>
+            <h3>Uninstall AX from {shortName(confirmCluster.context)}?</h3>
+            <p className="muted env-confirm">
+              This runs <span className="mono">ax uninstall</span>. It removes ax-server and ax-postgres
+              from <span className="mono">ax-system</span>, so nobody can use AX on this cluster until it's installed again,
+              and takes ax-server off Agent Substrate's allowlists, which restarts Substrate's API server and router. The
+              database's volume is kept, and Agent Substrate itself is left in place.
+            </p>
+            <div className="row env-confirm-actions">
+              <button className="btn" onClick={() => setConfirmCluster(null)}>Cancel</button>
+              <button className="btn primary danger-fill" onClick={() => { const { context } = confirmCluster; setConfirmCluster(null); void clusters.uninstallFrom(context) }}>
+                Uninstall AX
               </button>
             </div>
           </div>
@@ -303,13 +331,14 @@ function NewClusterGuide({ open }: { open: boolean }) {
 }
 
 /** A cluster from the kubeconfig: connect to it, check what's on it, and install AX once Substrate is there. */
-function TeamCluster({ name, current, check, busy, installBlockers, onInstall }: {
+function TeamCluster({ name, current, check, busy, installBlockers, onInstall, onUninstall }: {
   name: string
   current: boolean
   check: ClusterCheck | undefined
   busy: boolean
   installBlockers: string[]
   onInstall: () => void
+  onUninstall: () => void
 }) {
   const checked = !!check && !check.checking && !check.error
   // ax install needs Substrate there already; everything else it can be tried without.
@@ -326,19 +355,32 @@ function TeamCluster({ name, current, check, busy, installBlockers, onInstall }:
       <div className="caption faint mono ellipsis" title={name}>{name}</div>
       {check && <CheckResult check={check} />}
       <div className="row env-context-actions">
-        <button className={`btn small ${current ? '' : 'primary'}`} disabled={busy || current} onClick={() => clusters.connect(name)}>
+        <button className={`btn small ${current ? '' : 'primary'}`} disabled={busy || current} onClick={() => clusters.connect(name)}
+          title={current ? 'Activity, Deploy and Terminal are already using this cluster.'
+            : "Points Activity, Deploy and Terminal at this cluster and opens Activity. Nothing on the cluster changes, and neither does your kubectl context."}>
           <ExternalLink size={12} />{current ? 'Connected' : 'Connect'}
         </button>
         <button className="btn small" disabled={check?.checking} onClick={() => void clusters.checkCluster(name)}
-          title="Look at the cluster with kubectl: what it offers, and whether Agent Substrate and AX are on it">
+          title="Looks at the cluster with kubectl: what it offers, and whether Agent Substrate and AX are on it. It only reads; nothing is changed.">
           <RefreshCw size={12} className={check?.checking ? 'spin' : ''} />{check ? 'Check Again' : 'Check'}
         </button>
         <button className="btn small ghost" disabled={busy || blockers.length > 0} onClick={onInstall}
-          title={blockers.length > 0 ? blockers.join(' ') : 'Runs ax install on this cluster'}>
+          title={blockers.length > 0 ? blockers.join(' ')
+            : checked && check.ax ? "Runs ax install: redeploys ax-server and ax-postgres with the images below. Asks first."
+            : "Runs ax install: deploys ax-postgres and ax-server and registers ax-server with Agent Substrate, which restarts Substrate's API server and router. Asks first."}>
           <Wrench size={12} />{checked && check.ax ? 'Upgrade AX' : 'Install AX'}
         </button>
+        {checked && check.ax && (
+          <button className="btn small ghost danger" disabled={busy || clusters.axProblems.length > 0} onClick={onUninstall}
+            title={clusters.axProblems.length > 0 ? clusters.axProblems.join(' ')
+              : "Runs ax uninstall: removes ax-server and ax-postgres from the cluster and restarts Substrate's API server and router. The database's volume is kept. Asks first."}>
+            <Trash2 size={12} />Uninstall AX
+          </button>
+        )}
         <div className="spacer" />
-        {check && !check.checking && <button className="btn small ghost" onClick={() => clusters.clearCheck(name)}>Hide</button>}
+        {check && !check.checking && (
+          <button className="btn small ghost" onClick={() => clusters.clearCheck(name)} title="Folds the check's result away. Nothing on the cluster changes.">Hide</button>
+        )}
       </div>
     </div>
   )
@@ -572,8 +614,8 @@ function localLayers(local: LocalSandbox): Layer[] {
 function OperationBar({ op }: { op: Operation }) {
   useTick(op.status === 'running')
   const elapsed = duration((op.finished ?? Date.now()) - op.started)
-  const verb = op.wording?.doing ?? { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on' }[op.kind]
-  const done = op.wording?.done ?? { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on' }[op.kind]
+  const verb = op.wording?.doing ?? { setup: 'Setting up', stop: 'Stopping', delete: 'Deleting', install: 'Installing AX on', uninstall: 'Uninstalling AX from' }[op.kind]
+  const done = op.wording?.done ?? { setup: 'Set up', stop: 'Stopped', delete: 'Deleted', install: 'Installed AX on', uninstall: 'Uninstalled AX from' }[op.kind]
   const title = op.status === 'running' ? `${verb} ${op.target}` : op.status === 'ok' ? `${done} ${op.target}` : `${verb} ${op.target} failed`
   const progress = op.stage ? stageProgress(op) : null
   const StatusIcon = op.status === 'running' ? Loader : op.status === 'ok' ? CircleCheck : CircleX
@@ -587,7 +629,9 @@ function OperationBar({ op }: { op: Operation }) {
         <span className="faint num">{elapsed}{op.status === 'failed' && op.exit !== undefined ? ` · exit ${op.exit}` : ''}</span>
         {op.status === 'running' && op.step && <span className="caption muted ellipsis op-step" title={op.step}>{op.step}</span>}
         <div className="spacer" />
-        {op.status !== 'running' && <button className="btn small ghost" onClick={() => clusters.set({ op: null })}>Dismiss</button>}
+        {op.status !== 'running' && (
+          <button className="btn small ghost" onClick={() => clusters.set({ op: null })} title="Hides this result. The output below stays.">Dismiss</button>
+        )}
       </div>
       {progress && (
         <div className="op-stages">

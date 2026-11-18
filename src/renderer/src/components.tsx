@@ -120,7 +120,8 @@ export function LogConsole({ lines, chip, onClear, clearDisabled, empty, open = 
         {chip}
         <div className="spacer" />
         <span className="faint">{lines.length} lines</span>
-        <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onClear() }} disabled={clearDisabled}>Clear</button>
+        <button className="btn small ghost" onClick={(e) => { e.stopPropagation(); onClear() }} disabled={clearDisabled}
+          title="Empties this output. Nothing else changes.">Clear</button>
         {onToggle && <Chevron size={14} />}
       </div>
       {open && <div
