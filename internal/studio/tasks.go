@@ -136,7 +136,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -181,7 +181,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid task name: %v", err))
 		return
 	}
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -223,7 +223,7 @@ func (s *Server) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid gateway name: %v", err))
 		return
 	}
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -264,7 +264,7 @@ func (s *Server) handleTaskAction(action string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid task name: %v", err))
 			return
 		}
-		client, conn, err := s.dialAXForContext(kubeCtx)
+		client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return

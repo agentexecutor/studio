@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/agentexecutor/studio/internal/kube"
+	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 )
 
@@ -93,8 +94,6 @@ type EnvOpSnapshot struct {
 	Purpose string `json:"purpose,omitempty"`
 	// ExitCode is the command's exit status when it failed with one.
 	ExitCode int `json:"exitCode,omitempty"`
-	// To is where a task-move sends the task ("context/atespace").
-	To string `json:"to,omitempty"`
 }
 
 // EnvStatusResponse is returned by GET /api/env/status.
@@ -128,6 +127,80 @@ func (s *Server) hasContainerCLI() bool {
 		}
 	}
 	return false
+}
+
+const (
+	// defaultLocalClusterName is the cluster `ax local` manages by default.
+	defaultLocalClusterName = "ax-local"
+	// stateNotFound is the state `ax local status` reports when there is no local cluster.
+	stateNotFound = "NotFound"
+	// stateRunning is the state it reports when every node of the cluster runs.
+	stateRunning = "Running"
+)
+
+// localStatus is the part of `ax local status -o json` that Studio shows.
+type localStatus struct {
+	LocalClusterInfo
+	Host localHost `json:"host"`
+}
+
+// localHost is the container engine that runs the local cluster. Error is why
+// `ax local start` would refuse it, and Warning a problem that would not stop it.
+type localHost struct {
+	Runtime       string `json:"runtime"`
+	KernelVersion string `json:"kernelVersion"`
+	MemTotalBytes int64  `json:"memTotalBytes"`
+	Rootless      bool   `json:"rootless"`
+	Error         string `json:"error"`
+	Warning       string `json:"warning"`
+}
+
+// axLocalStatus runs `ax local status -o json`. ax owns the checks of the
+// host and of the cluster, so Studio and `ax local start` always agree.
+func (s *Server) axLocalStatus(ctx context.Context) (localStatus, error) {
+	c, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	res, err := s.runner.Run(c, kube.Spec{
+		Name: s.axBinary,
+		Args: []string{"-n", s.axNamespace, "local", "status", "-o", "json"},
+	})
+	if err != nil {
+		lines := strings.Split(strings.TrimSpace(res.Stderr), "\n")
+		return localStatus{}, fmt.Errorf("%s", nonEmptyStr(strings.TrimSpace(lines[len(lines)-1]), err.Error()))
+	}
+	var st localStatus
+	if err := json.Unmarshal([]byte(res.Stdout), &st); err != nil {
+		return localStatus{}, fmt.Errorf("reading the output of ax local status: %w", err)
+	}
+	return st, nil
+}
+
+// containerEnginePreflight turns ax's report of the container host into the
+// row the Environments page shows. statusErr is why the report could not be read.
+func containerEnginePreflight(host localHost, statusErr error) PreflightItem {
+	item := PreflightItem{ID: "container_engine", Label: "Container runtime & VM"}
+	switch {
+	case statusErr != nil:
+		// Not a reason to block a start: an older ax has no JSON status.
+		item.Status = "warn"
+		item.Detail = fmt.Sprintf("Could not check the container host with `ax local status -o json`: %v", statusErr)
+	case host.Error != "" || host.Runtime == "":
+		item.Status = "fail"
+		item.Detail = nonEmptyStr(host.Error, "No running container engine found.")
+		if host.Runtime != "" && runtime.GOOS == "darwin" {
+			item.Command = "colima stop && colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs"
+		}
+	case host.Warning != "":
+		item.Status = "warn"
+		item.Detail = host.Warning
+	default:
+		item.Status = "ok"
+		item.Detail = host.Runtime + " ready"
+		if gib := float64(host.MemTotalBytes) / (1024 * 1024 * 1024); host.KernelVersion != "" && gib > 0 {
+			item.Detail = fmt.Sprintf("%s ready · kernel %s · %.1f GiB RAM", host.Runtime, host.KernelVersion, gib)
+		}
+	}
+	return item
 }
 
 func freeDiskSpaceBytes(dir string) uint64 {
@@ -166,75 +239,38 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 		Detail: fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 	})
 
-	// 2. Container Runtime, Kernel & Memory check.
-	rt, rtErr := kube.ResolveContainerRuntime(ctx, s.runner)
-	if rtErr != nil {
-		fixCmd := "sudo systemctl start docker"
-		detail := "No running rootful Docker or Podman engine detected."
+	// 2. Container runtime, kernel and memory, and the local cluster, as
+	// `ax local status` reports them.
+	resp.Local = LocalClusterInfo{
+		Name:            "N/A",
+		State:           stateNotFound,
+		KubeContext:     "N/A",
+		SubstrateStatus: "N/A",
+		AXStatus:        "N/A",
+	}
+	local, localErr := s.axLocalStatus(ctx)
+	if localErr == nil {
+		resp.Local = local.LocalClusterInfo
+		resp.ContainerRuntime = local.Host.Runtime
+		resp.ContainerKernel = local.Host.KernelVersion
+		resp.ContainerMemBytes = local.Host.MemTotalBytes
+		resp.ContainerRootless = local.Host.Rootless
+	}
+	engine := containerEnginePreflight(local.Host, localErr)
+	if localErr == nil && local.Host.Runtime == "" {
+		// No engine is running. Say what this computer has to start one with.
 		if runtime.GOOS == "darwin" {
 			// macOS runs containers in a Linux VM that one of a few apps provides: say which are installed, and how to start one.
-			detail, fixCmd = s.macVMAdvice()
+			engine.Detail, engine.Command = s.macVMAdvice()
 		} else if !s.hasContainerCLI() {
 			// There is no engine to start: neither one is installed.
-			fixCmd = ""
-			detail = "Docker or Podman isn't installed. Install Docker, or Podman in rootful mode, and start it. Or connect directly to a team cluster."
-		}
-		resp.Preflight = append(resp.Preflight, PreflightItem{
-			ID:      "container_engine",
-			Label:   "Container runtime & VM",
-			Status:  "fail",
-			Detail:  detail,
-			Command: fixCmd,
-		})
-	} else {
-		engineName := "docker"
-		if rt.IsPodman {
-			engineName = "podman"
-		}
-		resp.ContainerRuntime = engineName
-
-		hostInfo, ok := kube.InspectContainerHost(ctx, s.runner, rt)
-		if ok {
-			resp.ContainerKernel = hostInfo.KernelVersion
-			resp.ContainerMemBytes = hostInfo.MemTotalBytes
-			resp.ContainerRootless = hostInfo.Rootless
-		}
-		var warnBuf bytes.Buffer
-		valErr := kube.ValidateContainerHost(hostInfo, rt.IsPodman, runtime.GOOS, &warnBuf)
-		switch {
-		case valErr != nil:
-			fixCmd := ""
-			if runtime.GOOS == "darwin" {
-				fixCmd = "colima stop && colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs"
-			}
-			resp.Preflight = append(resp.Preflight, PreflightItem{
-				ID:      "container_engine",
-				Label:   "Container runtime & VM",
-				Status:  "fail",
-				Detail:  valErr.Error(),
-				Command: fixCmd,
-			})
-		case warnBuf.Len() > 0:
-			resp.Preflight = append(resp.Preflight, PreflightItem{
-				ID:     "container_engine",
-				Label:  "Container runtime & VM",
-				Status: "warn",
-				Detail: strings.TrimSpace(strings.TrimPrefix(warnBuf.String(), "==> Warning: ")),
-			})
-		default:
-			gib := float64(hostInfo.MemTotalBytes) / (1024 * 1024 * 1024)
-			detail := fmt.Sprintf("%s ready", engineName)
-			if hostInfo.KernelVersion != "" && gib > 0 {
-				detail = fmt.Sprintf("%s ready · kernel %s · %.1f GiB RAM", engineName, hostInfo.KernelVersion, gib)
-			}
-			resp.Preflight = append(resp.Preflight, PreflightItem{
-				ID:     "container_engine",
-				Label:  "Container runtime & VM",
-				Status: "ok",
-				Detail: detail,
-			})
+			engine.Detail = "Docker or Podman isn't installed. Install Docker, or Podman in rootful mode, and start it. Or connect directly to a team cluster."
+		} else {
+			engine.Detail = "No running rootful Docker or Podman engine detected."
+			engine.Command = "sudo systemctl start docker"
 		}
 	}
+	resp.Preflight = append(resp.Preflight, engine)
 
 	// 3. Free Disk Space check.
 	if diskBytes > 0 {
@@ -273,31 +309,10 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 	}
 	resp.CanStartLocal = canStart
 
-	// Local cluster status (fast check when container runtime is up).
-	resp.Local = LocalClusterInfo{
-		Name:            "N/A",
-		State:           kube.StateNotFound,
-		KubeContext:     "N/A",
-		SubstrateStatus: "N/A",
-		AXStatus:        "N/A",
-	}
-	if resp.ContainerRuntime != "" {
-		stCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		st := kube.InspectLocalCluster(stCtx, s.runner, rt, kube.DefaultLocalClusterName, s.axNamespace)
-		cancel()
-		resp.Local = LocalClusterInfo{
-			Name:            st.Name,
-			State:           st.State,
-			KubeContext:     st.KubeContext,
-			SubstrateStatus: st.SubstrateStatus,
-			AXStatus:        st.AXStatus,
-		}
-	}
-
 	// Kubeconfig contexts.
-	curCtx, _ := kube.CurrentContext("")
+	curCtx, _ := axclient.CurrentContext()
 	resp.CurrentContext = curCtx
-	if entries, err := kube.ListContexts(""); err == nil {
+	if entries, err := axclient.ListContexts(); err == nil {
 		for _, e := range entries {
 			resp.Contexts = append(resp.Contexts, ContextSummary{
 				Name:    e.Name,
@@ -314,7 +329,7 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 	s.opMu.Lock()
 	if s.currentOp != nil {
 		if s.currentOp.Action == "local-up" && s.currentOp.Status == "failed" &&
-			resp.Local.State == kube.StateRunning &&
+			resp.Local.State == stateRunning &&
 			strings.Contains(resp.Local.SubstrateStatus, "available") &&
 			strings.Contains(resp.Local.AXStatus, "available") {
 			s.currentOp = nil
@@ -367,7 +382,7 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	_ = decodeJSONBody(r, &req)
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		name = kube.DefaultLocalClusterName
+		name = defaultLocalClusterName
 	}
 	if err := kube.ValidateName(name); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid cluster name: %v", err))
@@ -453,7 +468,7 @@ func (s *Server) handleLocalAction(subcmd string) http.HandlerFunc {
 		_ = decodeJSONBody(r, &req)
 		name := strings.TrimSpace(req.Name)
 		if name == "" {
-			name = kube.DefaultLocalClusterName
+			name = defaultLocalClusterName
 		}
 		if err := kube.ValidateName(name); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid cluster name: %v", err))

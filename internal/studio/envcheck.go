@@ -122,9 +122,6 @@ type envExtras struct {
 
 	// workerNS caches where each cluster's Agent Substrate workers run (logs.go).
 	workerNS workerNamespaces
-
-	// pipeAX, when set, replaces running `ax from... | ax to...` (tests).
-	pipeAX func(ctx context.Context, from, to []string) error
 }
 
 // shortHome writes a path under the home directory with ~.
@@ -226,7 +223,7 @@ func (s *Server) axFlags(ctx context.Context) AXFlags {
 // (its API server doesn't answer). Without access, what's installed on it is
 // unknown rather than missing.
 func (s *Server) localAccess(ctx context.Context, st LocalClusterInfo, contexts []ContextSummary) string {
-	if st.State != kube.StateRunning {
+	if st.State != stateRunning {
 		return "ok"
 	}
 	known := false

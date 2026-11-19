@@ -30,12 +30,13 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/agentexecutor/studio/internal/kube"
+	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // taskStubServer is an ax-server that keeps tasks and gateways in memory.
@@ -105,14 +106,14 @@ func (s *taskStubServer) ResumeTask(_ context.Context, req *v1alpha1.ResumeTaskR
 	return nil, status.Error(codes.ResourceExhausted, "no free workers available")
 }
 
-func (s *taskStubServer) DeleteTask(_ context.Context, req *v1alpha1.DeleteTaskRequest) (*v1alpha1.DeleteTaskResponse, error) {
+func (s *taskStubServer) DeleteTask(_ context.Context, req *v1alpha1.DeleteTaskRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.find(req.GetAtespace(), req.GetName()); err != nil {
 		return nil, err
 	}
 	delete(s.tasks, req.GetAtespace()+"/"+req.GetName())
-	return &v1alpha1.DeleteTaskResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 // newTaskTestServer starts a stub ax-server holding one task and returns a
@@ -129,7 +130,7 @@ func newTaskTestServer(t *testing.T) (http.Handler, *http.Cookie, string, *taskS
 			Kind:       "Task",
 			Metadata:   &v1alpha1.ObjectMeta{Name: "fix-flaky-tests", Atespace: "default"},
 			Spec: &v1alpha1.TaskSpec{
-				Goal:      &v1alpha1.Goal{Spec: "Fix the flaky tests."},
+				Goal:      &v1alpha1.Goal{Text: "Fix the flaky tests."},
 				SessionId: "session-1",
 				Debug:     true,
 			},
@@ -154,7 +155,7 @@ func newTaskTestServer(t *testing.T) (http.Handler, *http.Cookie, string, *taskS
 
 	srv, err := NewServer(Options{
 		Addr: "127.0.0.1:0",
-		ResolveServer: func(kube.TunnelOptions) (string, error) {
+		ResolveServer: func(context.Context, axclient.Options) (string, error) {
 			return "http://" + ln.Addr().String(), nil
 		},
 	})
@@ -193,7 +194,7 @@ func TestTaskEndpoints(t *testing.T) {
 		} `json:"metadata"`
 		Spec struct {
 			Goal struct {
-				Spec string `json:"spec"`
+				Text string `json:"text"`
 			} `json:"goal"`
 			SessionID string `json:"sessionId"`
 			Debug     bool   `json:"debug"`
@@ -217,7 +218,7 @@ func TestTaskEndpoints(t *testing.T) {
 	if len(list.Tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d: %s", len(list.Tasks), rec.Body.String())
 	}
-	if got := list.Tasks[0]; got.Metadata.Name != "fix-flaky-tests" || got.Spec.Goal.Spec != "Fix the flaky tests." ||
+	if got := list.Tasks[0]; got.Metadata.Name != "fix-flaky-tests" || got.Spec.Goal.Text != "Fix the flaky tests." ||
 		got.Spec.SessionID != "session-1" || !got.Spec.Debug || got.Status.State != "TASK_STATE_WORKING" {
 		t.Errorf("unexpected task in list: %+v", got)
 	}
@@ -522,7 +523,7 @@ func TestTaskChangesListNewFilesInNewDirectories(t *testing.T) {
 
 	srv, err := NewServer(Options{
 		Addr: "127.0.0.1:0",
-		ResolveServer: func(kube.TunnelOptions) (string, error) {
+		ResolveServer: func(context.Context, axclient.Options) (string, error) {
 			return "http://" + ln.Addr().String(), nil
 		},
 		// The sandbox is the repository above: git runs for real.

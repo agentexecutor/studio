@@ -444,7 +444,7 @@ export function generate(d: Draft, redact = false): string {
 
   const argv = tokenize(d.command)
   if (argv.length) t += `\n  commands: [${argv.map(q).join(', ')}]`
-  if (d.goal.trim()) t += `\n  goal:\n    spec: ${block(d.goal.trim(), 6)}`
+  if (d.goal.trim()) t += `\n  goal:\n    text: ${block(d.goal.trim(), 6)}`
   if (d.sessionId.trim()) t += `\n  sessionId: ${q(d.sessionId.trim())}`
   if (d.configMode === 'custom' && d.customConfig.trim()) {
     t +=

@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/agentexecutor/studio/internal/kube"
+	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
 )
@@ -255,7 +256,7 @@ func TestTaskChangesAndApplyLocal(t *testing.T) {
 
 	srv, err := NewServer(Options{
 		Addr: "127.0.0.1:0",
-		ResolveServer: func(kube.TunnelOptions) (string, error) {
+		ResolveServer: func(context.Context, axclient.Options) (string, error) {
 			return "http://" + ln.Addr().String(), nil
 		},
 		GuestExec: func(_ context.Context, _, _, _, _ string, cmd []string, _ string) (string, string, int, error) {

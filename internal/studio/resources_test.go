@@ -25,6 +25,7 @@ import (
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func (s *taskStubServer) ListGateways(_ context.Context, req *v1alpha1.ListGatewaysRequest) (*v1alpha1.ListGatewaysResponse, error) {
@@ -39,7 +40,7 @@ func (s *taskStubServer) ListGateways(_ context.Context, req *v1alpha1.ListGatew
 	return resp, nil
 }
 
-func (s *taskStubServer) DeleteGateway(_ context.Context, req *v1alpha1.DeleteGatewayRequest) (*v1alpha1.DeleteGatewayResponse, error) {
+func (s *taskStubServer) DeleteGateway(_ context.Context, req *v1alpha1.DeleteGatewayRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := req.GetAtespace() + "/" + req.GetName()
@@ -47,7 +48,7 @@ func (s *taskStubServer) DeleteGateway(_ context.Context, req *v1alpha1.DeleteGa
 		return nil, status.Errorf(codes.NotFound, "gateway %s not found", k)
 	}
 	delete(s.gateways, k)
-	return &v1alpha1.DeleteGatewayResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (s *taskStubServer) ListWorkspaces(_ context.Context, req *v1alpha1.ListWorkspacesRequest) (*v1alpha1.ListWorkspacesResponse, error) {
@@ -62,7 +63,7 @@ func (s *taskStubServer) ListWorkspaces(_ context.Context, req *v1alpha1.ListWor
 	return resp, nil
 }
 
-func (s *taskStubServer) DeleteWorkspace(_ context.Context, req *v1alpha1.DeleteWorkspaceRequest) (*v1alpha1.DeleteWorkspaceResponse, error) {
+func (s *taskStubServer) DeleteWorkspace(_ context.Context, req *v1alpha1.DeleteWorkspaceRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k := req.GetAtespace() + "/" + req.GetName()
@@ -70,7 +71,7 @@ func (s *taskStubServer) DeleteWorkspace(_ context.Context, req *v1alpha1.Delete
 		return nil, status.Errorf(codes.NotFound, "workspace %s not found", k)
 	}
 	delete(s.workspaces, k)
-	return &v1alpha1.DeleteWorkspaceResponse{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (s *taskStubServer) ListModels(_ context.Context, req *v1alpha1.ListModelsRequest) (*v1alpha1.ListModelsResponse, error) {

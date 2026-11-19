@@ -226,7 +226,7 @@ export function parseTaskYAML(text: string): TaskDetail {
   return {
     uid: meta.uid,
     sessionId: spec.sessionId ?? spec.session_id,
-    goal: spec.goal?.spec,
+    goal: spec.goal?.text,
     gateway: spec.gateway?.name,
     workspace: spec.workspace?.name,
     image: profile.image ?? spec.image,

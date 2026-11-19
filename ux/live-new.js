@@ -27,8 +27,7 @@
      `ax apply` on them, then `ax resume task`. You can read and edit the files before they are applied.
    - A follow-up is a new task in the same session as an earlier one. It reuses that task's workspace and network
      rules. It starts from the workspace's snapshot and the Git refs that were pushed, not from the earlier sandbox.
-   - Running on another cluster is `ax promote` (check first with --preflight-only, then send), or, when this ax has no
-     promote, Studio's own move through the AX API. */
+   - Running on another cluster is `ax promote`: check first with --preflight-only, then send. */
 
 /* The templates. The images and settings are the ones the Studio pages used before this UI, so a task looks the same
    to AX whichever page started it. They are staging images until the templates are published. */
@@ -763,11 +762,8 @@ function liveNewEnvRefresh(d) {
 }
 
 /* ---------- Running on another cluster ----------
-   `ax promote` when this ax has it: check first (--preflight-only), then send. Not every ax has it yet, so when it's
-   missing Studio sends the task itself (POST /api/tasks/move): it copies the task, and the workspace and Gateway it
-   binds when that cluster lacks them, through the AX API, and can copy the sandbox's /workspace across too. Either
-   way you choose the cluster and atespace, whether it starts there, and what happens to the original. */
-LIVE.promoteMissing = false;  // this ax answered "unknown command: promote"
+   `ax promote` does it: check first (--preflight-only), then send. You choose the cluster and atespace, whether it
+   starts there, and what happens to the original. */
 function livePromoteArgs(p, preflight) {
   const ns = (STUDIO.info && STUDIO.info.axNamespace) || 'ax-system';
   const args = ['promote', 'task', p.name, '--to', p.to, '--to-namespace', ns];
@@ -801,37 +797,22 @@ function livePromoteNote(line) {
 function liveKeysNote(secrets) {
   return `That cluster needs its own copy of ${secrets.length === 1 ? 'the key' : 'the keys'} ${secrets.map((x) => `<span class="mono">${esc(x)}</span>`).join(', ')}. Keys aren't copied.`;
 }
-/** What Studio's own move will do, from its dry run, in the same words as ax promote's check. */
-function liveMovePlanLines(p, plan) {
-  const out = (plan.items || []).map((it) => {
-    const what = it.kind === 'gateway' ? 'Gateway' : it.kind;
-    const n = `<span class="mono">${esc(it.name)}</span>`;
-    return it.action === 'reuse' ? `Uses the ${what} ${n} that is already there` : it.action === 'replace' ? `Deletes the ${what} ${n} that is already there, then creates it again` : `Creates the ${what} ${n} there`;
-  });
-  if (p.copyFiles) out.push(`Starts both copies, copies <span class="mono">${esc(plan.path || '/workspace')}</span> across, and restarts the copy on those files`);
-  else if (p.start) out.push(`Starts <span class="mono">${esc(p.name)}</span> there`);
-  if (p.original === 'suspend') out.push(`Pauses <span class="mono">${esc(p.name)}</span> on this cluster`);
-  if (p.original === 'delete') out.push(`Deletes <span class="mono">${esc(p.name)}</span> on this cluster once the copy is there`);
-  return out;
-}
 function liveOpenPromote(name) {
   const targets = LIVE.contexts;
-  const row = LIVE.tasks.find((t) => t.name === name);
-  const debug = !!(row ? row.debug : (LIVE.detail[name] && LIVE.detail[name].doc && LIVE.detail[name].doc.spec && LIVE.detail[name].doc.spec.debug));
   const others = targets.filter((c) => c.name !== LIVE.context);
   /* Start on a cluster a check found AX on, else one that didn't fail its check, else the first other one. */
   const chk = (c) => LIVE.clusterChecks[c.name];
   const best = others.find((c) => chk(c) && !chk(c).error && chk(c).ax) || others.find((c) => !(chk(c) && chk(c).error)) || others[0];
-  const p = { name, to: best ? best.name : LIVE.context, toAtespace: LIVE.atespace, start: true, original: 'keep', replace: false, copyFiles: false,
-    mode: LIVE.promoteMissing ? 'move' : 'promote', check: null, checking: false, sending: false, progress: null, error: '', seq: 0 };
+  const p = { name, to: best ? best.name : LIVE.context, toAtespace: LIVE.atespace, start: true, original: 'keep', replace: false,
+    check: null, checking: false, sending: false, error: '', seq: 0 };
   const scope = ['--context', LIVE.context, '-a', LIVE.atespace];
   const text = (r) => [String(r.stdout || '').trim(), String(r.stderr || '').trim()].filter(Boolean).join('\n');
   const same = () => p.to === LIVE.context && (p.toAtespace || 'default') === LIVE.atespace;
   const atesBad = () => !LIVE_NAME_RE.test(p.toAtespace || 'default');
   const dlg = openDialog(dialogShell('lp', `Run ${esc(name)} on another cluster`, '', '<div id="lp-body"></div>', `<span class="left"></span><button class="btn ghost" data-action="close-dialog" id="lp-cancel">Cancel</button><button class="btn primary" id="lp-go">${icon('cloudUp', 'sm')}Send</button>`, true, 'cloudUp'));
   const radio = (k, v, label) => `<button type="button" role="radio" aria-checked="${p[k] === v}" data-lp-pick="${k}" data-value="${v}" ${p.sending ? 'disabled' : ''}>${label}</button>`;
-  const toggle = (id, k, title, desc, disabled) => `<label class="toggle-line" style="margin-top:8px"><span class="tl-text"><b>${title}</b><span>${desc}</span></span>
-      <span class="switch"><input type="checkbox" role="switch" id="${id}" data-lp-toggle="${k}" ${p[k] ? 'checked' : ''} ${p.sending || disabled ? 'disabled' : ''} aria-label="${esc(title)}"><span class="track"></span><span class="thumb"></span></span></label>`;
+  const toggle = (id, k, title, desc) => `<label class="toggle-line" style="margin-top:8px"><span class="tl-text"><b>${title}</b><span>${desc}</span></span>
+      <span class="switch"><input type="checkbox" role="switch" id="${id}" data-lp-toggle="${k}" ${p[k] ? 'checked' : ''} ${p.sending ? 'disabled' : ''} aria-label="${esc(title)}"><span class="track"></span><span class="thumb"></span></span></label>`;
   const paint = () => {
     const body = $('#lp-body', dlg);
     if (!body) return;
@@ -841,20 +822,15 @@ function liveOpenPromote(name) {
       go.disabled = true;
       return;
     }
-    /* What sending it does: ax promote's check, or Studio's own dry run. */
+    /* What sending it does, from ax promote's check. */
     let check = '';
-    if (p.progress) {
-      const lines = p.progress.logs.filter((l) => /^==> /.test(l)).map((l) => l.slice(4));
-      const failed = p.progress.status === 'failed';
-      check = `<div class="live-title" style="margin-top:14px">${failed ? "It stopped:" : p.progress.status === 'ok' ? 'Done:' : 'Sending…'}</div>
-        <ol class="move-steps" id="lp-progress">${lines.map((l, i) => `<li class="${i < lines.length - 1 || p.progress.status === 'ok' ? 'done' : failed ? 'failed' : 'now'}">${icon(i < lines.length - 1 || p.progress.status === 'ok' ? 'checkCircle' : failed ? 'xCircle' : 'loader', 'xs')}<span>${esc(l)}</span></li>`).join('')}</ol>`;
-    } else if (same()) {
+    if (same()) {
       check = '<p class="small" style="margin-top:14px" id="lp-check">That\'s where it is now. Pick another cluster or atespace.</p>';
     } else if (atesBad()) {
       check = '<p class="small" style="margin-top:14px;color:var(--wait)" id="lp-check">An atespace name is lowercase letters, digits and dashes.</p>';
     } else if (p.checking) {
       check = `<p class="small muted" id="lp-check" style="margin-top:14px">${icon('loader', 'xs')} Checking ${esc(liveShortCtx(p.to))}…</p>`;
-    } else if (p.check && p.mode === 'promote') {
+    } else if (p.check) {
       const lines = String(p.check.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
       const notes = lines.filter((l) => /^Note:/i.test(l));
       const steps = lines.filter((l) => !/^Note:/i.test(l));
@@ -864,18 +840,9 @@ function liveOpenPromote(name) {
         : `<div class="live-title" style="margin-top:14px">The check found a problem:</div>
           <pre class="manifest" id="lp-check" style="margin-top:8px;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Check result">${esc(p.check.text || 'The check failed without saying why.')}</pre>
           ${/--replace/.test(p.check.text) && !p.replace ? '<p class="small" style="margin-top:8px" id="lp-fix">To send it anyway, turn on <b>Replace the task that is there</b>.</p>' : ''}`;
-    } else if (p.check && p.mode === 'move') {
-      const plan = p.check.plan || {};
-      check = p.check.error ? `<div class="callout warn" role="alert" style="margin-top:14px" id="lp-check">${icon('alert')}<div style="overflow-wrap:anywhere">${esc(p.check.error)}</div></div>`
-        : (plan.problems || []).length ? `<div class="live-title" style="margin-top:14px">It can't go yet:</div><ul class="live-steps" id="lp-check">${plan.problems.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
-          : `<div class="live-title" style="margin-top:14px">This is what sending it does:</div><ul class="live-steps" id="lp-check">${liveMovePlanLines(p, plan).map((l) => `<li>${l}</li>`).join('')}</ul>
-            ${(plan.keys || []).length ? `<p class="small lp-note" style="margin-top:8px">${icon('key', 'xs')} ${liveKeysNote(plan.keys)}</p>` : ''}`;
     }
-    const fresh = p.copyFiles
-      ? "The copy starts from this sandbox's files: Studio copies its /workspace across. Running programs start again there, and keys stored on this cluster aren't copied."
-      : "The run there starts fresh. It pulls from the Git branch that was pushed, and it uses that cluster's own Gateway credentials. Files in this sandbox and keys stored on this cluster aren't copied.";
-    const cli = p.mode === 'promote' ? cliHint(['ax', '--context', LIVE.context].concat(LIVE.atespace !== 'default' ? ['-a', LIVE.atespace] : [], livePromoteArgs(p, false)).join(' '))
-      : [liveCmd(['get', 'task', name]), liveCmdAt(p.to, (p.toAtespace !== 'default' ? ['-a', p.toAtespace] : []).concat(['apply', '-f', 'task.yaml'])), liveCmdAt(p.to, (p.toAtespace !== 'default' ? ['-a', p.toAtespace] : []).concat(['resume', 'task', name]))].map(cliHint).join('');
+    const fresh = "The run there starts fresh. It pulls from the Git branch that was pushed, and it uses that cluster's own Gateway credentials. Files in this sandbox and keys stored on this cluster aren't copied.";
+    const cli = cliHint(['ax', '--context', LIVE.context].concat(LIVE.atespace !== 'default' ? ['-a', LIVE.atespace] : [], livePromoteArgs(p, false)).join(' '));
     body.innerHTML = `
       <div class="lp-grid">
         <label class="small" style="display:grid;gap:4px" for="lp-to">Cluster
@@ -887,54 +854,35 @@ function liveOpenPromote(name) {
       <div class="lp-row"><span class="small lp-label" id="lp-orig-label">The original</span>
         <div class="seg" role="radiogroup" aria-labelledby="lp-orig-label">${radio('original', 'keep', 'Keep it running')}${radio('original', 'suspend', 'Pause it')}${radio('original', 'delete', 'Delete it')}</div></div>
       <p class="xsmall muted" style="margin-top:4px">${p.original === 'delete' ? 'Deleted once the copy is there. It can\'t be undone.' : p.original === 'suspend' ? 'Paused, so it doesn\'t run in both places. Resume it here anytime.' : 'It keeps running here too.'}</p>
-      ${toggle('lp-start', 'start', 'Start it there', 'Off creates it there paused, so you can start it when you choose.', p.copyFiles)}
+      ${toggle('lp-start', 'start', 'Start it there', 'Off creates it there paused, so you can start it when you choose.')}
       ${toggle('lp-replace', 'replace', 'Replace the task that is there', 'If that cluster already has a task with this name, it is deleted first.')}
-      ${p.mode === 'move' ? toggle('lp-copy', 'copyFiles', 'Copy its files', debug ? 'Copies this sandbox\'s /workspace across over ax ssh. Both copies run while it copies.' : 'Needs debug access, and this task was started without it.', !debug) : ''}
       ${check}
-      ${p.mode === 'move' && !p.progress ? '<p class="xsmall muted" style="margin-top:8px" id="lp-mode">This <span class="mono">ax</span> has no <span class="mono">ax promote</span>, so Studio sends the task itself through the AX API.</p>' : ''}
       ${p.error ? `<div class="callout warn" role="alert" style="margin-top:12px">${icon('alert')}<div style="overflow-wrap:anywhere;white-space:pre-wrap">${esc(p.error)}</div></div>` : ''}
       <div class="live-cli-wrap" style="margin-top:12px;display:grid;gap:6px">${cli}</div>`;
-    const ready = !same() && !atesBad() && !p.checking && p.check && (p.mode === 'promote' ? p.check.ok : !p.check.error && !((p.check.plan || {}).problems || []).length);
+    const ready = !same() && !atesBad() && !p.checking && p.check && p.check.ok;
     go.disabled = p.sending || !ready;
     go.innerHTML = p.sending ? `${icon('loader', 'sm')}Sending…` : `${icon('cloudUp', 'sm')}Send to ${esc(liveShortCtx(p.to))}`;
-    /* While Studio sends it, Cancel stops the move (what it already did stays done); ax promote can't be stopped. */
+    /* ax promote can't be stopped once it's sending. */
     const cancel = $('#lp-cancel', dlg);
-    if (cancel) {
-      const stoppable = p.sending && p.mode === 'move' && p.progress && p.progress.status === 'running';
-      cancel.disabled = p.sending && !stoppable;
-      cancel.dataset.action = stoppable ? 'live-op-cancel' : 'close-dialog';
-      cancel.textContent = stoppable ? 'Stop' : 'Cancel';
-    }
+    if (cancel) cancel.disabled = p.sending;
   };
-  /* Check first. ax promote --preflight-only reads both clusters and changes nothing; so does Studio's dry run. */
+  /* Check first. ax promote --preflight-only reads both clusters and changes nothing. */
   const runCheck = async () => {
     const seq = ++p.seq;
     p.check = null; p.error = '';
     if (same() || atesBad()) { p.checking = false; paint(); return; }
     p.checking = true;
     paint();
-    if (p.mode === 'promote') {
-      let r;
-      try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, true))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
-      if (seq !== p.seq) return; // the options changed while this check ran
-      /* This ax has no promote: Studio sends the task itself from now on. */
-      if (r.status !== 0 && /unknown command:? "?promote/i.test(text(r))) { LIVE.promoteMissing = true; p.mode = 'move'; runCheck(); return; }
-      p.check = { ok: r.status === 0, text: text(r) };
-    } else {
-      try {
-        p.check = { plan: await studioPost('/api/tasks/move', liveMoveBody(p, true)) };
-      } catch (e) {
-        p.check = { error: e.message };
-      }
-      if (seq !== p.seq) return;
-    }
+    let r;
+    try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, true))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
+    if (seq !== p.seq) return; // the options changed while this check ran
+    p.check = { ok: r.status === 0, text: text(r) };
     p.checking = false;
     paint();
-    const ok = p.mode === 'promote' ? p.check.ok : !p.check.error && !((p.check.plan || {}).problems || []).length;
+    const ok = p.check.ok;
     announce(ok ? `The check passed. You can send it to ${p.to}.` : `The check found a problem with ${p.to}.`);
   };
   const finish = () => {
-    LIVE.opWatch = null;
     closeDialog(true);
     toast(`<span class="mono">${esc(name)}</span> is on ${esc(liveShortCtx(p.to))}${p.toAtespace !== 'default' ? ` (atespace ${esc(p.toAtespace)})` : ''}`, { icon: 'cloudUp' });
     announce(`${name} is on ${p.to}`);
@@ -948,7 +896,7 @@ function liveOpenPromote(name) {
     const t = e.target;
     if (!t) return;
     if (t.id === 'lp-to') { p.to = t.value; runCheck(); }
-    if (t.dataset && t.dataset.lpToggle) { p[t.dataset.lpToggle] = t.checked; if (t.dataset.lpToggle === 'copyFiles' && t.checked) p.start = true; runCheck(); }
+    if (t.dataset && t.dataset.lpToggle) { p[t.dataset.lpToggle] = t.checked; runCheck(); }
   });
   dlg.addEventListener('input', (e) => { if (e.target && e.target.id === 'lp-ates') { p.toAtespace = e.target.value.trim() || 'default'; clearTimeout(p.timer); p.timer = setTimeout(runCheck, 400); } });
   dlg.addEventListener('click', (e) => {
@@ -961,42 +909,18 @@ function liveOpenPromote(name) {
     if (p.sending || $('#lp-go', dlg).disabled) return;
     p.sending = true; p.error = '';
     paint();
-    if (p.mode === 'promote') {
-      let r;
-      try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, false))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
-      if (r.status !== 0) { p.sending = false; p.error = text(r) || 'ax promote failed.'; paint(); return; }
-      /* ax promote can pause the original, not delete it: Studio does that once it's there. */
-      if (p.original === 'delete') {
-        try { await studioApi.taskAction('delete', LIVE.context, LIVE.atespace, name); } catch (e) { toast(`It's on ${esc(p.to)}, but Studio couldn't delete it here: ${esc(e.message)}`, { icon: 'alert', timeout: 9000 }); }
-      }
-      p.sending = false;
-      finish();
-      return;
+    let r;
+    try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, false))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
+    if (r.status !== 0) { p.sending = false; p.error = text(r) || 'ax promote failed.'; paint(); return; }
+    /* ax promote can pause the original, not delete it: Studio does that once it's there. */
+    if (p.original === 'delete') {
+      try { await studioApi.taskAction('delete', LIVE.context, LIVE.atespace, name); } catch (e) { toast(`It's on ${esc(p.to)}, but Studio couldn't delete it here: ${esc(e.message)}`, { icon: 'alert', timeout: 9000 }); }
     }
-    try {
-      const op = await studioPost('/api/tasks/move', liveMoveBody(p, false));
-      liveSetOp(op);
-      p.progress = LIVE.op;
-      LIVE.opWatch = (o) => {
-        if (!o || o.id !== op.id) return;
-        p.progress = o;
-        if (o.status !== 'running') LIVE.opHandled = o.id;
-        if (o.status === 'ok') { p.sending = false; finish(); return; }
-        if (o.status === 'failed') { p.sending = false; p.error = o.canceled ? 'Canceled. What it already did stays done.' : o.error || 'It stopped without saying why.'; LIVE.opWatch = null; }
-        paint();
-      };
-      paint();
-    } catch (e) {
-      p.sending = false; p.error = e.message;
-      paint();
-    }
+    p.sending = false;
+    finish();
   });
   paint();
   if (targets.length) runCheck();
-}
-/** The body of POST /api/tasks/move for what the dialog says. */
-function liveMoveBody(p, dryRun) {
-  return { context: LIVE.context, atespace: LIVE.atespace, name: p.name, toContext: p.to, toAtespace: p.toAtespace || 'default', original: p.original, noResume: !p.start && !p.copyFiles, copyFiles: p.copyFiles, replace: p.replace, dryRun };
 }
 
 const LIVE_NEW_ACTIONS = {
@@ -1096,15 +1020,6 @@ const LIVE_NEW_ACTIONS = {
   'live-new-form': () => { if (LIVE.draft) { LIVE.draft.raw = false; LIVE.draft.error = ''; render({ keepScroll: true }); } },
   'live-new-run': () => liveNewRun(),
   'live-promote': (el) => liveOpenPromote(el.dataset.task),
-  /* After a task move finished in the background: show it where it went. */
-  'live-show-moved': (el) => {
-    const ctx = el.dataset.context;
-    if (ctx && ctx !== LIVE.context && LIVE.contexts.some((c) => c.name === ctx)) liveUseContext(ctx);
-    liveUseAtespace(el.dataset.atespace || 'default');
-    location.hash = `#/task/${encodeURIComponent(el.dataset.task || '')}`;
-    render();
-    liveRefresh(true);
-  },
   'live-new-suggest': (el) => {
     if (!LIVE.draft) return;
     LIVE.draft.goal = el.dataset.text || '';

@@ -41,19 +41,23 @@ const LIVE_CHECK_TITLES = {
   container_engine: 'A container runtime that is running',
   disk_space: 'Free disk space',
 };
+/* What each button for AX on this computer does, shown when you point at it. */
+const LIVE_LOCAL_TIPS = {
+  setup: 'Creates a local cluster on this computer and installs Agent Substrate and AX on it (ax local start).',
+  start: 'Starts the local cluster again (ax local start). Your tasks and their files are kept.',
+  update: 'Runs ax local start again: checks every layer and redeploys AX with the AX images above. Your tasks are kept.',
+  repair: "Runs ax local start: puts the context back in your kubeconfig if it's missing and installs what's missing.",
+  stop: 'Stops the local cluster (ax local stop). Your tasks and their files are kept. Asks first when tasks are running.',
+  remove: "Deletes the local cluster and every task on it (ax local delete). Asks first. It can't be undone.",
+};
 const LIVE_OP_WORDS = {
   'local-up': { doing: 'Setting up AX on this computer', done: 'AX is running on this computer', fail: 'Setup stopped' },
   'local-stop': { doing: 'Stopping AX on this computer', done: 'AX on this computer is stopped', fail: "Couldn't stop AX on this computer" },
   'local-delete': { doing: 'Removing AX from this computer', done: 'AX is removed from this computer', fail: "Couldn't remove AX from this computer" },
 };
-const LIVE_OP_SHORT = { 'local-up': 'Setting up', 'local-stop': 'Stopping', 'local-delete': 'Removing', 'remote-install': 'Installing AX', 'remote-uninstall': 'Removing AX', 'task-move': 'Sending a task' };
-/** Setup, start, stop and remove run on this computer; installs, uninstalls and task moves run elsewhere. */
+const LIVE_OP_SHORT = { 'local-up': 'Setting up', 'local-stop': 'Stopping', 'local-delete': 'Removing', 'remote-install': 'Installing AX', 'remote-uninstall': 'Removing AX' };
+/** Setup, start, stop and remove run on this computer; installs and uninstalls run elsewhere. */
 function liveOpIsLocal(op) { return !!op && /^local-/.test(op.action || ''); }
-/** "gke-team-dev/team" (where a task move sends it) in words: the cluster, and the atespace when it isn't default. */
-function liveOpDest(op) {
-  const [ctx, ates] = String((op && op.to) || '').split('/');
-  return `${liveShortCtx(ctx) || 'the cluster'}${ates && ates !== 'default' ? ` (atespace ${ates})` : ''}`;
-}
 /** An operation in a word or two, for a chip: a setup run says what it was for. */
 function liveOpShort(op) {
   if (op && op.action === 'local-up') return { start: 'Starting', update: 'Updating', repair: 'Repairing' }[op.purpose || LIVE.localVerb] || 'Setting up';
@@ -71,10 +75,6 @@ function liveOpWords(op) {
     const t = liveShortCtx(op.target) || 'the cluster';
     return { doing: `Removing AX from ${t}`, done: `AX is removed from ${t}`, fail: `Couldn't remove AX from ${t}` };
   }
-  if (op && op.action === 'task-move') {
-    const t = liveOpDest(op);
-    return { doing: `Sending ${op.target} to ${t}`, done: `${op.target} is on ${t}`, fail: `Couldn't send ${op.target} to ${t}` };
-  }
   if (op && op.action === 'local-up' && LIVE_LOCAL_VERBS[op.purpose || LIVE.localVerb]) return LIVE_LOCAL_VERBS[op.purpose || LIVE.localVerb];
   return LIVE_OP_WORDS[op && op.action] || { doing: 'Working', done: 'Done', fail: 'It failed' };
 }
@@ -90,7 +90,6 @@ function liveOpCommand(op) {
   if (!op) return '';
   if (op.action === 'remote-install') return `ax --context ${op.target} install`;
   if (op.action === 'remote-uninstall') return `ax --context ${op.target} uninstall`;
-  if (op.action === 'task-move') return `Run ${op.target} on ${liveOpDest(op)}`;
   return { 'local-up': 'ax local start', 'local-stop': 'ax local stop', 'local-delete': 'ax local delete' }[op.action] || '';
 }
 /* What you typed under "AX images", kept in this browser (they are image names, not secrets), as the desktop app does. */
@@ -168,8 +167,8 @@ function liveSetOp(op) {
     step: op.step || (same ? LIVE.op.step : ''), canceled: !!op.canceled,
     /* What a setup run was for (setup, start, update or repair), as the button that started it said. */
     purpose: op.purpose || (same ? LIVE.op.purpose : ''),
-    /* The command's exit status when it failed, and where a task move sends the task. */
-    exitCode: op.exitCode || 0, to: op.to || (same ? LIVE.op.to : ''),
+    /* The command's exit status when it failed. */
+    exitCode: op.exitCode || 0,
   };
   if (op.status === 'running') LIVE.opDismissed = '';
 }
@@ -184,15 +183,12 @@ function liveOnStreamLine(l) {
   if (l.stage) LIVE.op.stage = l.stage;
   if (l.step) LIVE.op.step = l.step;
   if (l.stageStarted) LIVE.op.stageStarted = l.stageStarted;
-  if (LIVE.opWatch) LIVE.opWatch(LIVE.op);
   if (!liveOpPaintTimer) liveOpPaintTimer = setTimeout(() => { liveOpPaintTimer = 0; liveOpPaint(); }, 200);
 }
 function liveOnEnvOp(op) {
   if (!op) return;
   const wasRunning = liveOpRunning();
   liveSetOp(op);
-  /* A dialog that started this operation (Run on another cluster) follows it. */
-  if (LIVE.opWatch) LIVE.opWatch(LIVE.op);
   if (op.status === 'running') { render({ keepScroll: true, background: true }); return; }
   if (wasRunning || op.status === 'failed') liveOpFinished();
 }
@@ -201,15 +197,7 @@ async function liveOpFinished() {
   const words = liveOpWords(op);
   await liveLoadEnv();
   render({ keepScroll: true });
-  /* A dialog that watched the operation already said how it ended. */
-  const told = !!LIVE.opWatch || LIVE.opHandled === op.id;
-  if (op.status === 'ok' && op.action === 'task-move') {
-    if (!told) {
-      const [ctx, ates] = String(op.to || '').split('/');
-      toast(`${esc(words.done)}. <button type="button" class="btn ghost sm" data-action="live-show-moved" data-context="${esc(ctx)}" data-atespace="${esc(ates || 'default')}" data-task="${esc(op.target)}">Show it</button>`, { icon: 'cloudUp', timeout: 12000 });
-    }
-    announce(words.done);
-  } else if (op.status === 'ok') {
+  if (op.status === 'ok') {
     toast(esc(words.done), { icon: 'check' });
     announce(words.done);
     /* Setup finished and there was nothing else to talk to: use AX on this computer. */
@@ -222,7 +210,6 @@ async function liveOpFinished() {
   } else {
     announce(words.fail);
     if (op.action === 'remote-install' || op.action === 'remote-uninstall') toast(`${esc(words.fail)}${op.exitCode ? ` (exit ${esc(op.exitCode)})` : ''}. The Output panel has what <span class="mono">${esc(liveOpCommand(op))}</span> said.`, { icon: 'alert', timeout: 9000 });
-    else if (op.action === 'task-move' && !told) toast(`${esc(words.fail)}: ${esc(op.error || liveLastLine(op.logs.join('\n')))}`, { icon: 'alert', timeout: 9000 });
   }
   /* While you're in another tab, a notification says it finished (if you turned them on). */
   if (typeof liveNotify === 'function' && !op.canceled) liveNotify(op.status === 'ok' ? words.done : words.fail, op.status === 'ok' ? 'AX Studio' : (op.error || 'See Where agents run'), '#/places', `ax-op-${op.id}`);
@@ -415,13 +402,13 @@ function liveLocalHTML() {
     body = '';
   } else if (running) {
     body = `<div style="margin-top:12px">${liveKV([['Cluster', esc(L.name)], ['Kube context', `<span class="mono">${esc(L.context)}</span>`], ['Agent Substrate', esc(L.substrate)], ['AX server', esc(L.server)]])}</div>
-      <div class="btn-row" style="margin-top:14px"><button class="btn sm" data-action="live-local-stop">${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete">${icon('trash', 'sm')}Remove…</button></div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn sm" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}">${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
       <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>ax local status</code></p>`;
   } else if (stopped) {
     const blockers = liveLocalBlockers(false);
     body = `<p class="small" style="margin-top:10px">Start it again. Your tasks and their files are kept.</p>${noAx}
       ${liveImagesHTML()}
-      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="start" id="live-setup-start" data-needs-images data-blocked-other="${LIVE.axError ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>${icon('play', 'sm')}Start</button><button class="btn ghost sm" data-action="live-local-delete">${icon('trash', 'sm')}Remove…</button></div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="start" title="${esc(LIVE_LOCAL_TIPS.start)}" id="live-setup-start" data-needs-images data-blocked-other="${LIVE.axError ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>${icon('play', 'sm')}Start</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
       <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>ax local start</code></p>`;
   } else {
     const blockers = liveLocalBlockers(true);
@@ -431,7 +418,7 @@ function liveLocalHTML() {
         ${LIVE_SETUP_STEPS.map((s) => `<div style="padding:3px 0"><strong style="color:var(--ink)">${esc(s.short)}</strong> <span class="muted">${esc(s.desc)}</span></div>`).join('')}
         <p style="margin-top:8px">It all runs inside your container runtime. Setup may download <span class="mono">kind</span> and <span class="mono">kubectl</span> into <span class="mono">~/.ax/bin</span>, and it adds a context named <span class="mono">ax-local</span> to your kubeconfig. It doesn't ask for your password.</p></div></details>
       ${liveImagesHTML()}
-      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="setup" id="live-setup-start" data-needs-images data-blocked-other="${otherBlock ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>Set up AX on this computer${icon('arrowRight', 'sm')}</button><button class="btn ghost sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>
+      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="setup" title="${esc(LIVE_LOCAL_TIPS.setup)}" id="live-setup-start" data-needs-images data-blocked-other="${otherBlock ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>Set up AX on this computer${icon('arrowRight', 'sm')}</button><button class="btn ghost sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>
       ${!LIVE.canStartLocal ? '<p class="small" style="margin-top:8px">Fix what the checks found, then check again.</p>' : ''}
       <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} The same from the command line: <code>ax local start</code></p>`;
   }
@@ -646,7 +633,7 @@ function liveLocalPlaceHTML() {
   const upBtn = (verb, label, primary) => {
     const blockers = liveLocalBlockers(verb === 'setup');
     const other = verb === 'setup' ? (!LIVE.canStartLocal || !!LIVE.axError) : !!LIVE.axError;
-    return `<button class="btn ${primary ? 'primary ' : ''}sm" data-action="live-setup-start" data-verb="${verb}" id="live-${verb === 'setup' ? 'setup-start' : `local-${verb}`}" data-needs-images data-blocked-other="${other ? 1 : 0}" ${blockers.length || busy ? 'disabled' : ''}>${icon(verb === 'repair' ? 'wrench' : verb === 'update' ? 'refresh' : 'play', 'sm')}${label}</button>`;
+    return `<button class="btn ${primary ? 'primary ' : ''}sm" data-action="live-setup-start" data-verb="${verb}" title="${esc(LIVE_LOCAL_TIPS[verb])}" id="live-${verb === 'setup' ? 'setup-start' : `local-${verb}`}" data-needs-images data-blocked-other="${other ? 1 : 0}" ${blockers.length || busy ? 'disabled' : ''}>${icon(verb === 'repair' ? 'wrench' : verb === 'update' ? 'refresh' : 'play', 'sm')}${label}</button>`;
   };
   let actions = '', cli = 'ax local status', note = '';
   if (localBusy) {
@@ -654,13 +641,13 @@ function liveLocalPlaceHTML() {
   } else if (running) {
     const connect = inUse ? '' : `<button type="button" class="btn sm" data-action="live-use-context" data-context="${esc(L.context)}">${icon('link', 'sm')}Connect</button>`;
     actions = health.ok
-      ? `${connect}${upBtn('update', 'Update', false)}<button class="btn sm" data-action="live-local-stop" ${off}>${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" ${off}>${icon('trash', 'sm')}Remove…</button>`
-      : `${upBtn('repair', 'Repair', true)}${connect}<button class="btn sm" data-action="live-local-stop" ${off}>${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" ${off}>${icon('trash', 'sm')}Remove…</button>`;
+      ? `${connect}${upBtn('update', 'Update', false)}<button class="btn sm" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}" ${off}>${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}" ${off}>${icon('trash', 'sm')}Remove…</button>`
+      : `${upBtn('repair', 'Repair', true)}${connect}<button class="btn sm" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}" ${off}>${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}" ${off}>${icon('trash', 'sm')}Remove…</button>`;
     note = health.ok ? 'Update runs <span class="mono">ax local start</span> again: it checks every layer and redeploys AX with the AX images above.'
       : 'Repair runs <span class="mono">ax local start</span>: it puts the context back in your kubeconfig if it\'s missing, checks every layer and installs what\'s missing.';
   } else if (stopped) {
     cli = 'ax local start';
-    actions = `${upBtn('start', 'Start', true)}<button class="btn ghost sm" data-action="live-local-delete" ${off}>${icon('trash', 'sm')}Remove…</button>`;
+    actions = `${upBtn('start', 'Start', true)}<button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}" ${off}>${icon('trash', 'sm')}Remove…</button>`;
     note = 'Start it again. Your tasks and their files are kept.';
   } else {
     cli = 'ax local start';

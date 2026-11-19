@@ -25,8 +25,9 @@ import (
 	"github.com/agentexecutor/studio/internal/kube"
 )
 
-// engineRunner is a computer where nothing runs. installed says whether the
-// docker command is on PATH.
+// engineRunner is a computer where nothing runs, which ax reports as a host
+// with no container runtime. installed says whether the docker command is on
+// PATH.
 type engineRunner struct{ installed bool }
 
 func (r engineRunner) LookPath(file string) (string, error) {
@@ -36,7 +37,11 @@ func (r engineRunner) LookPath(file string) (string, error) {
 	return "/usr/bin/" + file, nil
 }
 
-func (engineRunner) Run(context.Context, kube.Spec) (kube.Result, error) {
+func (engineRunner) Run(_ context.Context, spec kube.Spec) (kube.Result, error) {
+	if strings.Contains(strings.Join(spec.Args, " "), "local status -o json") {
+		return kube.Result{Stdout: `{"name":"N/A","state":"NotFound","kubeContext":"N/A","substrateStatus":"N/A","axStatus":"N/A",
+			"host":{"runtime":"","error":"no running container engine found"}}`}, nil
+	}
 	return kube.Result{ExitCode: 1}, errors.New("not running")
 }
 

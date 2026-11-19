@@ -106,7 +106,7 @@ func (s *Server) collectTaskChanges(ctx context.Context, kubeCtx, atespace, task
 		return &TaskChangesResponse{TaskName: taskName, Available: false, Reason: "Guest sandbox client is not configured."}, nil
 	}
 
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(ctx, kubeCtx)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to cluster: %w", err)
 	}
@@ -345,7 +345,7 @@ func (s *Server) handleDiscardFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	atespace := nonEmptyStr(strings.TrimSpace(req.Atespace), v1alpha1.DefaultAtespace)
-	client, conn, err := s.dialAXForContext(req.Context)
+	client, conn, err := s.dialAXForContext(r.Context(), req.Context)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return

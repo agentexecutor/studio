@@ -38,6 +38,7 @@ import (
 
 	"github.com/agentexecutor/studio/internal/kube"
 	"github.com/agentexecutor/studio/ux"
+	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 )
 
@@ -165,7 +166,7 @@ func NewServer(opts Options) (*Server, error) {
 
 	resolver := opts.ResolveServer
 	if resolver == nil {
-		resolver = kube.EnsureServerURL
+		resolver = axclient.ServerURL
 	}
 
 	guestExec := opts.GuestExec
@@ -270,7 +271,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/gateways/delete", s.requireMutatingAuth(s.handleDeleteResource("gateway")))
 	mux.HandleFunc("/api/workspaces", s.requireSession(s.handleListWorkspaces))
 	mux.HandleFunc("/api/models", s.requireSession(s.handleListModels))
-	mux.HandleFunc("/api/tasks/move", s.requireMutatingAuth(s.handleTaskMove))
 	mux.HandleFunc("/api/workspaces/delete", s.requireMutatingAuth(s.handleDeleteResource("workspace")))
 	mux.HandleFunc("/api/tasks/suspend", s.requireMutatingAuth(s.handleTaskAction("suspend")))
 	mux.HandleFunc("/api/tasks/resume", s.requireMutatingAuth(s.handleTaskAction("resume")))

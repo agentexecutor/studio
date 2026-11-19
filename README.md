@@ -19,6 +19,7 @@ AX Studio ships as a **single Go binary (`ax-studio`)** with an embedded web fro
 ## Prerequisites
 
 - [`ax` CLI](https://github.com/google/ax) installed via `install.sh` (`~/.ax/bin/ax` and `~/.ax/bin/ax-studio`). No Node.js or Go is needed to run prebuilt releases.
+- An `ax` that has `ax local status -o json` (google/ax#640 or later). Studio is built against one AX version (see `go.mod`); use the `ax` and ax-server of that version or later.
 - For local sandboxes: Docker or rootful Podman on Linux (`>= 6.8` kernel), or OrbStack / Docker Desktop / Colima on macOS.
 
 ## Quick Start

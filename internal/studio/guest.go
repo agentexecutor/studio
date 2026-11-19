@@ -22,10 +22,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/agentexecutor/studio/internal/kube"
+	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 var (
@@ -36,8 +35,10 @@ var (
 // GuestExecFunc executes a non-interactive command inside a task's sandbox actor.
 type GuestExecFunc func(ctx context.Context, atespace, taskName, kubeContext, axNamespace string, command []string, cwd string) (stdout, stderr string, exitCode int, err error)
 
-// ServerResolver resolves the ax-server address of a Kubernetes context.
-type ServerResolver func(opts kube.TunnelOptions) (string, error)
+// ServerResolver resolves the address of the ax-server that opts selects. The
+// default is the ax client's ServerURL, which shares its port-forwards with
+// the ax CLI.
+type ServerResolver func(ctx context.Context, opts axclient.Options) (string, error)
 
 // PushBranchResult reports the pushed branch and commit SHA.
 type PushBranchResult struct {
@@ -47,8 +48,9 @@ type PushBranchResult struct {
 }
 
 // dialAXForContext returns a client for the ax-server of kubeCtx. The caller
-// closes the connection.
-func (s *Server) dialAXForContext(kubeCtx string) (v1alpha1.AXClient, *grpc.ClientConn, error) {
+// closes the connection. Cancelling ctx stops the wait for a port-forward that
+// is still starting; one that is already up is shared and outlives ctx.
+func (s *Server) dialAXForContext(ctx context.Context, kubeCtx string) (v1alpha1.AXClient, *grpc.ClientConn, error) {
 	// Resolving may start a port-forward. Requests for the same context take
 	// turns, so two of them never start two.
 	s.dialMu.Lock()
@@ -59,17 +61,12 @@ func (s *Server) dialAXForContext(kubeCtx string) (v1alpha1.AXClient, *grpc.Clie
 	}
 	s.dialMu.Unlock()
 	lock.Lock()
-	serverURL, err := s.resolveServer(kube.TunnelOptions{Context: kubeCtx, Namespace: s.axNamespace})
+	serverURL, err := s.resolveServer(ctx, axclient.Options{Context: kubeCtx, Namespace: s.axNamespace})
 	lock.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}
-	target := strings.TrimPrefix(strings.TrimPrefix(serverURL, "http://"), "https://")
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, nil, err
-	}
-	return v1alpha1.NewAXClient(conn), conn, nil
+	return axclient.Dial(ctx, axclient.Options{ServerURL: serverURL})
 }
 
 // validateBranchName verifies that branch is a safe Git ref name without traversal or flags.
@@ -143,7 +140,7 @@ func (s *Server) pushSandboxBranch(ctx context.Context, kubeCtx, atespace, taskN
 		atespace = v1alpha1.DefaultAtespace
 	}
 
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(ctx, kubeCtx)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to cluster: %w", err)
 	}

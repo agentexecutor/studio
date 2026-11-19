@@ -15,10 +15,7 @@
 package kube
 
 import (
-	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,67 +44,6 @@ func TestValidateName(t *testing.T) {
 		if err := ValidateName(invalid); err == nil {
 			t.Errorf("ValidateName(%q) expected error, got nil", invalid)
 		}
-	}
-}
-
-func TestValidateContainerHost(t *testing.T) {
-	var warn bytes.Buffer
-	if err := ValidateContainerHost(ContainerHostInfo{
-		KernelVersion: "6.12.5-linuxkit",
-		MemTotalBytes: 8 * 1024 * 1024 * 1024,
-		Rootless:      false,
-	}, false, "darwin", &warn); err != nil || warn.Len() > 0 {
-		t.Fatalf("expected healthy host to pass without warnings, err=%v warn=%q", err, warn.String())
-	}
-
-	if err := ValidateContainerHost(ContainerHostInfo{
-		KernelVersion: "6.6.12",
-		MemTotalBytes: 8 * 1024 * 1024 * 1024,
-	}, false, "linux", nil); err == nil {
-		t.Fatal("expected < 6.8 kernel to fail validation")
-	}
-
-	if err := ValidateContainerHost(ContainerHostInfo{
-		KernelVersion: "6.12.0",
-		Rootless:      true,
-	}, true, "darwin", nil); err == nil {
-		t.Fatal("expected rootless Podman to fail validation")
-	}
-}
-
-func TestKubeconfigContexts(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "config")
-	initial := `apiVersion: v1
-kind: Config
-current-context: local
-contexts:
-- name: local
-  context:
-    cluster: kind-local
-    user: kind-local
-- name: team-gke
-  context:
-    cluster: gke-cluster
-    user: gke-user
-`
-	if err := os.WriteFile(cfgPath, []byte(initial), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("KUBECONFIG", cfgPath)
-	t.Setenv("KUBECONTEXT", "")
-
-	cur, err := CurrentContext("")
-	if err != nil || cur != "local" {
-		t.Fatalf("expected current context 'local', got %q (%v)", cur, err)
-	}
-
-	entries, err := ListContexts("")
-	if err != nil || len(entries) != 2 {
-		t.Fatalf("expected 2 contexts, got %+v (%v)", entries, err)
-	}
-	if !entries[0].Current || entries[0].Cluster != "kind-local" || entries[1].Current {
-		t.Fatalf("expected only context 'local' (cluster kind-local) to be current, got %+v", entries)
 	}
 }
 
@@ -140,12 +76,5 @@ func TestExecInTaskSandboxPositionalArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rec.specs[0].Args, wantArgs) {
 		t.Fatalf("unexpected args:\ngot:  %#v\nwant: %#v", rec.specs[0].Args, wantArgs)
-	}
-}
-
-func TestInspectLocalClusterNotFound(t *testing.T) {
-	st := InspectLocalCluster(context.Background(), &recordingRunner{}, ContainerRuntime{}, "", "ax-system")
-	if st.State != StateNotFound || st.Name != "N/A" || st.KubeContext != "N/A" {
-		t.Fatalf("expected NotFound with Name=N/A and KubeContext=N/A, got %+v", st)
 	}
 }

@@ -94,7 +94,7 @@ func (s *Server) listResources(w http.ResponseWriter, r *http.Request, key strin
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	client, conn, err := s.dialAXForContext(kubeCtx)
+	client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -138,7 +138,7 @@ func (s *Server) handleDeleteResource(kind string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s name: %v", kind, err))
 			return
 		}
-		client, conn, err := s.dialAXForContext(kubeCtx)
+		client, conn, err := s.dialAXForContext(r.Context(), kubeCtx)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return

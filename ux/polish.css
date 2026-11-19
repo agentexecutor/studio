@@ -1792,18 +1792,11 @@ button.station:disabled::after { display: none; }
 .cond-table td.mono { font-size: 11.5px; }
 .cl-empty > div { flex: 1; min-width: 0; }
 
-/* Run on another cluster: the cluster and atespace side by side, the original's fate, and the move's steps as they run. */
+/* Run on another cluster: the cluster and atespace side by side, and the original's fate. */
 .lp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; }
 .lp-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-top: 14px; }
 .lp-row .lp-label { font-weight: 550; color: var(--ink); }
-.move-steps { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
-.move-steps li { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
-.move-steps li .svg { flex: none; margin-top: 2px; }
-.move-steps li.done .svg { color: var(--done); }
-.move-steps li.now .svg { color: var(--key-ink); animation: spin 1s linear infinite; }
-.move-steps li.failed .svg { color: var(--fail); }
 .op-exit { flex: none; padding: 1px 6px; border-radius: 6px; font: 500 11.5px/1.4 var(--font-mono); color: var(--fail); background: var(--fail-soft); }
-@media (prefers-reduced-motion: reduce) { .move-steps li.now .svg { animation: none; } }
 
 /* New task: step spacing, aligned top with the run plan, Customize workspace inside Set up the workspace, and More options. */
 .new-grid { margin-top: 24px; }

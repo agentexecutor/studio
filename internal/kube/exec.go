@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package kube provides self-contained host preflight, kubeconfig context,
-// port-forward tunnel, and allow-listed CLI execution helpers for AX Studio.
+// Package kube runs the ax and kubectl commands AX Studio needs and validates
+// the names it passes to them.
 package kube
 
 import (
@@ -25,19 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"runtime"
-	"strconv"
 	"strings"
 )
-
-const (
-	minKernelMajor       = 6
-	minKernelMinor       = 8
-	minRecommendedMemGiB = 6.0
-)
-
-var kernelVersionRe = regexp.MustCompile(`^(\d+)\.(\d+)`)
 
 // Spec describes an allow-listed external command invocation.
 type Spec struct {
@@ -169,130 +158,24 @@ func ResolveKind(r Runner) (string, error) {
 	return resolveManagedOrPathTool(r, "", "kind")
 }
 
-// ContainerRuntime identifies the host container engine CLI and whether it is Podman.
-type ContainerRuntime struct {
-	Binary   string
-	IsPodman bool
-}
-
-// ContainerHostInfo summarizes the container daemon's underlying Linux host or VM.
-type ContainerHostInfo struct {
-	KernelVersion string
-	MemTotalBytes int64
-	Rootless      bool
-}
-
-// ResolveContainerRuntime locates a running Docker or Podman engine.
-func ResolveContainerRuntime(ctx context.Context, r Runner) (ContainerRuntime, error) {
-	if r == nil {
-		r = OSRunner{}
-	}
-	if explicit := strings.TrimSpace(os.Getenv("CONTAINER_CLI")); explicit != "" {
-		p, err := r.LookPath(explicit)
-		if err != nil {
-			return ContainerRuntime{}, fmt.Errorf("CONTAINER_CLI=%q not found: %w", explicit, err)
-		}
-		res, _ := r.Run(ctx, Spec{Name: p, Args: []string{"--version"}})
-		return ContainerRuntime{
-			Binary:   p,
-			IsPodman: strings.Contains(strings.ToLower(res.Stdout+filepath.Base(p)), "podman"),
-		}, nil
-	}
-
-	for _, candidate := range []struct {
-		name     string
-		isPodman bool
-	}{
-		{name: "docker", isPodman: false},
-		{name: "podman", isPodman: true},
-	} {
-		p, err := r.LookPath(candidate.name)
-		if err != nil {
-			continue
-		}
-		if _, err := r.Run(ctx, Spec{Name: p, Args: []string{"info"}}); err == nil {
-			return ContainerRuntime{Binary: p, IsPodman: candidate.isPodman}, nil
-		}
-	}
-	if runtime.GOOS == "darwin" {
-		return ContainerRuntime{}, errors.New("no running container engine found on macOS: start OrbStack, Docker Desktop, or Colima")
-	}
-	return ContainerRuntime{}, errors.New("no running container engine found: install and start Docker or rootful Podman")
-}
-
-// InspectContainerHost queries Docker or Podman for its Linux kernel, memory, and rootless mode.
-func InspectContainerHost(ctx context.Context, r Runner, rt ContainerRuntime) (ContainerHostInfo, bool) {
-	format := "{{.KernelVersion}}|{{.MemTotal}}|{{.SecurityOptions}}"
-	if rt.IsPodman {
-		format = "{{.Host.Kernel}}|{{.Host.MemTotal}}|{{.Host.Security.Rootless}}"
-	}
-	res, err := r.Run(ctx, Spec{
-		Name: rt.Binary,
-		Args: []string{"info", "--format", format},
-	})
-	if err != nil {
-		return ContainerHostInfo{}, false
-	}
-	line := strings.TrimSpace(res.Stdout)
-	if line == "" {
-		return ContainerHostInfo{}, false
-	}
-	parts := strings.SplitN(line, "|", 3)
-	if len(parts) < 3 {
-		return ContainerHostInfo{}, false
-	}
-	memBytes, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-	secField := strings.ToLower(strings.TrimSpace(parts[2]))
-	rootless := secField == "true" || strings.Contains(secField, "name=rootless")
-	return ContainerHostInfo{
-		KernelVersion: strings.TrimSpace(parts[0]),
-		MemTotalBytes: memBytes,
-		Rootless:      rootless,
-	}, true
-}
-
-// ValidateContainerHost checks kernel (>= 6.8), rootful mode, and memory capacity.
-func ValidateContainerHost(info ContainerHostInfo, isPodman bool, hostOS string, warnOut io.Writer) error {
-	if info.Rootless {
-		if isPodman {
-			return errors.New("rootless Podman is not supported for 'ax local' (requires rootful mode): run 'podman machine stop && podman machine set --rootful && podman machine start' or use Colima / OrbStack / Docker Desktop")
-		}
-		return errors.New("rootless Docker is not supported for 'ax local' (requires rootful mode): use a rootful Docker engine (or Colima / OrbStack / Docker Desktop on macOS)")
-	}
-	if maj, minVer, ok := parseKernelMajorMinor(info.KernelVersion); ok {
-		if maj < minKernelMajor || (maj == minKernelMajor && minVer < minKernelMinor) {
-			vmHint := "upgrade your host Linux kernel to >= 6.8"
-			if hostOS == "darwin" {
-				vmHint = "upgrade your macOS container Linux VM (Colima / OrbStack / Docker Desktop) to a Linux >= 6.8 kernel"
-			}
-			return fmt.Errorf("container host Linux kernel %q is older than %d.%d (required by Agent Substrate's OverlayFS lowerdir+ image cache): %s",
-				info.KernelVersion, minKernelMajor, minKernelMinor, vmHint)
-		}
-	}
-	if info.MemTotalBytes > 0 && warnOut != nil {
-		gib := float64(info.MemTotalBytes) / (1024 * 1024 * 1024)
-		if gib < minRecommendedMemGiB {
-			if hostOS == "darwin" {
-				fmt.Fprintf(warnOut, "==> Warning: container VM has %.1f GiB RAM (< %.1f GiB recommended); increase VM memory (e.g. 'colima stop && colima start --cpu 4 --memory 8 --disk 60 --vm-type vz').\n", gib, minRecommendedMemGiB)
-			} else {
-				fmt.Fprintf(warnOut, "==> Warning: container host has %.1f GiB RAM (< %.1f GiB recommended); pods may stay Pending under load.\n", gib, minRecommendedMemGiB)
+// KubeconfigPaths returns the kubeconfig files contexts are read from:
+// $KUBECONFIG when it is set, otherwise ~/.kube/config.
+func KubeconfigPaths() []string {
+	if p := os.Getenv("KUBECONFIG"); p != "" {
+		var out []string
+		for _, item := range filepath.SplitList(p) {
+			if item != "" {
+				out = append(out, item)
 			}
 		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return []string{filepath.Join(home, ".kube", "config")}
 	}
 	return nil
-}
-
-func parseKernelMajorMinor(raw string) (int, int, bool) {
-	m := kernelVersionRe.FindStringSubmatch(strings.TrimSpace(raw))
-	if len(m) != 3 {
-		return 0, 0, false
-	}
-	maj, err1 := strconv.Atoi(m[1])
-	minVer, err2 := strconv.Atoi(m[2])
-	if err1 != nil || err2 != nil {
-		return 0, 0, false
-	}
-	return maj, minVer, true
 }
 
 // ExecInTaskSandbox executes a non-interactive command inside a debug-enabled

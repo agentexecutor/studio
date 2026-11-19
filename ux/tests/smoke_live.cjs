@@ -166,7 +166,6 @@ function makeBackend(opts) {
       return ok(`task.ax.io/${name} created\n`);
     }
     if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_WORKING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
-    if (a[0] === 'promote' && B.noPromote) return { status: 1, stdout: '', stderr: 'unknown command: promote\n' };
     if (a[0] === 'promote' && a[1] === 'task') {
       const name = a[2], to = a[a.indexOf('--to') + 1], pre = a.includes('--preflight-only') ? ' (preflight only)' : '';
       const src = find(ctx, name);
@@ -228,10 +227,6 @@ function makeBackend(opts) {
         else t.status.state = u.pathname.endsWith('/suspend') ? 'TASK_STATE_SUSPENDED' : 'TASK_STATE_WORKING';
         return answer(200, { ok: true });
       }
-      case '/api/tasks/move':
-        if (body.dryRun) return answer(200, { items: [{ kind: 'gateway', name: 'review-bot-gw', action: 'create' }, { kind: 'workspace', name: 'itsdangerous', action: 'reuse' }, { kind: 'task', name: body.name, action: 'create' }], problems: [], keys: ['anthropic-api-creds'], path: '/workspace', debug: true });
-        B.running = { id: 'op-' + B.posts.length, action: 'task-move', target: body.name, to: `${body.toContext}/${body.toAtespace}`, status: 'running', started: 1 };
-        return answer(202, B.running);
       case '/api/workspaces': return answer(200, { workspaces: B.workspaces });
       case '/api/models': return B.models ? answer(200, { models: B.models }) : answer(501, { error: 'unknown method ListModels', code: 'Unimplemented' });
       case '/api/gateways': return answer(200, { gateways: B.gatewayList });
@@ -1071,47 +1066,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(dialog(p).querySelector('#lp-body').innerHTML, ['Deletes the task <span class="mono">fix-flaky-tests</span> that is already there, then creates it again']);
     never(dialog(p).querySelector('#lp-body').innerHTML, ['id="lp-fix"']);
     if (dialog(p).querySelector('#lp-go').disabled) throw new Error('Send is on');
-  });
-
-  await check("with an ax that has no promote, Studio sends the task itself: a dry run first, then the move, step by step", async () => {
-    api.ACTIONS['close-dialog'] && api.ACTIONS['close-dialog']();
-    B.noPromote = true;
-    api.liveOpenPromote('fix-flaky-tests');
-    await settle();
-    let d = dialog(p);
-    await fire(d, 'change', { target: { id: 'lp-to', value: 'gke-team-dev', dataset: {} } });
-    /* Typing an atespace checks again a moment later; the stubbed page has no timers, so pick the cluster again. */
-    await fire(d, 'input', { target: { id: 'lp-ates', value: 'team' } });
-    await fire(dialog(p), 'change', { target: { id: 'lp-to', value: 'gke-team-dev', dataset: {} } });
-    d = dialog(p);
-    const dry = B.posts.filter((x) => x.path === '/api/tasks/move').pop();
-    if (!dry || !dry.body.dryRun || dry.body.toContext !== 'gke-team-dev' || dry.body.toAtespace !== 'team') throw new Error(JSON.stringify(dry && dry.body));
-    need(d.querySelector('#lp-body').innerHTML, ['This <span class="mono">ax</span> has no <span class="mono">ax promote</span>, so Studio sends the task itself', 'This is what sending it does:',
-      'Creates the Gateway <span class="mono">review-bot-gw</span> there', 'Uses the workspace <span class="mono">itsdangerous</span> that is already there', 'Starts <span class="mono">fix-flaky-tests</span> there',
-      'needs its own copy of the key <span class="mono">anthropic-api-creds</span>', 'id="lp-copy" data-lp-toggle="copyFiles"']);
-    /* Copy its files, and delete the original once it's there. */
-    await fire(d, 'change', { target: { dataset: { lpToggle: 'copyFiles' }, checked: true } });
-    await fire(dialog(p), 'click', { target: { closest: () => ({ dataset: { lpPick: 'original', value: 'delete' } }) } });
-    d = dialog(p);
-    need(d.querySelector('#lp-body').innerHTML, ['copies <span class="mono">/workspace</span> across', 'Deletes <span class="mono">fix-flaky-tests</span> on this cluster once the copy is there', "Deleted once the copy is there. It can't be undone."]);
-    await fire(d.querySelector('#lp-go'), 'click');
-    const sent = B.posts.filter((x) => x.path === '/api/tasks/move').pop();
-    if (sent.body.dryRun || !sent.body.copyFiles || sent.body.original !== 'delete' || sent.body.noResume) throw new Error(JSON.stringify(sent.body));
-    B.push('streamLine', { id: L.op.id, line: '==> Creating the Gateway review-bot-gw on gke-team-dev (atespace team)' });
-    need(dialog(p).querySelector('#lp-body').innerHTML, ['Sending…', 'Creating the Gateway review-bot-gw on gke-team-dev (atespace team)']);
-    /* While it sends, the dialog's Cancel stops the move. */
-    const stop = dialog(p).querySelector('#lp-cancel');
-    if (stop.textContent !== 'Stop' || stop.dataset.action !== 'live-op-cancel') throw new Error(stop.textContent + ' ' + stop.dataset.action);
-    B.tasks['gke-team-dev'].push(taskDoc('fix-flaky-tests', 'WORKING', { goal: 'Fix the flaky tests.' }));
-    B.push('envOp', { id: L.op.id, action: 'task-move', target: 'fix-flaky-tests', to: 'gke-team-dev/team', status: 'ok' });
-    await settle();
-    if (L.context !== 'gke-team-dev' || L.atespace !== 'team') throw new Error('Studio follows it there: ' + L.context + ' ' + L.atespace);
-    need(toasts(p), ['<span class="mono">fix-flaky-tests</span> is on gke-team-dev (atespace team)']);
-    if ((toasts(p).match(/is on gke-team-dev \(atespace team\)/g) || []).length !== 1) throw new Error('one toast, from the dialog: ' + toasts(p).slice(-400));
-    B.running = null; B.noPromote = false; L.op = null;
-    api.ACTIONS['live-atespace-use'] && api.ACTIONS['live-atespace-use']({ dataset: { value: 'default' } });
-    api.ACTIONS['live-use-context']({ dataset: { context: 'ax-local' } });
-    await settle();
   });
 
   // ---------- Where agents run ----------
