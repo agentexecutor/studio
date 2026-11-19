@@ -1,5 +1,7 @@
-node_modules/
-out/
-dist/
-__pycache__/
-/index.html
+/node_modules/
+/bin/
+/dist/
+/out/
+/internal/studio/dist/*
+!/internal/studio/dist/.gitkeep
+.DS_Store

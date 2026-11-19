@@ -1,0 +1,320 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* =========================================================================
+   Axel (official AX mascot) — state-reactive animations + confetti
+   Coordinates match axel.svg's 550×600 viewBox (transform-box: view-box).
+   ========================================================================= */
+.axo {
+  width: var(--axo-size, 112px);
+  height: auto;
+  aspect-ratio: 550 / 600;
+  overflow: visible;
+  display: block;
+  flex: none;
+}
+.axo * { transform-box: view-box; }
+
+/* Line styling matched to Axel's comic ink weight */
+.axo .axo-ink-arc { fill: none; stroke: #0a0b0e; stroke-width: 12; stroke-linecap: round; stroke-linejoin: round; }
+.axo .axo-ink-thin { fill: none; stroke: #0a0b0e; stroke-width: 9.5; stroke-linecap: round; stroke-linejoin: round; }
+.axo .axo-accent-arc { fill: none; stroke: #e4769d; stroke-width: 9; stroke-linecap: round; }
+.axo .axo-pill { fill: #ffffff; stroke: #0a0b0e; stroke-width: 9; }
+.axo .axo-pill-tail { fill: #ffffff; stroke: #0a0b0e; stroke-width: 9; stroke-linejoin: round; }
+.axo .axo-pill-stroke { fill: #ffffff; stroke: none; }
+.axo .axo-q { font: 700 58px/1 var(--font-sans, system-ui, sans-serif); fill: #e4769d; }
+.axo .axo-z text { font: 700 48px/1 var(--font-sans, system-ui, sans-serif); fill: #e4769d; }
+.axo .axo-z .z2 { font-size: 58px; }
+.axo .axo-z .z3 { font-size: 70px; }
+
+/* Subtle idle swim + natural blink + pointer eye-look */
+.axo .axo-root { transform-origin: 275px 310px; animation: axelFloat 4.2s ease-in-out infinite; }
+.axo .axo-eye { animation: axelBlink 5.4s infinite; }
+.axo .axo-eye + .axo-eye { animation-delay: .05s; }
+.axo .axo-look { transform: translate(var(--lx, 0px), var(--ly, 0px)); transition: transform 160ms ease-out; }
+
+@keyframes axelFloat {
+  0%, 100% { transform: translateY(0) rotate(-.8deg); }
+  50% { transform: translateY(-9px) rotate(1deg); }
+}
+@keyframes axelBlink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  95.5% { transform: scaleY(.08); }
+}
+
+/* Wave: cheerful greeting wiggle + paw motion arcs */
+.axo--wave .axo-root { animation: axelWave 2.2s ease-in-out infinite; }
+@keyframes axelWave {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-10px) rotate(3deg); }
+}
+.axo--wave .axo-wave-lines path { animation: axelArc 1.4s ease-in-out infinite; }
+.axo--wave .axo-wave-lines .s2 { animation-delay: .2s; }
+@keyframes axelArc { 0%, 100% { opacity: .25; } 50% { opacity: .95; } }
+
+/* Waiting: attentive bob + floating question badge */
+.axo--waiting .axo-bubble { transform-origin: 430px 40px; animation: axelBubble 2.2s ease-in-out infinite; }
+@keyframes axelBubble {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-10px) rotate(-4deg); }
+}
+
+/* Working: focused buoyant swim + twinkling sparkles */
+.axo--working .axo-root { animation: axelWork 2.4s ease-in-out infinite; }
+@keyframes axelWork {
+  0%, 100% { transform: translateY(0) rotate(-.5deg); }
+  50% { transform: translateY(-11px) rotate(1.5deg); }
+}
+.axo--working .axo-look { transform: translate(calc(var(--lx, 0px) * .5 - 4px), calc(5px + var(--ly, 0px) * .4)); }
+.axo--working .axo-sparks path { transform-box: fill-box; transform-origin: center; animation: axelSpark 1.8s ease-in-out infinite; }
+.axo--working .axo-sparks .s2 { animation-delay: .6s; }
+.axo--working .axo-sparks .s3 { animation-delay: 1.2s; }
+@keyframes axelSpark {
+  0%, 100% { opacity: 0; transform: scale(.35) rotate(0); }
+  50% { opacity: 1; transform: scale(1) rotate(35deg); }
+}
+
+/* Thinking: curious tilt + upward glance + rising thought dots */
+.axo--thinking .axo-look { transform: translate(8px, -7px); }
+.axo--thinking .axo-root { animation: axelTilt 3.2s ease-in-out infinite; }
+@keyframes axelTilt {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: translateY(-6px) rotate(2.5deg); }
+}
+.axo--thinking .axo-dots circle { transform-box: fill-box; transform-origin: center; animation: axelDot 1.6s ease-in-out infinite; }
+.axo--thinking .axo-dots circle:nth-child(2) { animation-delay: .22s; }
+.axo--thinking .axo-dots circle:nth-child(3) { animation-delay: .44s; }
+@keyframes axelDot {
+  0%, 100% { opacity: .45; transform: scale(.86); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+/* Blocked: holds guardrail shield gently */
+.axo--blocked .axo-shield { transform-origin: 98px 418px; animation: axelShield 2.4s ease-in-out infinite; }
+@keyframes axelShield {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Done: joyful hop + confetti */
+.axo--done .axo-root { transform-origin: 275px 520px; animation: axelHop 1.7s cubic-bezier(.34, 1.36, .5, 1) infinite; }
+@keyframes axelHop {
+  0%, 80%, 100% { transform: translateY(0) scale(1, 1); }
+  14% { transform: translateY(4px) scale(1.04, .95); }
+  40% { transform: translateY(-34px) scale(.97, 1.04) rotate(2deg); }
+  64% { transform: translateY(0) scale(1.03, .97); }
+}
+.axo--done .cf { transform-box: fill-box; transform-origin: center; animation: axelConfetti 1.7s ease-in-out infinite; }
+.axo--done .cf:nth-child(odd) { animation-delay: .25s; }
+.axo--done .cf:nth-child(3n) { animation-delay: .5s; }
+@keyframes axelConfetti {
+  0%, 100% { transform: translateY(0) rotate(0); opacity: 1; }
+  50% { transform: translateY(14px) rotate(80deg); opacity: .7; }
+}
+
+/* Failed: gentle slow bob + sweat drop */
+.axo--failed .axo-root { animation-duration: 5.4s; }
+.axo--failed .axo-sweat { animation: axelSweat 2.6s ease-in infinite; }
+@keyframes axelSweat {
+  0%, 60% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(22px); }
+}
+
+/* Sleeping: slow peaceful drift + rising zzz */
+.axo--sleeping .axo-root { animation-duration: 5.8s; }
+.axo--sleeping .axo-z text { animation: axelZ 3.6s ease-in-out infinite; opacity: 0; }
+.axo--sleeping .axo-z .z2 { animation-delay: .9s; }
+.axo--sleeping .axo-z .z3 { animation-delay: 1.8s; }
+@keyframes axelZ {
+  0% { opacity: 0; transform: translate(0, 16px); }
+  30% { opacity: .95; }
+  100% { opacity: 0; transform: translate(16px, -24px); }
+}
+
+/* Building (setup): steady bob + turning gear */
+.axo--building .axo-root { animation: axelWork 1.5s ease-in-out infinite; }
+.axo--building .axo-gear { transform-origin: 98px 414px; animation: axelSpin 5s linear infinite; }
+@keyframes axelSpin { to { transform: rotate(360deg); } }
+
+/* Click poke */
+.axo.axo-poke .axo-root { transform-origin: 275px 520px; animation: axelHop .78s cubic-bezier(.34, 1.36, .5, 1) 1; }
+button.axo-btn { display: inline-flex; padding: 0; border-radius: 50%; cursor: pointer; background: none; }
+button.axo-btn:focus-visible { box-shadow: var(--ring); }
+
+/* Tail wag. The tail is the official art clipped to its outline and pivots at the hip, behind the body.
+   Idle: a quick swish rides along with the 3rd and 9th blink of every 10 (blinks are 5.4 s apart), so it
+   happens about twice a minute at uneven intervals. Click: a longer, happier wag on an outer group. */
+.axo .axo-tail, .axo .axo-tail-wag { transform-origin: 392px 430px; }
+.axo .axo-tail { animation: axelTailIdle 54s ease-in-out infinite; }
+.axo--sleeping .axo-tail, .axo--failed .axo-tail { animation: none; }
+.axo.axo-wag .axo-tail-wag { animation: axelTailWag .96s cubic-bezier(.36, .07, .19, .97) 1; }
+@keyframes axelTailIdle {
+  0%, 29.2%, 30.65%, 89.2%, 90.65%, 100% { transform: rotate(0deg); }
+  29.6%, 89.6% { transform: rotate(-5deg); }
+  29.95%, 89.95% { transform: rotate(4deg); }
+  30.3%, 90.3% { transform: rotate(-2deg); }
+}
+@keyframes axelTailWag {
+  0%, 100% { transform: rotate(0deg); }
+  14% { transform: rotate(-7deg); }
+  32% { transform: rotate(6.5deg); }
+  50% { transform: rotate(-4.5deg); }
+  67% { transform: rotate(3deg); }
+  83% { transform: rotate(-1.5deg); }
+}
+
+/* ---------- Easter egg: Axel's tricks (axoTap in mascot.js) ----------
+   Click 1–2: tail wag. Then, one per click: gill wiggle · wink · bubble · look around · blush · backflip · nap.
+   Tricks animate .axo-act (inside the idle float), so the float never jumps. Each lasts about a second. */
+.axo .axo-act { transform-origin: 275px 330px; }
+/* Gills flap with a vertical shear anchored on their root line (x = 114 / 431): the tips lift and dip while the root
+   stays put, so the cut along the ink never opens. */
+.axo .axo-gill-l { transform-origin: 114px 160px; }
+.axo .axo-gill-r { transform-origin: 431px 165px; }
+.axo .tf-spark { fill: #38bdf8; }
+.axo .tf-o { fill: #0a0b0e; }
+.axo .tf-bub circle { fill: url(#axel-bubble); stroke: #38bdf8; stroke-width: 5; }
+.axo .tf-bub path { fill: none; stroke: #ffffff; stroke-width: 4; stroke-linecap: round; }
+.axo .tf-blush { fill: url(#axel-blush); }
+.axo .tf-z text { font: 700 48px/1 var(--font-sans, system-ui, sans-serif); fill: #e4769d; }
+.axo .tf-z .z2 { font-size: 58px; }
+.axo .tf-z .z3 { font-size: 70px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 1 · Gill wiggle: the six gills flutter from their roots like ears, the right side a beat behind. */
+  .axo.axo-trick--gills .axo-gill-l { animation: axoGillL 1s cubic-bezier(.36, .07, .19, .97) both; }
+  .axo.axo-trick--gills .axo-gill-r { animation: axoGillR 1s cubic-bezier(.36, .07, .19, .97) .07s both; }
+  .axo.axo-trick--gills .axo-act { animation: axoBob 1s ease-in-out both; }
+  /* 2 · Wink: one eye closes, the head tips toward it, a sparkle. */
+  .axo.axo-trick--wink .axo-eye + .axo-eye { animation: axoWink .95s ease-in-out both; }
+  .axo.axo-trick--wink .axo-act { animation: axoTip .95s ease-in-out both; }
+  .axo.axo-trick--wink .tf-spark { transform-box: fill-box; transform-origin: center; animation: axoSpark .95s ease-out both; }
+  /* 3 · Bubble: an "o" mouth, two bubbles drift up and pop. */
+  .axo.axo-trick--bubble .axo-face > use { animation: axoMouthOff 1.5s linear both; }
+  .axo.axo-trick--bubble .tf-o { transform-box: fill-box; transform-origin: center; animation: axoO 1.5s ease-in-out both; }
+  .axo.axo-trick--bubble .tf-bub { transform-box: fill-box; transform-origin: center; animation: axoBubble 1.4s cubic-bezier(.3, .6, .4, 1) .1s both; }
+  .axo.axo-trick--bubble .tf-bub.b2 { animation-delay: .28s; animation-duration: 1.2s; }
+  /* 4 · Look around: eyes left, right, back to you. */
+  .axo.axo-trick--look .axo-look { animation: axoLook 1.25s ease-in-out both; }
+  .axo.axo-trick--look .axo-act { animation: axoTurn 1.25s ease-in-out both; }
+  /* 5 · Blush: cheeks warm, eyes squint, a shy sway. */
+  .axo.axo-trick--blush .tf-blush { animation: axoBlush 1.5s ease-in-out both; }
+  .axo.axo-trick--blush .axo-eye { animation: axoSquint 1.5s ease-in-out both; }
+  .axo.axo-trick--blush .axo-act { animation: axoShy 1.5s ease-in-out both; }
+  /* 6 · Backflip: squash, flip, land with a happy face (the tail wags on landing). */
+  .axo.axo-trick--flip .axo-act { animation: axoFlip 1.1s cubic-bezier(.3, .7, .3, 1) both; }
+  .axo.axo-trick--flip .axo-look { animation: axoEyesOff 1.1s linear both; }
+  .axo.axo-trick--flip .tf-happy { animation: axoEyesOn 1.1s linear both; }
+  /* 7 · Nap: eyes close, gills breathe slowly, three z's drift up, then he wakes with a stretch. */
+  .axo.axo-trick--nap .axo-eye { animation: axoNapEyes 3.8s ease-in-out both; }
+  .axo.axo-trick--nap .axo-look { animation: axoNapLook 3.8s linear both; }
+  .axo.axo-trick--nap .tf-sleep { animation: axoNapArcs 3.8s linear both; }
+  .axo.axo-trick--nap .axo-gill-l { animation: axoBreatheL 1.9s ease-in-out 2 both; }
+  .axo.axo-trick--nap .axo-gill-r { animation: axoBreatheR 1.9s ease-in-out 2 both; }
+  .axo.axo-trick--nap .axo-act { animation: axoNap 3.8s ease-in-out both; }
+  .axo.axo-trick--nap .tf-z text { animation: axelZ 2.4s ease-in-out .3s both; }
+  .axo.axo-trick--nap .tf-z .z2 { animation-delay: .9s; }
+  .axo.axo-trick--nap .tf-z .z3 { animation-delay: 1.5s; }
+}
+@keyframes axoGillL {
+  0%, 100% { transform: skewY(0); }
+  12% { transform: skewY(10deg); } 28% { transform: skewY(-5deg); } 44% { transform: skewY(7deg); }
+  60% { transform: skewY(-3deg); } 76% { transform: skewY(3.5deg); } 90% { transform: skewY(-1deg); }
+}
+@keyframes axoGillR {
+  0%, 100% { transform: skewY(0); }
+  12% { transform: skewY(-10deg); } 28% { transform: skewY(5deg); } 44% { transform: skewY(-7deg); }
+  60% { transform: skewY(3deg); } 76% { transform: skewY(-3.5deg); } 90% { transform: skewY(1deg); }
+}
+@keyframes axoBob { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-7px); } 62% { transform: translateY(2px); } }
+@keyframes axoWink { 0%, 100% { transform: scaleY(1); } 20%, 62% { transform: scaleY(.08); } }
+@keyframes axoTip { 0%, 100% { transform: rotate(0); } 24%, 60% { transform: rotate(5deg) translateY(-3px); } }
+@keyframes axoSpark {
+  0%, 18% { opacity: 0; transform: scale(.2) rotate(0); }
+  46% { opacity: 1; transform: scale(1.1) rotate(45deg); }
+  100% { opacity: 0; transform: scale(.6) rotate(90deg); }
+}
+@keyframes axoMouthOff { 0%, 4% { opacity: 1; } 10%, 76% { opacity: 0; } 86%, 100% { opacity: 1; } }
+@keyframes axoO { 0% { opacity: 0; transform: scale(.3); } 10%, 72% { opacity: 1; transform: scale(1); } 86%, 100% { opacity: 0; transform: scale(.4); } }
+@keyframes axoBubble {
+  0% { opacity: 0; transform: translate(-14px, 18px) scale(.25); }
+  18% { opacity: 1; transform: translate(0, 0) scale(.8); }
+  80% { opacity: 1; transform: translate(34px, -130px) scale(1.15); }
+  92% { opacity: .85; transform: translate(38px, -146px) scale(1.4); }
+  100% { opacity: 0; transform: translate(40px, -152px) scale(1.65); }
+}
+@keyframes axoLook {
+  0%, 100% { transform: translate(var(--lx, 0px), var(--ly, 0px)); }
+  18%, 40% { transform: translate(-12px, -2px); }
+  60%, 82% { transform: translate(12px, -3px); }
+}
+@keyframes axoTurn { 0%, 100% { transform: rotate(0); } 18%, 40% { transform: rotate(-3deg); } 60%, 82% { transform: rotate(3deg); } }
+@keyframes axoBlush { 0% { opacity: 0; } 24%, 76% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes axoSquint { 0%, 100% { transform: scaleY(1); } 22%, 76% { transform: scaleY(.5); } }
+@keyframes axoShy {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-3deg); } 40% { transform: rotate(2.5deg); } 60% { transform: rotate(-2deg); } 80% { transform: rotate(1deg); }
+}
+@keyframes axoFlip {
+  0% { transform: translateY(0) rotate(0) scale(1, 1); }
+  14% { transform: translateY(10px) rotate(0) scale(1.06, .92); }
+  50% { transform: translateY(-78px) rotate(-200deg) scale(.97, 1.03); }
+  76% { transform: translateY(0) rotate(-360deg) scale(1.05, .94); }
+  88% { transform: translateY(-6px) rotate(-360deg) scale(.99, 1.01); }
+  100% { transform: translateY(0) rotate(-360deg) scale(1, 1); }
+}
+@keyframes axoEyesOff { 0%, 70% { opacity: 1; } 71%, 100% { opacity: 0; } }
+@keyframes axoEyesOn { 0%, 70% { opacity: 0; } 71%, 100% { opacity: 1; } }
+@keyframes axoNapEyes { 0%, 100% { transform: scaleY(1); } 8%, 92% { transform: scaleY(.08); } }
+@keyframes axoNapLook { 0%, 8% { opacity: 1; } 9%, 91% { opacity: 0; } 92%, 100% { opacity: 1; } }
+@keyframes axoNapArcs { 0%, 8% { opacity: 0; } 9%, 91% { opacity: 1; } 92%, 100% { opacity: 0; } }
+@keyframes axoBreatheL { 0%, 100% { transform: skewY(0); } 50% { transform: skewY(-4deg); } }
+@keyframes axoBreatheR { 0%, 100% { transform: skewY(0); } 50% { transform: skewY(4deg); } }
+@keyframes axoNap {
+  0%, 100% { transform: translateY(0) rotate(0) scale(1, 1); }
+  14%, 84% { transform: translateY(8px) rotate(-3deg) scale(1, 1); }
+  50% { transform: translateY(12px) rotate(-3deg) scale(1, 1); }
+  93% { transform: translateY(-5px) rotate(0) scale(.98, 1.03); }
+}
+
+/* Reduced motion: each trick is a still pose for its moment, with no movement. */
+@media (prefers-reduced-motion: reduce) {
+  .axo.axo-trick--gills .axo-gill-l { transform: skewY(7deg); }
+  .axo.axo-trick--gills .axo-gill-r { transform: skewY(-7deg); }
+  .axo .axo-look { transition: none; }
+  .axo.axo-trick--wink .axo-eye + .axo-eye { transform: scaleY(.08); }
+  .axo.axo-trick--bubble .axo-face > use { opacity: 0; }
+  .axo.axo-trick--look .axo-look { transform: translate(-10px, -2px); }
+  .axo.axo-trick--blush .axo-eye { transform: scaleY(.5); }
+  .axo.axo-trick--flip .axo-look, .axo.axo-trick--nap .axo-look { opacity: 0; }
+}
+
+/* Confetti burst */
+.confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 200; overflow: hidden; }
+.confetti-layer i {
+  position: absolute; width: 8px; height: 5px; border-radius: 2px;
+  transform: translate(-50%, -50%);
+  animation: confettiFly 1.25s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+@keyframes confettiFly {
+  0% { transform: translate(-50%, -50%) scale(.6) rotate(0); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy) + 130px)) scale(1) rotate(var(--r)); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .axo *, .axo .axo-root, .axo .axo-eye { animation: none !important; }
+}

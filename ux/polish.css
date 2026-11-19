@@ -1,0 +1,1881 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* =========================================================================
+   AX Studio v5 — "Light through water" polish layer (loaded last)
+   Depth comes from light, translucency and hairlines, never card drop shadows.
+   A spring-cerulean → spring-teal → gill-rose accent is used sparingly: the
+   active nav mark, progress rails, the greeting, focus. Geist only. Zero purple
+   in dark mode. Every motion respects prefers-reduced-motion.
+   ========================================================================= */
+
+/* ---------- 1. Tokens ---------- */
+:root {
+  --aqua: #0D9488;
+  --aqua-soft: rgba(13, 148, 136, .10);
+  --glow-a: rgba(14, 165, 233, .12);
+  --glow-b: rgba(20, 184, 166, .09);
+  --glow-c: rgba(228, 118, 157, .085);
+  --grad-brand: linear-gradient(118deg, #0279B8 0%, #0D8A80 50%, #C9567F 100%);
+  --grad-rail: linear-gradient(90deg, #0EA5E9 0%, #14B8A6 100%);
+  --grad-avatar: linear-gradient(135deg, #0369A1 0%, #0F766E 100%);
+  --glass: color-mix(in srgb, var(--bg) 70%, transparent);
+  --glass-2: color-mix(in srgb, var(--bg) 86%, transparent);
+  --line-soft: rgba(11, 18, 25, .055);
+  --hl: inset 0 1px 0 rgba(255, 255, 255, .8);
+  --hl-btn: inset 0 1px 0 rgba(255, 255, 255, .16);
+  --r-card: 16px;
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--key) 75%, transparent);
+}
+html[data-theme="dark"] {
+  --bg: #070B11;
+  --bg-subtle: #0A1018;
+  --surface: #0F1722;
+  --surface-2: #172231;
+  --line: rgba(196, 222, 246, .085);
+  --line-strong: rgba(196, 222, 246, .165);
+  --line-soft: rgba(196, 222, 246, .05);
+  --aqua: #2DD4BF;
+  --aqua-soft: rgba(45, 212, 191, .12);
+  --glow-a: rgba(56, 189, 248, .14);
+  --glow-b: rgba(45, 212, 191, .10);
+  --glow-c: rgba(240, 165, 191, .075);
+  --grad-brand: linear-gradient(118deg, #5CCBF9 0%, #2DD4BF 50%, #F4AFC8 100%);
+  --grad-rail: linear-gradient(90deg, #38BDF8 0%, #2DD4BF 100%);
+  --hl: inset 0 1px 0 rgba(255, 255, 255, .05);
+  --hl-btn: inset 0 1px 0 rgba(255, 255, 255, .7);
+}
+
+/* ---------- 2. Base ---------- */
+::selection { background: color-mix(in srgb, var(--key) 24%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+/* Page titles are a third smaller than the prototype's: a page's title is 21 px at full width, a task's 19 px, the
+   setup card's 24 px, and the display title (Home, the setup and journey heads) 28 px. */
+h1, .display { font-weight: 650; letter-spacing: -0.022em; }
+.h-display-sm { font-weight: 650; letter-spacing: -0.026em; }
+.lede { text-wrap: pretty; }
+h1, h2, .h-display-sm { text-wrap: balance; }
+
+/* Light from the surface of the spring: soft caustic glows at the top of every page. */
+.main::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 960px;
+  z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(860px 500px at 94% -8%, var(--glow-a), transparent 64%),
+    radial-gradient(660px 420px at 60% -20%, var(--glow-b), transparent 62%),
+    radial-gradient(520px 420px at 106% 44%, var(--glow-c), transparent 66%);
+}
+
+/* ---------- 3. Sidebar ---------- */
+.sidebar {
+  background:
+    radial-gradient(380px 240px at -10% -6%, var(--glow-a), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-subtle) 94%, var(--bg)) 0%, var(--bg-subtle) 60%);
+  border-right-color: var(--line);
+}
+.brand-name { letter-spacing: -0.024em; }
+.nav a { border-radius: 9px; transition: color var(--dur-1), background var(--dur-1), box-shadow var(--dur-2); }
+.nav a .svg { transition: color var(--dur-1); }
+.nav a:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.nav a[aria-current="page"] {
+  background: var(--glass-2);
+  box-shadow: var(--hl), 0 0 0 1px var(--line);
+}
+html[data-theme="dark"] .nav a[aria-current="page"] { background: var(--surface); }
+.nav a[aria-current="page"] .svg { color: var(--key-ink); }
+.nav a[aria-current="page"]:not(.nav-task)::before {
+  content: "";
+  position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--grad-brand);
+}
+.nav-label { letter-spacing: .08em; }
+.nav-task .bead { transition: transform var(--dur-2) var(--spring); }
+.nav-task:hover .bead { transform: scale(1.12); }
+.health-card {
+  background: var(--glass-2);
+  border: 1px solid var(--line);
+  box-shadow: var(--hl);
+  border-radius: 12px;
+}
+.health-card:hover { background: var(--bg); border-color: var(--line-strong); }
+.avatar { color: #fff; background: var(--grad-avatar); border: 0; letter-spacing: .02em; }
+
+/* ---------- 4. Top bar ---------- */
+.topbar {
+  background: color-mix(in srgb, var(--bg) 66%, transparent);
+  -webkit-backdrop-filter: saturate(170%) blur(16px);
+  backdrop-filter: saturate(170%) blur(16px);
+  border-bottom-color: var(--line-soft);
+}
+.search-trigger {
+  border-radius: 10px;
+  background: var(--glass-2);
+  box-shadow: var(--hl);
+}
+.search-trigger:hover { background: var(--bg); border-color: color-mix(in srgb, var(--key) 38%, var(--line-strong)); }
+.round-btn { border-radius: 10px; transition: background var(--dur-1), color var(--dur-1), transform var(--dur-2) var(--spring); }
+.round-btn:hover { transform: translateY(-1px); }
+
+/* ---------- 5. Buttons ---------- */
+.btn {
+  border-radius: 10px;
+  font-weight: 550;
+  transition: background var(--dur-1), border-color var(--dur-1), color var(--dur-1), transform var(--dur-1), box-shadow var(--dur-2), filter var(--dur-1);
+}
+.btn:not(.primary):not(.ghost):not(.danger) { background: var(--glass-2); box-shadow: var(--hl); }
+.btn:not(.primary):not(.ghost):not(.danger):hover { background: var(--bg); border-color: color-mix(in srgb, var(--ink) 24%, transparent); }
+/* The primary button (black ink, white in dark mode) is defined once, in styles.css §Buttons. */
+.btn:active { transform: translateY(.5px) scale(.985); }
+.btn.lg { border-radius: 12px; }
+.btn.sm { border-radius: 8px; }
+.btn .svg { transition: transform var(--dur-2) var(--spring); }
+.btn:hover .svg:last-child:not(:first-child) { transform: translateX(2px); }
+
+/* ---------- 6. Chips, inputs, switches ---------- */
+.chip { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--muted)) 15%, transparent); }
+.input, .textarea { border-radius: 10px; background: var(--glass-2); }
+.input:focus, .textarea:focus { background: var(--bg); box-shadow: 0 0 0 4px var(--key-soft); }
+.seg { border-radius: 11px; }
+.seg [aria-pressed="true"], .seg [aria-checked="true"], .seg [aria-selected="true"] { box-shadow: var(--hl), 0 0 0 1px var(--line); }
+
+/* ---------- 7. Home: hero ---------- */
+.stage { padding: 18px 0 30px; }
+.stage h1 { font-size: clamp(22px, 1.95vw, 28px); letter-spacing: -0.03em; line-height: 1.14; }
+.stage h1 em {
+  background: var(--grad-brand);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  padding-right: .05em;
+}
+.stage .lede { margin-top: 10px; font-size: 15px; }
+.quick {
+  margin-top: 22px;
+  padding: 6px 6px 6px 16px;
+  border-radius: 14px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: var(--hl);
+}
+.quick:focus-within { border-color: color-mix(in srgb, var(--key) 55%, transparent); box-shadow: var(--hl), 0 0 0 4px var(--key-soft); }
+.quick input { height: 40px; font-size: 14.5px; }
+.quick .btn.primary { height: 38px; padding: 0 16px; border-radius: 10px; }
+.agent-pick { border-radius: 9px; }
+.speech {
+  border-radius: 16px 16px 5px 16px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border-color: var(--line);
+  box-shadow: var(--hl);
+}
+.spring-pool::before {
+  content: "";
+  position: absolute; inset: -34px -40px -26px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--key) 14%, transparent), transparent 74%);
+  pointer-events: none; z-index: 0;
+}
+
+/* Living water: a slow caustic shimmer drifts across the spring illustration behind the Home hero. */
+.sanctuary-atmo { overflow: hidden; }
+/* v15: the stream illustration is 20% darker against the white page. brightness() then contrast() keeps white white
+   and moves every other tone 20% further from it, so only the stream deepens; the page stays white. Dark mode is unchanged. */
+html:not([data-theme="dark"]) .sanctuary-atmo { filter: saturate(1.18) brightness(.86) contrast(1.42); }
+html:not([data-theme="dark"]) .setup-atmo { filter: brightness(.858) contrast(1.4); }
+/* v15: on regular pages (everything but Home), the top-right stream is easier to see. The picture sits lower, so the
+   water and stones fill the corner instead of the sky, at 60% instead of 30%. Light mode, wider than a phone. */
+@media (min-width: 681px) {
+  html:not([data-theme="dark"]) .main:not(:has(.stage)) .sanctuary-atmo { opacity: .6; background-position: right 85%; }
+}
+.main:has(.stage) .sanctuary-atmo::after {
+  content: "";
+  position: absolute; inset: -25%;
+  background:
+    radial-gradient(46px 24px at 18% 32%, rgba(255, 255, 255, .62), transparent 72%),
+    radial-gradient(70px 30px at 58% 54%, rgba(255, 255, 255, .5), transparent 72%),
+    radial-gradient(38px 22px at 82% 22%, rgba(255, 255, 255, .58), transparent 72%),
+    radial-gradient(56px 26px at 36% 78%, rgba(255, 255, 255, .46), transparent 72%);
+  background-size: 300px 190px;
+  mix-blend-mode: soft-light;
+  opacity: .9;
+  pointer-events: none;
+}
+html[data-theme="dark"] .main:has(.stage) .sanctuary-atmo::after { mix-blend-mode: screen; opacity: .18; }
+@media (prefers-reduced-motion: no-preference) {
+  .main:has(.stage) .sanctuary-atmo::after { animation: caustics 26s ease-in-out infinite alternate; }
+  @keyframes caustics {
+    0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+    50% { transform: translate3d(-46px, 18px, 0) rotate(1.2deg); }
+    100% { transform: translate3d(-90px, -12px, 0) rotate(-.6deg); }
+  }
+}
+
+/* The spring illustration owns more of the hero's right side; the greeting side stays clean. */
+.main:has(.stage) .sanctuary-atmo {
+  width: min(1180px, 86%);
+  height: 440px;
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .22) 30%, rgba(0, 0, 0, .86) 56%, #000 80%),
+    linear-gradient(180deg, #000 0%, rgba(0, 0, 0, .86) 52%, transparent 100%);
+  mask-image:
+    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .22) 30%, rgba(0, 0, 0, .86) 56%, #000 80%),
+    linear-gradient(180deg, #000 0%, rgba(0, 0, 0, .86) 52%, transparent 100%);
+}
+
+/* ---------- 8. Home: where your tasks are (tiles) ---------- */
+.flow.card { gap: 12px; border: 0; border-radius: 0; background: transparent; margin-top: 4px; }
+.station {
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 16px 18px 15px;
+  background:
+    radial-gradient(260px 130px at 0% 0%, var(--cs), transparent 72%),
+    var(--glass);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  box-shadow: var(--hl);
+  transition: border-color var(--dur-2), transform var(--dur-2) var(--ease), background var(--dur-2);
+}
+.station:first-of-type { border-left: 1px solid var(--line); padding-left: 18px; }
+.station:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--c) 36%, var(--line));
+  background: radial-gradient(280px 150px at 0% 0%, var(--cs), transparent 74%), var(--glass-2);
+}
+.station .st-num { font-size: 21px; font-weight: 650; letter-spacing: -0.03em; }
+.station::after {
+  content: "";
+  position: absolute; right: 16px; top: 18px; width: 16px; height: 16px;
+  background: var(--c);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+  opacity: 0; transform: translateX(-4px);
+  transition: opacity var(--dur-2), transform var(--dur-2) var(--ease);
+}
+.station:hover::after, .station:focus-visible::after { opacity: .9; transform: none; }
+/* Tasks flow left to right: Needs you → Working → Ready to review → Shipped. */
+.station:not(:last-of-type)::before {
+  content: "";
+  position: absolute; right: -16px; top: 50%; z-index: 2;
+  width: 20px; height: 20px; margin-top: -10px;
+  border-radius: 50%;
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 7l5 5-5 5'/%3E%3C/svg%3E") center / 12px no-repeat;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* ---------- 9. Home: sections, needs-you cards, task rows ---------- */
+.section-head h2 { font-size: 14.5px; letter-spacing: -0.016em; }
+.section-head:not(:has(.right))::after {
+  content: ""; flex: 1; min-width: 24px; height: 1px; margin-left: 6px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+.needs-card {
+  overflow: hidden;
+  padding: 18px 20px 18px 22px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--hl);
+  transition: border-color var(--dur-2), background var(--dur-2);
+}
+.needs-card:hover { border-color: var(--line-strong); background: var(--bg); }
+.needs-card::before {
+  content: "";
+  position: absolute; left: 0; top: 16px; bottom: 16px; width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: color-mix(in srgb, var(--wait) 55%, #F59E0B);
+}
+.needs-card .n-title { font-size: 15.5px; letter-spacing: -0.018em; }
+.task-list { border-top: 0; }
+.task-row { position: relative; border-bottom: 0; border-radius: 12px; padding: 13px 12px; }
+.task-row + .task-row::before {
+  content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 1px;
+  background: var(--line-soft);
+}
+.task-row:hover { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.task-row:hover::before, .task-row:hover + .task-row::before { opacity: 0; }
+.caught-up.card { border-radius: var(--r-card); background: radial-gradient(320px 120px at 0% 0%, var(--done-soft), transparent 70%), var(--glass); }
+
+/* ---------- 10. Rail & data viz ---------- */
+.rail .panel-title { letter-spacing: .07em; }
+.stat-num { font-weight: 650; letter-spacing: -0.045em; }
+.bar-col {
+  max-width: 20px;
+  border-radius: 6px 6px 3px 3px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--key) 34%, var(--surface)) 0%, color-mix(in srgb, var(--aqua) 16%, var(--surface)) 100%);
+}
+.bar.today .bar-col { background: var(--grad-rail); }
+.ring-track { stroke: color-mix(in srgb, var(--surface-2) 80%, transparent); }
+
+/* ---------- 11. Cards & panels used across pages ---------- */
+.card-pad.card, .fail-card, .callout, .env-banner { border-radius: 14px; }
+.fail-card { background: var(--glass-2); box-shadow: var(--hl); }
+.callout { background: color-mix(in srgb, var(--key-soft) 60%, var(--glass-2)); }
+.env-banner { box-shadow: var(--hl); }
+.choice, .radio-card {
+  border-radius: 14px;
+  background: var(--glass-2);
+  box-shadow: var(--hl);
+  transition: background var(--dur-1), border-color var(--dur-2), transform var(--dur-2) var(--ease);
+}
+.choice:hover, .radio-card:hover { background: var(--bg); border-color: color-mix(in srgb, var(--key) 30%, var(--line-strong)); }
+.choice[aria-checked="true"], .radio-card[aria-checked="true"] {
+  background: radial-gradient(280px 140px at 0% 0%, var(--key-soft), transparent 75%), var(--bg);
+  border-color: color-mix(in srgb, var(--key) 70%, var(--ink));
+  box-shadow: var(--hl), 0 0 0 3px color-mix(in srgb, var(--key) 12%, transparent);
+}
+.choice .c-check { background: var(--circle-fill); border: 0; color: var(--circle-ink); }
+
+/* ---------- 12. Task page ---------- */
+.jr-rail { height: 3px; border-radius: 3px; overflow: hidden; }
+.jr-fill, .journey.flowing .jr-fill { background: var(--grad-rail); border-radius: 3px; }
+.jr-step.ok .jr-bead { background: var(--circle-fill); color: var(--circle-ink); border-color: transparent; }
+html[data-theme="dark"] .jr-step.ok .jr-bead { color: var(--circle-ink); }
+.nn-icon { border-radius: 10px; }
+.seg.task-tabs a[aria-selected="true"]::after { background: var(--grad-rail); height: 2px; border-radius: 2px; }
+
+/* ---------- 13. Overlays ---------- */
+.scrim { -webkit-backdrop-filter: blur(8px) saturate(120%); backdrop-filter: blur(8px) saturate(120%); }
+.dialog {
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%);
+  border-color: var(--line);
+}
+.dialog-badge { border-radius: 12px; }
+.toast {
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+  border-color: var(--line);
+}
+.toast-ic { border-radius: 9px; }
+.popover, .palette { border-radius: 18px; }
+
+/* ---------- 14. Setup: content anchored to the top, with a steady step track ---------- */
+.setup-main { place-items: start center; padding: clamp(28px, 6vh, 60px) 20px 56px; }
+.setup-card { width: min(640px, 100%); }
+.su-track {
+  display: flex; align-items: center; gap: 0;
+  margin: 0 0 26px; padding: 0; list-style: none;
+  font-size: 12px; font-weight: 550; color: var(--faint);
+}
+.su-track li { display: flex; align-items: center; gap: 8px; white-space: nowrap; transition: color .38s var(--ease-glide); }
+.su-track li + li::before {
+  content: ""; width: 40px; height: 1.5px; margin: 0 12px;
+  border-radius: 2px; background: var(--line-strong);
+  transition: background .55s var(--ease-glide);
+}
+.su-track li.ok + li::before, .su-track li.ok + li.now::before { background: var(--grad-rail); }
+.su-track .st-b {
+  width: 22px; height: 22px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  font-size: 11px; font-weight: 650;
+  color: var(--faint);
+  background: var(--glass-2);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  transition: background .42s var(--ease-glide), color .42s var(--ease-glide), box-shadow .42s var(--ease-glide), transform .42s var(--ease-glide);
+}
+.su-track li.now { color: var(--ink); font-weight: 600; }
+.su-track li.now .st-b { color: var(--key-ink); background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--key), 0 0 0 4px var(--key-soft); }
+.su-track li.ok { color: var(--ink); }
+.su-track li.ok .st-b { color: var(--circle-ink); background: var(--circle-fill); box-shadow: none; }
+.su-track li.fail .st-b { color: var(--fail); background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fail), 0 0 0 4px var(--fail-soft); }
+.su-track li.fail { color: var(--fail); }
+.su-track .svg { width: 11px; height: 11px; stroke-width: 2.8; }
+.setup-card.view-enter > .su-track,
+.setup-card.view-enter > .su-head { animation: none; }
+.su-body.phase-fade { animation: suFade .34s var(--ease-glide) both; }
+@keyframes suFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.setup-card h1 { font-size: clamp(20px, 1.7vw, 24px); letter-spacing: -0.028em; }
+.setup-panel { border-radius: 16px; background: var(--glass-2); box-shadow: var(--hl); }
+.su-now { border-radius: 14px; background: var(--glass-2); box-shadow: var(--hl); transition: opacity .28s var(--ease-glide), transform .28s var(--ease-glide); }
+.setup-card .su-head { align-items: flex-start; }
+.setup-card .su-head > div { padding-top: 10px; }
+.agent-first [role="radio"] { border-radius: 11px; background: var(--glass-2); box-shadow: var(--hl); }
+.consent-row { border-radius: 14px; background: var(--glass-2); box-shadow: var(--hl); }   /* a toggle line in its own panel (§26) */
+.stone .sb { box-shadow: var(--hl); }
+.stones .fillbar { background: var(--grad-rail); height: 3px; border-radius: 3px; }
+.setup-top { background: color-mix(in srgb, var(--bg) 66%, transparent); -webkit-backdrop-filter: saturate(170%) blur(14px); backdrop-filter: saturate(170%) blur(14px); border-bottom-color: var(--line-soft); }
+.setup-foot { border-top-color: var(--line-soft); background: color-mix(in srgb, var(--bg) 70%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.setup::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 760px; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(760px 460px at 50% -16%, var(--glow-a), transparent 66%),
+    radial-gradient(520px 360px at 12% 0%, var(--glow-c), transparent 66%);
+}
+
+/* ---------- 15. Motion (navigation only; live updates re-render without these) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .view-enter .station, .view-enter .needs-card { animation: rise .46s var(--ease) both; }
+  .view-enter .station:nth-of-type(2) { animation-delay: 40ms; }
+  .view-enter .station:nth-of-type(3) { animation-delay: 80ms; }
+  .view-enter .station:nth-of-type(4) { animation-delay: 120ms; }
+  .view-enter .needs-card:nth-of-type(2) { animation-delay: 60ms; }
+  .view-enter .needs-card:nth-of-type(3) { animation-delay: 100ms; }
+  .view-enter .needs-card:nth-of-type(4) { animation-delay: 140ms; }
+  .view-enter .needs-card:nth-of-type(n+5) { animation-delay: 170ms; }
+  .stage h1 em { background-size: 200% 100%; animation: nameShimmer 9s ease-in-out infinite; }
+  @keyframes nameShimmer { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+}
+@media (max-width: 980px) {
+  .flow.card .station:nth-of-type(3) { border-left: 1px solid var(--line); padding-left: 18px; }
+  .flow.card .station:nth-of-type(n+3) { border-top: 1px solid var(--line); }
+  .station:nth-of-type(2)::before { display: none; }
+}
+/* V2: Blocked and Waiting share the amber "needs a decision" family everywhere, including the mini progress bars. */
+.mini-journey i.now.blocked, .mini-journey i.now.waiting { background: var(--wait); }
+@media (prefers-reduced-motion: reduce) {
+  .rm-packet { display: none; }
+  .station, .round-btn, .btn .svg { transition: none !important; }
+  .station:hover, .round-btn:hover { transform: none !important; }
+}
+
+/* =========================================================================
+   16. System rules (documented in ax_studio_visual_style_guide.md)
+   Standard widths · one button language · no icons on tabs or headings · accessibility
+   ========================================================================= */
+
+/* --- Layout: every page uses the same column; pages with a side panel use the same width for it. --- */
+:root { --page-max: 1240px; --aside-w: 304px; --col-gap: 36px; }
+html { scrollbar-gutter: stable; scroll-padding-top: 72px; }   /* no sideways shift when a scrollbar appears; focused controls never hide under the sticky top bar (WCAG 2.4.11) */
+.content, .content.wide { max-width: var(--page-max); }
+@media (min-width: 1221px) {
+  .home-grid, .task-grid, .new-grid { grid-template-columns: minmax(0, 1fr) var(--aside-w); gap: var(--col-gap); }
+}
+/* Task tabs swap only the panel. The floor stops the page from collapsing (and jumping) when a panel is short. */
+.task-panel { min-height: 620px; display: flow-root; }   /* flow-root: a child's margin can't leak out and nudge the panel */
+.task-panel > :first-child { margin-top: 0; }
+.changes { grid-template-columns: 220px minmax(0, 1fr); gap: 16px; }
+/* Hairline sections (task inspector, Home rail, Settings, Places) are dividers, not cards: square ends. */
+.side > .card, .rail > .card, .set-section > .card, .place-card.card { border-radius: 0; box-shadow: none; }
+
+/* --- One kicker style: every small uppercase label (panel titles, Now/Next, fail-card and compare keys, table heads). --- */
+.panel-title, .nn dt, .fail-grid dt, .cmp-stats dt, .table th, .palette-group, .popover-head, .si-trait {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+}
+
+/* --- Buttons: Primary (one per region) · Secondary · Ghost · Danger. Same sizes everywhere. --- */
+.btn.ghost { color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.btn.danger { background: transparent; }
+.toast .t-act { color: var(--ink); background: transparent; border: 1px solid var(--line-strong); font-weight: 600; }
+.toast .t-act:hover { background: var(--bg-subtle); }
+.agent-pick { color: var(--ink); background: var(--glass-2); border-color: var(--line-strong); box-shadow: var(--hl); border-radius: 8px; }
+/* The message composer's Send stays secondary until there's something to send. */
+.steer:has(textarea:not(:placeholder-shown)) .steer-send:not([disabled]) {
+  color: var(--primary-ink);
+  background: var(--grad-primary);
+  border-color: transparent;
+  box-shadow: var(--hl-btn), 0 0 0 1px color-mix(in srgb, var(--primary-2) 85%, transparent);
+}
+.link { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--key-ink); cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+/* --- No icons in front of tabs or headings: layouts that reserved an icon column close up. --- */
+.seg.task-tabs a { gap: 6px; }
+/* Selecting a tab or option never changes text width (no bold-on-select): state shows by colour, pill or underline. */
+.seg button, .seg a, .seg [aria-pressed="true"], .seg [aria-checked="true"], .seg [aria-selected="true"],
+.seg.task-tabs a, .seg.task-tabs a[aria-selected="true"] { font-weight: 550; }
+.needs-card { grid-template-columns: minmax(0, 1fr); padding-left: 22px; }
+.needs-card.s-failed::before { background: var(--fail); }
+.needs-card.s-paused::before { background: var(--line-strong); }
+.task-row { grid-template-columns: minmax(0, 1fr) auto; }
+@media (max-width: 1220px) {
+  .task-row { grid-template-columns: minmax(0, 1fr); }
+  .task-row .t-right { grid-column: 1 / -1; justify-content: flex-start; }
+}
+.station .st-top { min-height: 38px; }
+.where, .place-top { gap: 0; }
+.where { margin-top: 8px; }
+.theme-card .tc-label { gap: 0; }
+.step-head { gap: 12px; }
+.resolution.pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--muted); }
+.radio-card.no-access:not(.info) { margin-top: 8px; }
+/* Static rows (Places cluster list, clusters you can't use) look like options but aren't: no hover, no pointer. */
+.radio-card.info, .radio-card.no-access { cursor: default; }
+.radio-card.info:hover { background: var(--glass-2); border-color: var(--line); }
+.radio-card.no-access, .radio-card.no-access:hover { background: transparent; border-color: var(--line-strong); border-style: dashed; box-shadow: none; }
+.radio-card.no-access .rc-title { color: var(--muted); }
+.radio-card.no-access .rc-right .link, .radio-card .rc-right .link { font-size: 12.5px; font-weight: 600; }
+
+/* --- Accessibility --- */
+/* Focus ring: solid key colour (≥ 3:1 against the page in both themes, WCAG 1.4.11) with a page-coloured gap. */
+:root, html[data-theme="dark"] { --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--key); }
+.quick:focus-within, .goal:focus-within, .steer:focus-within { border-color: var(--key); box-shadow: var(--hl), 0 0 0 3px var(--key-soft); }
+.diff .ln { opacity: 1; }                       /* line numbers keep ≥ 4.5:1 on added/removed rows */
+.story-ps { margin-top: 14px; }
+.speech.still { animation: none; }   /* re-drawn after a refresh: no second entrance */
+::view-transition { pointer-events: none; }   /* the theme reveal never swallows a click */
+.nav-task .tt { flex: 1; }
+.nav-task .tt-agent { flex: none; margin-left: 2px; font-size: 11.5px; font-weight: 550; color: var(--faint); }   /* continued tasks: which agent */
+.diff tr.add .ln, .diff tr.del .ln { color: var(--muted); }
+/* Targets are at least 24 × 24 px (WCAG 2.5.8), including breadcrumb, "Manage …" and text-style buttons. */
+.crumbs a, .link, a.link { display: inline-flex; align-items: center; min-height: 24px; }
+.side a.link, .rail a.link, .rail .card a[href] { min-height: 24px; }
+.skip-link { border: 0; font: 600 13px/1 var(--font-sans); cursor: pointer; }
+.skip-link:focus { top: 12px; }
+.seg.task-tabs a:focus-visible { box-shadow: var(--ring) !important; border-radius: 6px; }
+.task-panel:focus-visible { box-shadow: var(--ring) !important; border-radius: 12px; }
+@media (prefers-contrast: more) {
+  :root { --line: rgba(11, 18, 25, .28); --line-strong: rgba(11, 18, 25, .5); --muted: #24323F; --faint: #33414F; }
+  html[data-theme="dark"] { --line: rgba(214, 232, 248, .3); --line-strong: rgba(214, 232, 248, .55); --muted: #C9D6E2; --faint: #B7C6D4; }
+  .glass, .station, .needs-card, .choice, .radio-card { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* =========================================================================
+   17. CUJ 2 · Deploy your first agent
+   Prompt help under the goal · pre-built vs. your agents · "Find or bring your own" · Add an agent dialog
+   (documented in ax_studio_visual_style_guide.md §15)
+   ========================================================================= */
+
+/* --- The user prompt: suggestions when empty, then three plain-language tips that add an editable line --- */
+.goal-help { align-items: center; min-height: 30px; }
+.gh-label { margin-right: 2px; font-size: 12px; font-weight: 550; color: var(--faint); }
+.gh-add .svg { stroke-width: 2.4; color: var(--key-ink); }
+.gh-ok { display: inline-flex; align-items: center; gap: 6px; height: 28px; font-size: 12.5px; font-weight: 550; color: var(--done); }
+.gh-ok .svg { width: 15px; height: 15px; }
+.ev.user .ev-text { white-space: pre-line; }   /* multi-line goals ("Done when: …") keep their lines in Activity */
+
+/* --- Agent picker: one radio group with two labelled rows (Pre-built · Your agents) --- */
+.agent-picker { display: flex; flex-direction: column; gap: 10px; }
+.agent-group-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.agent-picker .choice-grid + .agent-group-label { margin-top: 8px; }
+.c-tag {
+  display: inline-flex; align-items: center; height: 18px; margin-left: 7px; padding: 0 7px; vertical-align: 2px;
+  border-radius: var(--r-full); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+  color: var(--muted); background: var(--surface);
+}
+.c-tag.s-team { color: var(--key-ink); background: var(--key-soft); }
+.c-tag.s-verified { color: var(--done); background: var(--done-soft); }
+.c-tag.s-yours { color: var(--coral-ink); background: var(--coral-soft); }
+.choice.just-added { animation: justAdded 1.5s var(--ease-glide); }
+@keyframes justAdded {
+  0% { box-shadow: var(--hl), 0 0 0 0 color-mix(in srgb, var(--key) 45%, transparent); }
+  70% { box-shadow: var(--hl), 0 0 0 10px transparent; }
+}
+.su-alt { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.su-alt .link { display: inline; min-height: 0; }
+
+/* --- Add an agent dialog: one fixed-height panel, so switching tabs, filters or views never resizes the dialog --- */
+.cat-dialog .dialog-head { padding-bottom: 0; }
+.cat-tabs { margin-top: 14px; }
+.cat-body { padding: 0; }
+.cat-panel {
+  height: min(470px, calc(100vh - 300px)); min-height: 280px;
+  padding: 16px 22px 20px;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+}
+.cat-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cat-search { position: relative; flex: 1; min-width: 220px; }
+.cat-search > .svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+.cat-search .input { height: 36px; padding-left: 34px; }
+.cat-group { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.cat-kicker { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cat-row {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  width: 100%; padding: 12px 14px; text-align: left;
+  border-radius: 14px; border: 1px solid var(--line);
+  background: var(--glass-2); box-shadow: var(--hl);
+  transition: background var(--dur-1), border-color var(--dur-2);
+}
+.cat-row:hover { background: var(--bg); border-color: color-mix(in srgb, var(--key) 30%, var(--line-strong)); }
+.cr-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cr-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.cr-desc { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.cr-meta { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cr-right { display: flex; align-items: center; gap: 8px; }
+.cr-right .cr-chev { color: var(--faint); transition: transform var(--dur-2) var(--ease); }
+.cat-row:hover .cr-chev { transform: translateX(2px); color: var(--ink); }
+.cr-added { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--done); }
+.cr-added .svg { width: 12px; height: 12px; stroke-width: 2.6; }
+.src-badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  border-radius: var(--r-full); font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  color: var(--muted); background: var(--surface);
+}
+.src-badge .svg { width: 12px; height: 12px; stroke-width: 2.2; }
+.src-badge.s-team { color: var(--key-ink); background: var(--key-soft); }
+.src-badge.s-verified { color: var(--done); background: var(--done-soft); }
+.src-badge.s-yours { color: var(--coral-ink); background: var(--coral-soft); }
+/* Static row (dashed) with one real action: your team's agents appear after sign-in. */
+.cat-signin { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line-strong); }
+.cat-signin .cs-copy { flex: 1; min-width: 220px; }
+.cat-signin b { display: block; font-size: 13px; font-weight: 600; color: var(--ink); }
+.cat-signin span { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--faint); }
+.cat-empty { display: grid; justify-items: start; gap: 4px; margin-top: 22px; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-subtle); font-size: 13px; }
+.cat-empty span { color: var(--faint); }
+/* Agent details */
+.cat-back { margin-left: -8px; }
+.cd-head { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.cd-id { flex: 1; min-width: 0; }
+.cd-name { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; }
+.cd-meta { margin-top: 2px; font-size: 12px; color: var(--faint); }
+.cd-desc { margin-top: 12px; font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+/* Trust strip: who published it, whether it's signed, and where it runs, in one line of proof. */
+.cd-trust {
+  display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 12px;
+  border-radius: 12px; border: 1px solid color-mix(in srgb, var(--done) 22%, var(--line));
+  background: color-mix(in srgb, var(--done-soft) 70%, transparent);
+  font-size: 12.5px; line-height: 1.5; color: var(--muted);
+}
+.cd-trust > .svg { flex: none; margin-top: 2px; color: var(--done); }
+.cd-trust b { font-weight: 600; color: var(--ink); }
+.cd-trust .mono { font-size: 11.5px; }
+.cd-trust.warn { border-color: color-mix(in srgb, var(--wait) 26%, var(--line)); background: color-mix(in srgb, var(--wait-soft) 70%, transparent); }
+.cd-trust.warn > .svg { color: var(--wait); }
+.cd-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; margin-top: 14px; }
+.cd-grid section { min-width: 0; }
+.cd-grid .check-list { margin-top: 2px; }
+.cd-grid .check-item { padding: 7px 0; gap: 10px; }
+.cd-grid .check-item .ci-title { font-size: 13px; }
+.cd-grid .check-item .ci-title.mono { font-size: 12px; word-break: break-all; }
+.cd-note { margin-top: 4px; font-size: 12px; color: var(--faint); }
+.check-item.info .ci-icon { color: var(--muted); background: var(--surface); }
+/* Bring your own */
+.byo { display: flex; flex-direction: column; gap: 8px; }
+.byo-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.byo-kinds .radio-card { align-items: flex-start; gap: 10px; padding: 11px 12px; }
+.byo-kinds .rc-dot { margin-top: 2px; }
+.byo-kinds .rc-desc { margin-top: 2px; font-size: 12px; line-height: 1.4; }
+.byo-field { margin-top: 8px; }
+
+.byo-results { margin-top: 4px; }
+.byo-hint { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-subtle); font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.byo-checks .check-item { align-items: center; gap: 10px; padding: 6px 0; }
+.byo-checks .check-item > div { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 1px; }
+.byo-checks .check-item .ci-title { font-size: 13px; }
+.byo-checks .check-item .ci-desc { margin-top: 0; }
+.byo-checks .byo-fix { flex-basis: 100%; }
+.byo-where code { white-space: nowrap; }
+.byo-fix { margin-top: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-subtle); }
+.byo-fix .bf-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.byo-fix p { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.byo-fix .bf-code { margin: 8px 0 10px; max-height: none; font-size: 11.5px; }
+.byo-done { display: grid; gap: 12px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.byo-where { font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.byo-where b { display: block; margin-bottom: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+@media (max-width: 680px) {
+  .byo-kinds, .cd-grid { grid-template-columns: minmax(0, 1fr); }
+  .cat-row { grid-template-columns: 38px minmax(0, 1fr); }
+  .cat-row .cr-right { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) { .choice.just-added { animation: none; } .cat-row:hover .cr-chev { transform: none; } }
+@media (prefers-contrast: more) { .cat-row { -webkit-backdrop-filter: none; backdrop-filter: none; } .cat-signin { border-color: var(--line-strong); } }
+
+/* =========================================================================
+   18. CUJ review mode · one journey at a time (?cuj=1)
+   CUJ 1 overview (title, description, two paths, what can go wrong, success), the header ribbon, and the end strip
+   (documented in ax_studio_visual_style_guide.md §16)
+   ========================================================================= */
+.cuj-card { width: min(760px, 100%); padding: 4px 0 8px; }
+.cuj-kicker { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cuj-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 12px; }
+.cuj-head .axo { --axo-size: 104px; flex: none; margin: -6px -6px -10px -10px; }
+.cuj-head-copy { min-width: 0; }
+.cuj-head h1 { font-size: clamp(22px, 1.95vw, 28px); line-height: 1.14; letter-spacing: -0.03em; text-wrap: balance; }
+.cuj-num {
+  display: block; width: fit-content; margin-bottom: 10px; padding: 3px 11px;
+  border-radius: var(--r-full); font-size: 13px; font-weight: 650; letter-spacing: .02em;
+  color: var(--circle-ink); background: var(--circle-fill);
+}
+.cuj-head .lede { margin-top: 12px; max-width: 58ch; font-size: 15px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+.cuj-paths { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 26px; }
+.cuj-path {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 18px 18px 16px; text-align: left;
+  border-radius: 16px; border: 1px solid var(--line);
+  background: var(--glass-2); box-shadow: var(--hl); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  transition: border-color var(--dur-2), background var(--dur-1);
+}
+.cuj-path:hover { background: var(--bg); border-color: color-mix(in srgb, var(--key) 40%, var(--line-strong)); }
+.cp-k { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--key-ink); }
+.cp-title { margin-top: 2px; font-size: 17px; font-weight: 650; letter-spacing: -0.02em; color: var(--ink); }
+.cp-desc { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.cp-meta { margin-top: 6px; font-size: 12px; font-weight: 550; color: var(--faint); }
+.cp-go { display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 12px; font-size: 13px; font-weight: 600; color: var(--key-ink); }
+.cp-go .svg { transition: transform var(--dur-2) var(--ease); }
+.cuj-path:hover .cp-go .svg { transform: translateX(3px); }
+.cuj-sec { margin-top: 24px; }
+.cuj-sk { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cuj-sd { margin-top: 4px; font-size: 13px; color: var(--muted); }
+.cuj-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cuj-ok { display: grid; gap: 9px; margin: 10px 0 0; padding: 0; list-style: none; }
+.cuj-ok li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.cuj-ok li > .svg { width: 20px; height: 20px; padding: 4px; border-radius: 50%; stroke-width: 3; color: var(--circle-ink); background: var(--circle-fill); }
+.cuj-ok b { font-weight: 600; color: var(--ink); }
+.cuj-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
+/* Ribbon in the setup header while you review a CUJ: which journey, which path or failure, and a way back. */
+.cuj-ribbon {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: min(640px, 54vw); height: 32px; padding: 0 4px 0 5px;
+  border-radius: var(--r-full); border: 1px solid var(--line); background: var(--glass-2); box-shadow: var(--hl);
+  font-size: 12.5px; white-space: nowrap; overflow: hidden;
+}
+.cuj-ribbon .cr-k { flex: none; padding: 2px 8px; border-radius: var(--r-full); font-size: 11px; font-weight: 650; color: var(--circle-ink); background: var(--circle-fill); }
+.cuj-ribbon .cr-t { flex: none; font-weight: 600; color: var(--ink); }
+.cuj-ribbon .cr-sep { flex: none; width: 1px; height: 14px; background: var(--line-strong); }
+.cuj-ribbon .cr-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.cuj-ribbon .cr-link { flex: none; display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: var(--r-full); font-weight: 600; color: var(--key-ink); }
+.cuj-ribbon .cr-link:hover { background: var(--surface); text-decoration: none; }
+.cuj-end {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; padding: 12px 14px;
+  border-radius: 14px; border: 1px solid color-mix(in srgb, var(--key) 30%, var(--line));
+  background: color-mix(in srgb, var(--key-soft) 55%, transparent); font-size: 13px; color: var(--muted);
+}
+.cuj-end .ce-copy { flex: 1; min-width: 240px; }
+.cuj-end b { font-weight: 600; color: var(--ink); }
+@media (max-width: 980px) { .cuj-ribbon .cr-t, .cuj-ribbon .cr-sep { display: none; } }
+@media (max-width: 680px) { .cuj-paths { grid-template-columns: minmax(0, 1fr); } .cuj-ribbon { display: none; } .cuj-head .axo { --axo-size: 72px; } }
+@media (prefers-reduced-motion: reduce) { .cuj-path:hover .cp-go .svg { transform: none; } }
+@media (prefers-contrast: more) { .cuj-path { -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+/* =========================================================================
+   19. CUJ 2 · First run in order (template → where → workspace → goal → Run)
+   Step numbers that turn into checks · model row · live template downloads · workspace "Starts with" summary and
+   saved setups · hydration checklist and its Activity entry · folder picker · empty task list
+   (documented in ax_studio_visual_style_guide.md §17)
+   ========================================================================= */
+.step-block.first { margin-top: 20px; padding-top: 0; border-top: 0; }
+.step-head .n { transition: background var(--dur-2), color var(--dur-2); }
+.step-head .n.ok .svg { animation: pop var(--dur-2) var(--spring); }
+
+/* Template download status (live % from the 1-second ticker) */
+.choice .c-foot.dl { color: var(--key-ink); }
+[data-dl], [data-dl-secs] { font-variant-numeric: tabular-nums; }
+
+#setup-hint .link { min-height: 0; margin-left: 4px; font-size: 12px; }
+
+/* Hydration: the workspace fills in step by step before the first turn, then folds into one Activity entry */
+.hydrate.card { margin-bottom: 16px; background: var(--glass-2); }
+.hy-head { display: flex; align-items: center; gap: 12px; }
+.hy-title { font-weight: 600; color: var(--ink); }
+.hy-count { flex: none; font-size: 12px; font-weight: 600; color: var(--faint); }
+.hy-list { margin: 10px 0 0; padding: 0; }
+.hy-list .check-item { padding: 8px 0; }
+.hy-list .check-item.idle .ci-title { font-weight: 500; color: var(--faint); }
+.ws-card > summary .ws-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.ws-list { margin: 0; padding: 4px 14px 8px; border-top: 1px solid var(--line); }
+.ws-list .check-item { padding: 7px 0; }
+.ws-list .check-item .ci-title { font-size: 12.5px; }
+.ws-list .check-item .ci-desc { font-size: 12px; }
+.ev.ws.ws-fail .ev-icon { color: var(--fail); }
+
+/* Folder picker: folders on this computer, with what AX found in each */
+.fp-list { display: flex; flex-direction: column; gap: 8px; }
+.fp-row {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; text-align: left;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--glass-2);
+  transition: background var(--dur-1), border-color var(--dur-1);
+}
+.fp-row:hover { background: var(--bg); border-color: var(--line-strong); }
+.fp-row[aria-current="true"] { border-color: var(--ink); }
+.fp-row > .svg { flex: none; margin-top: 2px; color: var(--key-ink); }
+.fp-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fp-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.fp-desc { font-size: 12px; color: var(--faint); }
+.fp-desc .mono { font-size: 11.5px; color: var(--muted); }
+.fp-cur { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; font-weight: 600; color: var(--done); }
+
+/* A first run's empty task list in the sidebar */
+.nav-empty { padding: 6px 10px; font-size: 12px; line-height: 1.4; color: var(--faint); }
+@media (prefers-reduced-motion: reduce) { .step-head .n.ok .svg { animation: none; } }
+.new-head .lede { max-width: 76ch; }
+
+/* =========================================================================
+   20. Task page · Next step in the right column · attention dots on the tabs (v11)
+   The full-width Now | Next band is gone: the journey stands alone, and one Next step card tops the right column on
+   every tab. A tab gets a dot when something on it needs you while you're on another tab.
+   (documented in ax_studio_visual_style_guide.md §4.2)
+   ========================================================================= */
+:root { --attn-dot: #D97706; }
+html[data-theme="dark"] { --attn-dot: var(--wait); }
+.journey-card.card { padding: 18px 0 14px; }
+
+/* Next step: the one card in the inspector with a surface, because it's the one that can need you */
+.side > .card.next-card {
+  position: relative; margin: 0 0 16px; padding: 14px 16px 16px;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--glass-2); box-shadow: var(--hl);
+}
+.side > .card.next-card:first-child.card-pad { padding-top: 14px; }
+.next-card .panel-title { display: flex; align-items: center; gap: 7px; }
+.next-card .ns-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
+.next-card .ns-title { margin-top: 7px; font-size: 14.5px; font-weight: 600; line-height: 1.38; letter-spacing: -0.01em; color: var(--ink); overflow-wrap: anywhere; }
+.next-card .ns-title .mono { font-size: 13px; }
+.next-card .ns-body { margin-top: 5px; font-size: 12.5px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+.next-card .ns-quote { margin: 9px 0 0; padding: 9px 11px; border-left: 3px solid var(--attn-dot); border-radius: 0 9px 9px 0; background: var(--wait-soft); font-size: 13px; line-height: 1.45; color: var(--ink); }
+.next-card .ns-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.next-card.s-attn {
+  border-color: transparent;
+  background: radial-gradient(320px 150px at 0% 0%, var(--wait-soft), transparent 74%), var(--glass-2);
+  box-shadow: var(--hl), 0 0 0 1px color-mix(in srgb, var(--attn-dot) 34%, var(--line));
+}
+.next-card.s-attn .panel-title { color: var(--wait); }
+.next-card.s-fail {
+  border-color: transparent;
+  background: radial-gradient(320px 150px at 0% 0%, var(--fail-soft), transparent 74%), var(--glass-2);
+  box-shadow: var(--hl), 0 0 0 1px color-mix(in srgb, var(--fail) 30%, var(--line));
+}
+.next-card.s-fail .panel-title { color: var(--fail); }
+.next-card.s-done .panel-title { color: var(--done); }
+/* When it turns into something that needs you, one soft ring draws the eye (no motion with reduced motion). */
+.next-card.arrive::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; animation: nsRing 1.4s var(--ease) 1; }
+.next-card.s-fail.arrive::after { --ring-c: var(--fail); }
+@keyframes nsRing { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ring-c, var(--attn-dot)) 55%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
+
+/* Attention dot on a task tab: amber = a decision, red = a failure, key colour = changes ready to review */
+.seg.task-tabs a .tab-attn {
+  --dot: var(--attn-dot);
+  width: 8px; height: 8px; flex: none; align-self: flex-start; margin: 9px 0 0 -2px;
+  border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 2px var(--bg);
+}
+.seg.task-tabs a .tab-attn.fail { --dot: var(--fail); }
+.seg.task-tabs a .tab-attn.review { --dot: var(--key); }
+.seg.task-tabs a .tab-attn.pop { animation: tabPing 1.3s var(--ease) 2; }
+@keyframes tabPing { 0% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 2px color-mix(in srgb, var(--dot) 60%, transparent); } 100% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 10px transparent; } }
+@media (prefers-reduced-motion: reduce) { .next-card.arrive::after, .seg.task-tabs a .tab-attn.pop { animation: none; } }
+
+/* =========================================================================
+   21. Task page · slim progress track, docked in the top bar while you scroll (v11)
+   The journey keeps its six stages and Axel's glide at about a third of the height: Axel marks the current stage on
+   the rail, labels sit under small beads, and what each stage means is a tooltip (only an attention state shows as
+   text). Once the track scrolls under the top bar, the top bar swaps its breadcrumb for the task's status chip, title
+   and mini track, so progress stays visible at all times with no extra bar and no layout shift.
+   (documented in ax_studio_visual_style_guide.md §4.2)
+   ========================================================================= */
+.journey-card.card { margin-top: 14px; padding: 8px 0 12px; }
+.journey { padding-top: 0; }
+.jr-rail { top: 14.5px; }
+.jr-axo { top: -3px; width: 30px; margin-left: -15px; }
+.jr-axo .axo { --axo-size: 30px; }
+.jr-axo.gliding { transform: translateY(-2px) rotate(4deg); }
+.jr-step { gap: 0; }
+.jr-bead { width: 16px; height: 16px; margin: 8px 0; font-size: 0; border-width: 1.5px; }
+.jr-step.ok .jr-bead .svg { width: 9px; height: 9px; stroke-width: 3.2; }
+.jr-step.todo .jr-bead { width: 10px; height: 10px; margin: 11px 0; }
+.jr-step.now .jr-bead { opacity: 0; box-shadow: none; }   /* Axel sits on the current stage */
+.jr-label { margin-top: 3px; font-size: 11.5px; line-height: 1.2; }
+.jr-hint, .journey:hover .jr-hint { display: none; }
+.jr-step.now.failed .jr-hint, .jr-step.now.blocked .jr-hint, .jr-step.now.waiting .jr-hint, .jr-step.now.paused .jr-hint {
+  display: block; opacity: 1; max-width: none; margin-top: 1px; font-size: 11px; white-space: nowrap;
+}
+.jr-step.now.paused .jr-hint { font-weight: 600; color: var(--muted); }
+
+/* Docked: the breadcrumb and the task's status share one slot in the top bar and cross-fade */
+.tb-left { display: grid; flex: 1; min-width: 0; align-items: center; }
+.tb-left > .crumbs, .tb-left > .tb-task {
+  grid-area: 1 / 1; min-width: 0;
+  transition: opacity .2s var(--ease), transform .3s var(--ease-glide), visibility 0s linear .3s;
+}
+.tb-task { display: flex; align-items: center; gap: 10px; opacity: 0; visibility: hidden; transform: translateY(6px); }
+.topbar.docked .tb-task, .topbar:not(.docked) .crumbs { visibility: visible; transition-delay: 0s; }
+.topbar.docked .tb-task { opacity: 1; transform: none; }
+.topbar.docked .crumbs { opacity: 0; visibility: hidden; transform: translateY(-6px); }
+.topbar.docked { box-shadow: 0 12px 24px -22px rgba(11, 18, 25, .5); }
+.tb-task .chip { flex: none; }
+.tb-title {
+  min-width: 0; max-width: min(460px, 36vw); padding: 0; border: 0; border-radius: 6px; background: none;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.tb-title:hover { color: var(--key-ink); }
+.tb-task .mini-journey { flex: none; }
+.tb-task .mini-journey i { width: 16px; }
+.tb-task .mini-journey b { font-size: 12px; color: var(--ink); }
+@media (max-width: 980px) { .tb-title { max-width: 180px; } }
+@media (max-width: 680px) { .tb-title { display: none; } }
+@media (prefers-reduced-motion: reduce) { .tb-left > .crumbs, .tb-left > .tb-task { transition: none; } }
+
+/* =========================================================================
+   22. Home on day 0 (no tasks yet): one focused, playful scene (v11, v12)
+   No empty sections, counters or rail. Axel greets you from his spring, says how it works in his bubble, and nudges
+   toward the one thing to do (describe a goal, or finish setup if you skipped it). Ideas sit under the goal box.
+   (documented in ax_studio_visual_style_guide.md §4.3)
+   ========================================================================= */
+.stage.first-stage {
+  flex-direction: column; justify-content: center; align-items: center; gap: 0;
+  min-height: calc(100vh - 54px - 120px); padding: 4px 0 20px; text-align: center;
+}
+/* The spring fills the scene behind Axel instead of hugging the right edge. */
+.main:has(.first-stage) .sanctuary-atmo {
+  left: 0; right: 0; width: 100%; height: min(720px, 100%);
+  background-position: center 34%;
+  -webkit-mask-image: radial-gradient(58% 48% at 50% 22%, #000 0%, rgba(0, 0, 0, .55) 45%, transparent 80%);
+  mask-image: radial-gradient(58% 48% at 50% 22%, #000 0%, rgba(0, 0, 0, .55) 45%, transparent 80%);
+  opacity: .5;
+}
+html[data-theme="dark"] .main:has(.first-stage) .sanctuary-atmo { opacity: .45; }
+
+/* Axel, bigger, with a speech bubble that floats beside him */
+.fs-axel { position: relative; display: flex; justify-content: center; width: 100%; }
+.first-stage .spring-pool { width: 200px; height: 176px; }
+.first-stage .axo { --axo-size: 150px; }
+.fs-speech {
+  position: absolute; top: 18px; left: calc(50% + 104px);
+  width: max-content; max-width: 290px; padding: 12px 15px; text-align: left;
+  font-size: 13.5px; border-radius: 18px 18px 18px 6px;
+  animation: speechIn var(--dur-2) var(--ease), fsBob 6s ease-in-out 1s infinite;
+}
+@keyframes fsBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+.first-stage h1 { margin-top: 12px; }
+.first-stage .lede { margin: 12px auto 0; max-width: 58ch; }
+
+/* The one primary action: a big goal box, with a soft glow on Set up task until you start */
+.first-stage .first-quick {
+  width: min(720px, 100%); max-width: none; margin: 28px auto 0;
+  padding: 8px 8px 8px 20px; border-radius: 18px; text-align: left;
+}
+.first-stage .first-quick input { height: 48px; font-size: 16px; }
+.first-stage .first-quick .btn.primary { height: 44px; padding: 0 18px; border-radius: 12px; font-size: 14px; }
+.first-go { animation: firstGo 2.8s var(--ease) 1.4s infinite; }
+.first-quick:focus-within .first-go, .first-quick:hover .first-go { animation: none; }
+@keyframes firstGo {
+  0%, 55%, 100% { box-shadow: var(--hl), 0 0 0 0 color-mix(in srgb, var(--key) 50%, transparent); }
+  28% { box-shadow: var(--hl), 0 0 0 9px transparent; }
+}
+.first-setup { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 28px; }
+
+/* Ideas to start from */
+.first-ideas { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin-top: 16px; }
+.fi-label { margin-right: 2px; font-size: 12.5px; font-weight: 550; color: var(--faint); }
+/* The ideas are pills (§26); only their icons are tinted. */
+.fi-idea .svg { color: var(--key-ink); }
+.fi-idea.sample .svg { color: var(--coral-ink); }
+
+/* Axel's hello is one casual sentence (how it works, in order) that ends with a nudge to start (v12) */
+.fs-speech { max-width: 312px; line-height: 1.5; }
+.fs-speech b { font-weight: 650; color: var(--ink); }
+
+@media (max-width: 900px) {
+  .fs-axel { flex-direction: column; align-items: center; }
+  .fs-speech { position: static; margin: 6px auto 0; max-width: 360px; text-align: center; border-radius: 16px; }
+}
+@media (max-width: 680px) {
+  .first-stage .first-quick .agent-pick, .first-stage .first-quick .sel { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .fs-speech, .first-go { animation: none; } }
+
+/* Fit one screen: the scene sits in the visible area (slightly above centre) and the page doesn't scroll at 900 px.
+   The top glow (.main::before, 960 px tall) no longer makes short pages scroll 60 px. */
+.main::before { max-height: 100%; }
+.content:has(> .first-stage) { padding-bottom: 48px; }
+.stage.first-stage { min-height: calc(100vh - 54px - 72px); }
+
+/* Bubbles rise from Axel's spring, behind him: slow, small and translucent, so the scene feels alive but calm.
+   A soft glow sits behind him too. The fun stays around Axel; the goal box and text stay on a clean background. */
+.main:has(.first-stage) .sanctuary-atmo { opacity: .7; }
+.fs-axel::before {
+  content: ""; position: absolute; left: 50%; top: -34px; width: 540px; height: 340px; transform: translateX(-50%); pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--key) 20%, transparent), color-mix(in srgb, var(--coral) 8%, transparent) 58%, transparent);
+}
+.fs-axel > .spring-pool { position: relative; z-index: 1; }
+.fs-bubbles { position: absolute; left: 50%; top: 18px; width: 240px; height: 170px; transform: translateX(-50%); pointer-events: none; }
+.fs-bubbles i {
+  position: absolute; bottom: 0; left: var(--x); width: var(--s); height: var(--s); border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--key) 50%, transparent);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, #fff 70%, transparent), color-mix(in srgb, var(--key) 12%, transparent) 60%);
+  opacity: 0; animation: fsRise var(--d, 7s) ease-in var(--t, 0s) infinite;
+}
+@keyframes fsRise {
+  0% { transform: translate(0, 0) scale(.5); opacity: 0; }
+  15% { opacity: .85; }
+  50% { transform: translate(5px, -80px) scale(.85); }
+  85% { opacity: .5; }
+  100% { transform: translate(-3px, -160px) scale(1); opacity: 0; }
+}
+
+@media (max-width: 900px) { .fs-bubbles { top: 0; } }
+@media (max-width: 680px) { .fs-axel::before { width: 360px; height: 280px; } }
+@media (prefers-reduced-motion: reduce) { .fs-bubbles { display: none; } }
+/* Without the How it works row the scene is shorter: sit it a little above centre. */
+.stage.first-stage { padding-bottom: 64px; }
+
+/* =========================================================================
+   23. Dropdown select (v12): works like a regular select (selectHTML in views.js)
+   The closed box looks like the pill it replaces. The list opens under it: one row per option with its tile, name and
+   one line about it; the current choice has a check; the highlighted row (hover or arrow keys) is tinted.
+   ========================================================================= */
+.sel { position: relative; display: inline-flex; flex: none; }
+.sel-btn { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.sel-btn > .svg:last-child { transition: transform var(--dur-2) var(--ease); }
+.sel.open .sel-btn { color: var(--ink); border-color: color-mix(in srgb, var(--key) 45%, var(--line-strong)); }
+.sel.open .sel-btn > .svg:last-child { transform: rotate(180deg); }
+.sel-list {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+  width: max-content; min-width: max(100%, 260px); max-width: 340px; max-height: min(360px, 60vh); overflow-y: auto;
+  margin: 0; padding: 6px; list-style: none; text-align: left;
+  background: var(--bg); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--float);
+}
+.sel-list[hidden] { display: none; }
+.sel.anim .sel-list { animation: selIn var(--dur-2) var(--ease); }
+@keyframes selIn { from { opacity: 0; transform: translateY(-4px); } }
+.sel-opt {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) 16px; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 10px; color: var(--ink); cursor: pointer;
+}
+.sel-opt.is-active { background: var(--bg-subtle); }
+html[data-theme="dark"] .sel-opt.is-active { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.sel-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sel-txt b { font-size: 13px; font-weight: 600; }
+.sel-txt small { font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-opt > .svg:last-child { color: var(--key-ink); visibility: hidden; }
+.sel-opt[aria-selected="true"] > .svg:last-child { visibility: visible; }
+.sel-opt[aria-selected="true"] .sel-txt b { color: var(--key-ink); }
+/* The goal box sits above what follows it while its list is open. Home's sections each form their own layer (their
+   entrance animation leaves a transform), so the stage that holds the box is lifted too. */
+.quick:has(.sel.open) { position: relative; z-index: 30; }
+.stage:has(.sel.open) { z-index: 40; }
+@media (prefers-reduced-motion: reduce) { .sel.anim .sel-list, .sel-btn > .svg:last-child { animation: none; transition: none; } }
+
+/* =========================================================================
+   24. Task page without a progress track (v12)
+   Where the task is lives in the header: a mini track (six bars and the stage name) right after the status chip. Once
+   that row scrolls under the top bar, the top bar shows the same chip, title and mini track (§21). Axel moves to the
+   Next step card in the sticky right column, so he stays in view; his mood matches the task.
+   ========================================================================= */
+.task-head .th-progress {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 9px 0 8px;
+  border: 1px solid var(--line); border-radius: var(--r-full); background: var(--glass-2); box-shadow: var(--hl);
+}
+.task-head .th-progress .mini-journey i { width: 12px; }
+.task-head .th-progress .mini-journey b { font-size: 12px; font-weight: 600; color: var(--ink); }
+/* When the task moves on to the next stage, the current bar pops once. */
+.th-progress.advanced .mini-journey i.now { animation: mjPop .8s var(--spring) 1; }
+@keyframes mjPop { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(2.4); } }
+
+/* Axel in the Next step card's top corner; the card's words wrap around him, so a long title never runs under him */
+.next-card .ns-axel { float: right; display: grid; place-items: center; width: 46px; height: 46px; margin: -6px -6px 4px 10px; }
+.next-card .ns-axel .axo { --axo-size: 46px; }
+.next-card .ns-actions { clear: both; }
+@media (prefers-reduced-motion: reduce) { .th-progress.advanced .mini-journey i.now { animation: none; } }
+
+/* =========================================================================
+   25. CUJ 2 requirements pass (v13): connect GitHub once, inline files, CLI parity
+   GitHub connects once, in the workspace step (or Settings → Agents & keys), with the same keychain promise as a
+   template's sign-in. Inline files are written into the workspace before the agent starts.
+   ========================================================================= */
+/* Connect GitHub once is a row in the workspace panel (§26 .prow.prow-notice); the GitHub tile is the code-host mark. */
+.gh-tile { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; color: #fff; background: #24292f; }
+html[data-theme="dark"] .gh-tile { background: #3d444d; }
+.gh-tile .svg { width: 15px; height: 15px; }
+
+/* Inline files: a path and its contents per file, with a remove button; "Add a file" below. No box: the row holds it. */
+.files { display: flex; flex-direction: column; gap: 12px; align-self: stretch; }
+.file-row { display: flex; flex-direction: column; gap: 6px; }
+.file-row + .file-row { padding-top: 12px; border-top: 1px dashed var(--line-strong); }
+.file-row .fr-head { display: flex; align-items: center; gap: 6px; }
+.file-row .fr-head .input { flex: 1; min-width: 0; }
+.file-row .field-status:empty { display: none; }
+.files > .btn { align-self: flex-start; }
+
+/* The command-line equivalent under a sign-in (the key dialog's footer says the same) */
+.kp-cli { display: flex; align-items: center; gap: 6px; }
+.kp-cli code, #set-github code { font: 500 11.5px/1 var(--font-mono); color: var(--ink); }
+#set-github .sr-desc .svg { width: 12px; height: 12px; vertical-align: -1px; }
+
+/* =========================================================================
+   26. Components (v14): one style per component
+   Every page builds from the same few parts, each defined once here (or in styles.css for buttons and inputs).
+   The New task page used to stack eight kinds of box (sign-in panel, model bar, find card, compare card, folder bar,
+   uncommitted card, connect card, file card) and three kinds of pill. Now: option cards for the main choice, one
+   panel of labelled rows per step, pills for small toggles, facts for read-only summaries, and a step foot for the
+   step's secondary actions. Documented in the style guide §5.1 (and the primary colour in §2.4).
+   ========================================================================= */
+
+/* --- Panel: a step's group of settings. Glass, hairline, 14 px radius, no shadow. --- */
+.panel { margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--glass-2); box-shadow: var(--hl); }
+.panel-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 16px 0; }
+.panel-head .ph-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--key-ink); background: var(--key-soft); }
+.panel-head .ph-ic .svg { width: 15px; height: 15px; }
+.panel-head .ph-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.panel-head .ph-sub { margin-top: 3px; max-width: 66ch; font-size: 12.5px; line-height: 1.5; color: var(--faint); }
+.panel-body { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 14px 16px 16px 58px; }
+.panel-body > form, .panel-body > .field-status { align-self: stretch; }
+.panel-body .field-status:empty { min-height: 0; margin-top: -12px; }   /* keeps the live region, without a gap */
+
+/* --- Row: label · content · optional action. Every setting in a panel uses it, so labels line up down the page. --- */
+.prow { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 8px 20px; align-items: start; padding: 14px 16px; }
+.prow.has-act { grid-template-columns: 148px minmax(0, 1fr) auto; }
+.prow + .prow, .prow + .panel-more { border-top: 1px solid var(--line); }
+.prow-k { padding-top: 7px; font-size: 12.5px; font-weight: 600; line-height: 20px; color: var(--muted); }
+.prow-sub { display: block; margin-top: 3px; font-size: 12px; font-weight: 400; line-height: 1.45; color: var(--faint); }
+.prow-v { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.prow-v > .textarea, .prow-v > .input, .prow-v > .cli, .prow-v > .manifest, .prow-v > .field, .prow-v > .facts, .prow-v > .toggle-line,
+.prow-v > .src-line, .prow-v > .stretch, .prow-v > .mcp-list, .prow-v > .files { align-self: stretch; }
+.prow-act { align-self: center; }
+.prow-inline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.prow-hint { font-size: 12px; color: var(--faint); }
+.prow-text { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; line-height: 1.5; color: var(--faint); }
+/* Content that starts with text lines up with the label's first line; a row of pills centres on it. */
+.prow-v > .facts:first-child, .prow-v > .prow-text:first-child, .prow-v > .toggle-line:first-child, .prow-v > .check-row:first-child, .prow-v > .prow-hint:first-child { padding-top: 7px; }
+.prow-v > .pills:first-child { margin-top: 3px; }
+.prow-text b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.prow-notice .prow-v { flex-direction: row; align-items: flex-start; gap: 12px; }
+.prow-notice .prow-text { padding-top: 0; }
+/* A segmented control in a row never spills out of the panel; on a phone it scrolls sideways instead. */
+.prow-v .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.prow-v .seg::-webkit-scrollbar { display: none; }
+@media (max-width: 760px) {
+  .prow, .prow.has-act { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .prow-k { padding-top: 0; }
+  .prow-act { justify-self: start; }
+  .prow-v > .facts:first-child, .prow-v > .prow-text:first-child, .prow-v > .toggle-line:first-child, .prow-v > .check-row:first-child, .prow-v > .prow-hint:first-child { padding-top: 0; }
+  .prow-v > .pills:first-child { margin-top: 0; }
+}
+@media (max-width: 680px) {
+  .step-head { flex-wrap: wrap; row-gap: 2px; }
+  .step-head .muted { flex-basis: 100%; padding-left: 36px; }
+}
+
+/* --- More inside a panel: one quiet full-width row that opens more rows (same row pattern, lightly tinted). --- */
+.panel-more { border-top: 1px solid var(--line); }
+.panel-more > summary { list-style: none; display: flex; align-items: baseline; gap: 8px; padding: 12px 16px; cursor: pointer; font-size: 12.5px; color: var(--faint); border-radius: 0 0 13px 13px; transition: background var(--dur-1), color var(--dur-1); }
+.panel-more > summary::-webkit-details-marker { display: none; }
+.panel-more > summary .chev { align-self: center; color: var(--muted); transition: transform var(--dur-2) var(--ease); }
+.panel-more > summary b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.panel-more > summary:hover { color: var(--muted); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.panel-more > summary:focus-visible { outline: none; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--key) 70%, transparent); }
+.panel-more[open] > summary { border-radius: 0; border-bottom: 1px solid var(--line); }
+.panel-more[open] > summary .chev { transform: rotate(90deg); }
+.panel-more-body { border-radius: 0 0 13px 13px; background: color-mix(in srgb, var(--bg-subtle) 60%, transparent); animation: rise var(--dur-2) var(--ease); }
+html[data-theme="dark"] .panel-more-body { background: color-mix(in srgb, var(--surface) 35%, transparent); }
+
+/* --- Step foot: the step's secondary actions on one quiet line under its panel. --- */
+.step-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; font-size: 12.5px; color: var(--faint); }
+.step-foot .sf-text { font-weight: 600; color: var(--muted); }
+.step-foot .spacer { flex: 1; }
+
+/* --- Pill: every small toggle or suggestion (skills, more repos, saved setups, goal ideas and tips, kube contexts,
+       CUJ failure links). Pressed = key tint. --- */
+.pills { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;
+  border-radius: var(--r-full); border: 1px solid var(--line-strong); background: var(--glass-2);
+  font-size: 12.5px; font-weight: 500; color: var(--muted); white-space: nowrap; text-decoration: none;
+  transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1);
+}
+.pill:hover { color: var(--ink); background: var(--bg); border-color: color-mix(in srgb, var(--key) 32%, var(--line-strong)); }
+.pill[aria-pressed="true"] { color: var(--key-ink); background: var(--key-soft); border-color: color-mix(in srgb, var(--key) 36%, transparent); }
+.pill[aria-disabled="true"] { cursor: default; }
+.pill .svg { width: 13px; height: 13px; }
+.pill.mono { font-family: var(--font-mono); font-size: 12px; letter-spacing: -0.01em; }
+.goal-help.pills { margin-top: 10px; }
+
+/* --- Facts: a read-only summary as icon + text, two per line. Facts aren't buttons, so they aren't pills. --- */
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 22px; margin: 0; padding: 0; list-style: none; }
+.fact { display: flex; align-items: flex-start; gap: 9px; min-width: 0; font-size: 13px; line-height: 1.45; color: var(--ink); }
+.fact .svg { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--key-ink); }
+.fact code { font: 500 12px/1.45 var(--font-mono); color: var(--ink); background: none; padding: 0; }
+.fact.need, .fact.need code { color: var(--wait); }
+.fact.need .svg { color: var(--wait); }
+.fact.off { color: var(--faint); }
+.fact.off .svg { color: var(--faint); }
+@media (max-width: 680px) { .facts { grid-template-columns: minmax(0, 1fr); } }
+
+/* --- Source line: the code the agent starts from (tile, path and state, Change…). As a field (in a dialog), it
+       takes the input look. --- */
+.src-line { display: flex; align-items: center; gap: 12px; }
+.src-line .src-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--muted); background: var(--surface); }
+.src-line .src-ic .svg { width: 15px; height: 15px; }
+.src-line .src-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.src-line .src-path { font: 500 13px/1.4 var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.src-line .src-meta { font-size: 12px; line-height: 1.45; color: var(--faint); }
+.src-line.src-field { padding: 7px 8px 7px 8px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--glass-2); }
+
+/* --- Toggle line: a setting you switch on or off (title, one line about it, switch). In a row, or in its own panel
+       (.consent-row, as in Uninstall's Keep my workspaces). --- */
+.toggle-line { display: flex; align-items: center; gap: 14px; cursor: pointer; }
+.toggle-line .tl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.toggle-line .tl-text b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.toggle-line .tl-text span { font-size: 12px; line-height: 1.45; color: var(--faint); }
+.toggle-line.static { cursor: default; }
+
+/* --- More options: its summary is a step-level row; its rows sit in a panel like every step's. --- */
+.more-block > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 550; color: var(--muted); }
+.more-block > summary::-webkit-details-marker { display: none; }
+.more-block > summary .chev { transition: transform var(--dur-2) var(--ease); }
+.more-block > summary:hover { color: var(--ink); }
+.more-block[open] > summary .chev { transform: rotate(90deg); }
+
+/* =========================================================================
+   27. CUJ 3 requirements pass: watch, steer and unblock
+   Diffs are part of the live stream (and Changes updates while you watch). Permission prompts when
+   "Ask before risky commands" is on (they reuse the question styles). The plain-text log (the Log tab, §33).
+   ========================================================================= */
+/* The diff inside a "changed N files" entry: one collapsed row; open it to read the changes without leaving Activity. */
+.edit-diff > summary { color: var(--muted); }
+.edit-diff > summary > .svg:first-child { color: var(--key-ink); }
+.edit-diff .ed-body { max-height: 380px; overflow: auto; border-top: 1px solid var(--line); background: var(--code-bg); }
+.edit-diff .ed-file + .ed-file { border-top: 1px solid var(--line); }
+.edit-diff .ed-path { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; background: var(--bg-subtle); border-bottom: 1px solid var(--line); }
+.edit-diff .ed-path .mono { font: 550 12px/1.4 var(--font-mono); color: var(--ink); }
+.edit-diff .diff-wrap { background: transparent; }
+/* The plain-text log (the Log tab): the same mono well as tool output, as tall as the terminal, scrolls on its own. */
+.raw-log { height: 420px; max-height: none; margin: 0; border: 1px solid var(--line); border-radius: 12px; }
+/* Long commands and sites wrap inside the Next step title instead of pushing the "?" onto a line of its own. */
+.next-card .ns-title .mono { word-break: break-all; }
+
+
+/* =========================================================================
+   28. One spec per control (v16): buttons, links and pills
+   Every button is primary or secondary. Every text action that navigates is a
+   link. Every small label is a pill. Sizes and shapes come from the tokens
+   below, so nothing defines its own height, radius or weight.
+   ========================================================================= */
+:root {
+  --btn-h: 34px;      --btn-h-sm: 28px;   --btn-h-lg: 40px;
+  --btn-px: 13px;     --btn-px-sm: 10px;  --btn-px-lg: 18px;
+  --btn-r: 10px;      --btn-r-sm: 8px;    --btn-r-lg: 12px;
+  --btn-fs: 13px;     --btn-fs-sm: 12.5px; --btn-fs-lg: 13.5px;
+  --btn-weight: 550;
+  --link-ink: var(--key-ink);
+  --link-weight: 550;
+  --pill-h: 22px;     --pill-h-action: 28px;   /* a pill you can click is 28 px, to keep a 24 px+ target */
+  --pill-px: 8px;     --pill-px-action: 11px;
+  --pill-fs: 12px;
+  --pill-weight: 550;
+}
+
+/* --- Buttons: one shape, three sizes --- */
+.btn { height: var(--btn-h); padding: 0 var(--btn-px); border-radius: var(--btn-r); font-size: var(--btn-fs); font-weight: var(--btn-weight); }
+.btn.sm { height: var(--btn-h-sm); padding: 0 var(--btn-px-sm); border-radius: var(--btn-r-sm); font-size: var(--btn-fs-sm); }
+.btn.lg { height: var(--btn-h-lg); padding: 0 var(--btn-px-lg); border-radius: var(--btn-r-lg); font-size: var(--btn-fs-lg); }
+.btn.icon { width: var(--btn-h); padding: 0; }
+.btn.sm.icon { width: var(--btn-h-sm); padding: 0; }
+.btn.primary, .btn.primary.sm, .btn.primary.lg { font-weight: var(--btn-weight); }
+/* The goal boxes on Home used their own primary sizes (38 and 44 px); they're the large size like every other page-level action. */
+.quick .btn.primary, .first-stage .first-quick .btn.primary { height: var(--btn-h-lg); padding: 0 var(--btn-px-lg); border-radius: var(--btn-r-lg); font-size: var(--btn-fs-lg); }
+
+/* The sidebar's New task keeps its full-width, left-aligned layout (and collapses to an icon on narrow screens). */
+.btn.new-btn { padding: 0 11px; }
+@media (max-width: 980px) { .btn.new-btn { padding: 0; } }
+/* A toast's action is a small secondary button too. */
+.toast .t-act { height: var(--btn-h-sm); padding: 0 var(--btn-px-sm); border-radius: var(--btn-r-sm); font-size: var(--btn-fs-sm); font-weight: var(--btn-weight); background: var(--glass-2); box-shadow: var(--hl); }
+
+/* --- Secondary: every button that isn't primary looks the same. "ghost" used to be a third, borderless look (View log
+       next to a bordered Compare…); it's now the secondary style. Only an icon-only button (close, dismiss) stays bare. --- */
+.btn.ghost:not(a):not(.icon) { color: var(--ink); background: var(--glass-2); border-color: var(--line-strong); box-shadow: var(--hl); }
+.btn.ghost:not(a):not(.icon):hover { color: var(--ink); background: var(--bg); border-color: color-mix(in srgb, var(--ink) 24%, transparent); }
+
+/* --- Links: one style for every text action that takes you somewhere (a link in a sentence, "Open task →",
+       "See what happened →", "Manage guardrails ›"). Key colour, weight 550, underline on hover and focus. --- */
+.link, a.btn.ghost, #main a:not([class]):not([role]), .dialog a:not([class]), .toast a:not([class]) {
+  color: var(--link-ink); font-weight: var(--link-weight); text-decoration: none; text-underline-offset: 3px;
+}
+.link:hover, a.btn.ghost:hover, #main a:not([class]):not([role]):hover, .dialog a:not([class]):hover, .toast a:not([class]):hover { color: var(--link-ink); text-decoration: underline; }
+a.btn.ghost, a.btn.ghost.sm, a.btn.ghost.lg {
+  height: auto; min-height: 24px; padding: 0 2px; gap: 4px;
+  font-size: var(--btn-fs); border: 0; border-radius: 4px; background: none; box-shadow: none;
+}
+a.btn.ghost:hover { background: none; }
+a.btn.ghost .svg, #main a:not([class]):not([role]) .svg { width: 14px; height: 14px; }
+/* A link that stands on its own line (not inside a sentence) is 13 px, like a button label. */
+a.link { font-size: var(--btn-fs); }
+p a.link, li a.link, span a.link { font-size: inherit; }
+
+/* --- Pills: one shape for every small label (a status, where it runs, a template, "Recommended", a queued message).
+       Fully round, 22 px, 12 px text at weight 550. The colour is the only thing that changes. --- */
+.chip, .env, .dchip {
+  height: var(--pill-h); padding: 0 var(--pill-px); gap: 5px;
+  border-radius: var(--r-full); font-size: var(--pill-fs); font-weight: var(--pill-weight); line-height: 1; white-space: nowrap;
+}
+.chip .svg, .env .svg, .dchip .svg { width: 12.5px; height: 12.5px; }
+/* A pill you can click (a toggle, a suggestion, a file) has the same shape at 28 px. */
+.pill, .file-chip {
+  height: var(--pill-h-action); padding: 0 var(--pill-px-action); gap: 6px;
+  border-radius: var(--r-full); font-size: var(--pill-fs); font-weight: var(--pill-weight);
+}
+.file-chip, .pill.mono { font-weight: 500; }   /* mono text reads heavier, so it stays at 500 */
+
+
+/* --- Task page: one bar holds the tabs (left) and the task's log tools (right). The hairline belongs to the bar, and
+       the selected tab's underline sits on it. The tools are the same on every tab, so switching tabs moves nothing. --- */
+.tabs-bar { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+.tabs-bar .seg.task-tabs { flex: none; margin-bottom: -1px; border-bottom: 0; }
+.tabs-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; min-width: 0; }
+.tabs-tools .tt-meta { margin-right: 4px; white-space: nowrap; }
+@media (max-width: 1360px) { .tabs-tools .tt-meta { display: none; } }
+@media (max-width: 760px) { .tabs-tools { margin-left: 0; padding-bottom: 8px; } }
+
+
+/* =========================================================================
+   29. CUJ 4 and 5: continue with another agent, run on a remote cluster
+   ========================================================================= */
+/* What the new agent starts with (the handoff entry at the top of its Activity): label and value rows. */
+.handoff-card .ho-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 13px; line-height: 1.5; }
+.handoff-card .ho-kv dt { color: var(--faint); font-size: 12px; font-weight: 550; padding-top: 1px; }
+.handoff-card .ho-kv dd { margin: 0; min-width: 0; color: var(--ink); }
+.handoff-card .ho-kv .file-chips { margin-top: 0; }
+/* Settings → Command line: what a coding agent can do, as a plain two-column table. */
+.cli-table { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 13px; }
+.cli-table th, .cli-table td { padding: 8px 12px 8px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+.cli-table thead th { border-top: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cli-table tbody th { width: 42%; font-weight: 500; color: var(--ink); }
+.cli-table code { font: 500 12px/1.5 var(--font-mono); color: var(--ink); background: none; padding: 0; overflow-wrap: anywhere; }
+/* The Settings section list is navigation, not links in content, so it keeps its quiet look (section 28 colours
+   content links; this is the one unclassed list of anchors inside the page). */
+#main .settings-nav a:not([class]):not([role]) { color: var(--muted); font-weight: 500; }
+#main .settings-nav a:not([class]):not([role]):hover { color: var(--ink); text-decoration: none; }
+/* The open section: ink, heavier text, a surface and a key-colour bar, so it never relies on colour alone (1.4.1, 1.4.11). */
+#main .settings-nav a[aria-current="page"]:not([class]):not([role]) { color: var(--ink); font-weight: 600; background: var(--surface); box-shadow: inset 2px 0 0 var(--key-ink); }
+@media (max-width: 980px) {
+  /* Narrow windows: the sections wrap above the open one; the bar becomes a ring. */
+  #main .settings-nav a[aria-current="page"]:not([class]):not([role]) { box-shadow: inset 0 0 0 1px var(--line-strong); }
+}
+/* The story dialog is the one dialog with Axel in it (it's about him), so the page's own Axel steps out while it's open. */
+body:has(#story) #root svg.axo { visibility: hidden; }
+
+/* The setup screens' stream illustration is pinned to the window, not to the page. The page grows and shrinks with its
+   content (for example when you switch between "On this computer" and "Connect to a remote cluster"), and the picture
+   used to move with it. Fixed to the viewport, it stays put at every window size and while scrolling. */
+.setup-atmo { position: fixed; inset: 0; }
+
+
+/* ==========================================================================
+   §30 · Review follow-ups: delivery choice, budget check-in, CPU and memory, All tasks
+   ========================================================================== */
+/* Steering: choose when a message is delivered. A small segmented control in the composer hint. */
+.steer-hint { flex-wrap: wrap; row-gap: 6px; }
+.steer-mode { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2, var(--muted)); font-weight: 550; }
+.seg.sm { padding: 2px; border-radius: 9px; }
+.seg.sm button { min-height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
+.steer-mode-note { color: var(--muted); }
+
+/* CPU and memory a task is using, under "Where it runs". */
+.res-usage { display: grid; gap: 8px; margin-top: 12px; }
+.res-row { display: grid; grid-template-columns: 58px minmax(40px, 1fr) auto; align-items: center; gap: 10px; font-size: 12px; }
+.res-k { color: var(--muted); }
+.res-v { color: var(--ink); white-space: nowrap; }
+.res-meter { display: block; height: 6px; margin: 0; }
+.res-meter.hot > span { background: var(--coral); }
+.res-off { margin: 0; }
+
+/* All tasks: one flat, searchable table. */
+.nav-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nav .nav-label a.nav-all, .nav .nav-label a.nav-all[aria-current] { all: unset; cursor: pointer; font-size: 11px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--key-ink); border-radius: 6px; padding: 2px 4px; }
+.nav .nav-label a.nav-all::before, .nav .nav-label a.nav-all::after { content: none; }
+.nav .nav-label a.nav-all:hover { text-decoration: underline; }
+.nav .nav-label a.nav-all:focus-visible { box-shadow: var(--ring); }
+.tasks-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0 14px; }
+.tasks-search { position: relative; display: inline-flex; align-items: center; flex: 1 1 240px; max-width: 360px; }
+.tasks-search > svg { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
+.tasks-search .input { width: 100%; padding-left: 36px; }
+.seg .seg-n { margin-left: 6px; color: var(--muted); font-weight: 500; }
+.tasks-card { overflow-x: auto; }
+.tasks-table { min-width: 880px; }
+.tasks-table th, .tasks-table td { white-space: nowrap; vertical-align: middle; }
+.tasks-table td.tk-title { white-space: normal; min-width: 220px; max-width: 340px; }
+#main .tasks-table td.tk-title a:not([class]) { font-weight: 600; color: var(--ink); text-decoration: none; }
+#main .tasks-table td.tk-title a:not([class]):hover { text-decoration: underline; }
+.tasks-table th:first-child, .tasks-table td:first-child { padding-left: 18px; }
+.tasks-table th:last-child, .tasks-table td:last-child { padding-right: 18px; }
+.tk-agent { display: inline-flex; align-items: center; gap: 6px; }
+.tasks-empty { display: grid; gap: 4px; justify-items: center; text-align: center; padding: 36px 16px; color: var(--muted); }
+.tasks-empty b { color: var(--ink); }
+
+/* Narrow windows (one column): "Your next step" moves above Activity, so a decision or a failure's fix is never
+   below the whole timeline. The rest of the inspector stays underneath. */
+@media (max-width: 1220px) {
+  .task-grid > .side { display: contents; }
+  .task-grid > .side > .card.next-card { order: -1; margin: 0; }
+  .task-grid > .side > .card:not(.next-card) { padding-left: 0; padding-right: 0; }
+  .task-grid { row-gap: 16px; }
+}
+
+/* A failed check with a fix box under it: keep the mark beside the title, not centred on the whole block. */
+.byo-checks .check-item.no { align-items: flex-start; }
+
+/* §31 · Readiness fixes: bell cap, waiting chip, connected cluster */
+#bell-pop .popover { max-height: min(70vh, 560px); overflow-y: auto; }
+#bell-pop .pop-more { font-weight: 600; color: var(--key-ink); }
+.chip.waiting { color: var(--wait); background: var(--wait-soft); }
+.bead.waiting { color: var(--wait); }
+.bead.paused { color: var(--muted); }
+.radio-card.info.is-on { border-color: var(--key); box-shadow: inset 0 0 0 1px var(--key); }
+
+/* Lost connection: one banner, no live pulses, stale chips say how old the last update is */
+.conn-banner { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; padding: 10px 24px; background: var(--wait-soft); color: var(--ink); border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.conn-banner > svg { color: var(--wait); flex: none; }
+.conn-banner > span { flex: 1 1 320px; min-width: 0; }
+.conn-banner[hidden] { display: none; }
+body.conn-lost .pulse-dot, body.conn-lost .working .dots i { animation: none !important; opacity: .45; }
+.chip.stale { color: var(--muted); background: var(--bg-subtle); }
+
+/* §32 · Accessibility fixes from the readiness review (WCAG 2.2 AA) */
+/* 1.4.11: control states and boundaries at 3:1 or more, in both themes */
+:root { --field-line: rgba(11, 18, 25, .5); }
+html[data-theme="dark"] { --field-line: rgba(214, 232, 248, .44); }
+.input, .textarea, .steer, .quick, .goal, .sel-btn, .src-field { border-color: var(--field-line) !important; }
+.seg [aria-pressed="true"], .seg [aria-checked="true"], .seg [aria-selected="true"] { box-shadow: inset 0 0 0 1.5px var(--key) !important; color: var(--ink); font-weight: 650 !important; }
+.seg.task-tabs a[aria-selected="true"] { box-shadow: none !important; font-weight: 550 !important; }
+.seg.task-tabs a[aria-selected="true"]::after { background: var(--key) !important; height: 3px; }
+.switch .track { box-shadow: inset 0 0 0 1px var(--field-line); }
+.switch input:checked ~ .track { box-shadow: none; }
+.switch .thumb { box-shadow: 0 0 0 1px var(--field-line), 0 1px 2px rgba(0, 0, 0, .2); }
+/* 2.4.7: one focus ring everywhere */
+.panel-more > summary:focus-visible { box-shadow: var(--ring) !important; outline: none; }
+.term-input-row:focus-within { box-shadow: var(--ring); border-radius: 6px; }
+/* 2.5.8: targets at least 24 px */
+.nav .nav-label a.nav-all, .switch, .panel-more > summary, .term-input { min-height: 24px; }
+.switch { height: 24px; }
+.switch .thumb { top: 4px; }
+/* Skip to Your next step: visible only when focused */
+.skip-inline { position: absolute; left: -9999px; }
+.skip-inline:focus-visible { position: static; display: inline-flex; min-height: 24px; align-items: center; margin: 6px 0 0; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--key-ink); font-weight: 600; box-shadow: var(--ring); }
+/* Reduce motion (Settings or system) */
+body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+/* Narrow windows and 200% zoom (1.4.10, 4.1.2, 2.4.11) */
+@media (max-width: 980px) {
+  .nav a .label, .new-btn .label { display: block !important; position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+}
+@media (max-width: 680px) {
+  html { scroll-padding-bottom: 80px; }
+  .sidebar .new-btn { display: inline-flex !important; width: 40px; height: 38px; padding: 0; justify-content: center; }
+  .search-trigger { display: inline-flex !important; }
+  .stage, .stage-copy { min-width: 0; max-width: 100%; }
+  .stage-copy h1, .stage h1 { overflow-wrap: anywhere; }
+  .quick { flex-wrap: wrap; }
+  .quick input { flex: 1 1 100%; min-width: 0; }
+  .toasts { bottom: 76px; }
+}
+
+/* Scale: large diffs and long tool output */
+.big-diff { display: grid; gap: 6px; padding: 18px; border-top: 1px solid var(--line); }
+.tool-tail { margin: 8px 12px 0; }
+.see-all-needs { display: inline-block; margin-top: 10px; font-weight: 600; }
+
+/* ==========================================================================
+   §31 · CUJ 1: Get AX Studio (#/get) and a first launch that's already set up
+   The download page mocks the page builders get AX Studio from (it isn't part of the app): two cards, the app download
+   (recommended) and ax setup for people who already use the command line. The already-set-up Ready screen says
+   what Studio found in one line (.su-found), and the CUJ 1 overview links both in one line (.cuj-also).
+   ========================================================================== */
+.get-opts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 26px; }
+.get-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
+  padding: 18px 18px 16px; border-radius: 16px; border: 1px solid var(--line);
+  background: var(--glass-2); box-shadow: var(--hl); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.get-opt .cp-desc { margin-bottom: 4px; }
+.get-opt > .btn { margin-top: auto; }
+.get-opt .disclosure { width: 100%; }
+.get-cmd { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 5px 5px 12px; border-radius: var(--r-m); border: 1px solid var(--line); background: var(--bg-subtle); }
+.get-cmd code { flex: 1; min-width: 0; font: 500 12.5px/1.5 var(--font-mono); color: var(--ink); background: none; padding: 0; }
+.get-term { max-height: none; border-top: 0; border-radius: var(--r-m); }
+.get-done { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 6px; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.get-done .svg { flex: none; margin-top: 2px; color: var(--done); }
+.get-steps { display: grid; gap: 6px; margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.get-steps b { font-weight: 600; color: var(--ink); }
+.get-opts:has(details[open]) { align-items: start; }
+.cuj-also { margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.cuj-also a, .cuj-also .link { display: inline; min-height: 0; font-weight: 600; }
+.su-found { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 16px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.su-found li { display: inline-flex; align-items: center; gap: 6px; }
+.su-found .svg { flex: none; color: var(--done); }
+@media (max-width: 680px) { .get-opts { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-contrast: more) { .get-opt { -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+/* ==========================================================================
+   §32 · Templates as four equal cards (v24): Antigravity first and picked by default, Claude Code, Codex, then
+   Your own agent (bring your own), which opens Bring your own agent. The templates stay one radio group
+   (display: contents puts its cards in the shared grid); the fourth card is a button or link beside it.
+   ========================================================================== */
+.tpl-wrap { container-type: inline-size; }
+.tpl-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tpl-grid > [role="radiogroup"] { display: contents; }
+.tpl-grid .agent-group-label { grid-column: 1 / -1; margin-top: 8px; }
+.tpl-grid .byo-card { grid-row: 1; grid-column: 4; }
+a.byo-card, a.byo-card:hover { color: inherit; text-decoration: none; }
+.byo-card .c-foot { color: var(--key-ink); }
+.byo-card.on {
+  background: radial-gradient(280px 140px at 0% 0%, var(--key-soft), transparent 75%), var(--bg);
+  border-color: color-mix(in srgb, var(--key) 70%, var(--ink));
+  box-shadow: var(--hl), 0 0 0 3px color-mix(in srgb, var(--key) 12%, transparent);
+}
+.byo-card.on .c-check { transform: scale(1); opacity: 1; }
+.agent-tile.byo { --t: var(--coral-ink); }
+@container (max-width: 600px) {
+  .tpl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tpl-grid .byo-card { grid-row: 2; grid-column: 2; }
+}
+@container (max-width: 340px) {
+  .tpl-grid { grid-template-columns: minmax(0, 1fr); }
+  .tpl-grid .byo-card { grid-row: auto; grid-column: auto; }
+}
+.g-included code { overflow-wrap: anywhere; }
+
+/* ==========================================================================
+   §33 · The Log tab (v26): the plain-text log is the fourth task tab (Activity · Changes · Terminal · Log), not a
+   dialog behind View log. One quiet line with Copy and Download .txt above the log, and the CLI under it, like Terminal.
+   ========================================================================== */
+.log-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px; }
+.log-bar .lb-text { flex: 1 1 260px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.log-bar .lb-actions { display: flex; gap: 8px; }
+
+/* ==========================================================================
+   §34 · No login (v28): AX Studio has no account. Remote clusters come from your kubeconfig, and your team's
+   templates from a registry address you add here (Add a template → Your team).
+   ========================================================================== */
+.cat-reg { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cat-reg .input { width: min(240px, 100%); }
+.cat-reg .cat-reg-status { flex-basis: 100%; margin: 0; }
+.avatar.you .svg { width: 14px; height: 14px; }
+
+/* =========================================================================
+   Live mode (live.js): pages that show real data from AX inside the Studio app.
+   They reuse the components above; these are the few pieces of their own.
+   ========================================================================= */
+.live-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.app.live .manifest { max-height: 420px; white-space: pre; }
+/* A command that must be readable in full, in a narrow dialog: wrap it instead of scrolling sideways. */
+.live-cli-wrap .cli { align-items: flex-start; }
+.live-cli-wrap .cli code { white-space: normal; overflow-wrap: anywhere; }
+/* What an action will do, one step per line. */
+.live-steps { margin: 8px 0 0; padding-left: 20px; list-style: disc; font-size: 13px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.live-steps li + li { margin-top: 2px; }
+/* A changed file: a row that opens to its diff. */
+.live-file { border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--bg); }
+.live-file + .live-file { margin-top: 8px; }
+.live-file > summary { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; list-style: none; }
+.live-file > summary::-webkit-details-marker { display: none; }
+.live-file > summary:hover { background: var(--bg-subtle); }
+.live-file > summary .chev { flex: none; color: var(--faint); transition: transform .15s ease; }
+.live-file[open] > summary { background: var(--bg-subtle); border-bottom: 1px solid var(--line); }
+.live-file[open] > summary .chev { transform: rotate(90deg); }
+.live-file .lf-status { flex: none; min-width: 58px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.live-file .lf-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 550 12.5px/1.4 var(--font-mono); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .live-file > summary .chev { transition: none; } }
+
+/* Where agents run: each place's head (icon, name, context, state), what runs on this computer, the remote clusters
+   with Connect and Install / Upgrade AX, and one Output panel for whatever ran last. */
+.app.live .place-top { align-items: flex-start; gap: 12px; }
+.app.live .place-top .p-icon { flex: none; }
+.pl-head { min-width: 0; flex: 1; }
+.pl-ctx { margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.pl-state { flex: none; margin-left: auto; padding-top: 4px; }
+.pl-sub { margin-top: 18px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.app.live .layers { margin-top: 6px; }
+.app.live .layer .l-ic { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--surface); }
+.app.live .layer .l-ic .svg { width: 16px; height: 16px; }
+.app.live .layer .l-text { min-width: 0; flex: 1; }
+.app.live .layer .l-tech { overflow-wrap: anywhere; }
+.app.live .layer .chip { flex: none; }
+.cl-list { display: grid; gap: 8px; margin-top: 14px; padding: 2px; }
+.cl-card { align-items: flex-start; gap: 12px; cursor: default; }
+.cl-card .cl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cl-card .cl-cluster { margin-top: 2px; font: 450 11.5px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.cl-card .cl-actions { margin-top: 10px; gap: 8px; }
+.cl-empty { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: var(--r-m); color: var(--muted); }
+.cl-empty > .svg { flex: none; width: 20px; height: 20px; margin-top: 2px; }
+.cl-empty code { overflow-wrap: anywhere; }
+.live-output { margin-top: 22px; }
+.live-output .term-bar { flex-wrap: wrap; row-gap: 6px; }
+.live-output .lo-title { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 600; color: #EEF4F9; }
+.live-output .lo-title .svg { width: 14px; height: 14px; }
+.live-output .lo-cmd { font: 450 11.5px/1.4 var(--font-mono); color: #C9D6E3; background: rgba(214, 232, 248, .08); padding: 2px 8px; border-radius: 6px; overflow-wrap: anywhere; }
+.live-output .lo-count { margin-left: auto; font-size: 12px; color: #8CA0B5; }
+.live-output .btn.ghost.lo-clear { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+.live-output .btn.ghost.lo-clear:hover:not(:disabled) { color: #FFFFFF; background: rgba(214, 232, 248, .14); }
+.live-output .lo-body { height: auto; min-height: 96px; max-height: 300px; margin: 0; overflow-wrap: anywhere; }
+.live-output .lo-body .m { color: #8498AD; }
+/* The status chip sits on the dark bar in both themes, so it uses the bar's own light tints. */
+.live-output .term-bar .chip { box-shadow: none; }
+.live-output .term-bar .chip.running { color: #7CC8FF; background: rgba(124, 200, 255, .14); }
+.live-output .term-bar .chip.done { color: #5EE0A6; background: rgba(94, 224, 166, .14); }
+.live-output .term-bar .chip.failed { color: #FF9DB0; background: rgba(255, 157, 176, .14); }
+
+/* Settings: Axel next to his story, long values that wrap, and the shortcuts table. */
+.ls-axel { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; background: radial-gradient(circle at 50% 60%, var(--key-soft), transparent 70%); }
+.ls-axel svg.axo { width: 42px; height: 42px; }
+.ls-wrap { overflow-wrap: anywhere; }
+.ls-bad { color: var(--fail); font-weight: 550; overflow-wrap: anywhere; }
+.ls-keys { margin-top: 10px; }
+.ls-keys td { padding: 7px 10px; }
+.ls-keys td:first-child { width: 38%; white-space: nowrap; }
+/* A dialog stays centred and on screen even when it holds very wide text (a report's long lines scroll inside it):
+   the scrim's one column is the scrim's width, so wide content can't stretch it past the window. */
+.scrim { grid-template-columns: minmax(0, 1fr); }
+
+/* New task (live): the run plan's "What it can reach", the cluster pills under Where should it run, and the image pill. */
+.plan-card .pc-foot:empty { display: none; }
+.plan-card .pc-reach { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.plan-card .pc-reach .gate-map { width: 100%; height: auto; }
+.pc-kicker { margin-bottom: 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.where-pills { margin-top: 10px; }
+.ready-list .rt .mono { font-weight: 500; font-size: 12px; }
+
+/* A task's page (live): Details under Activity, the turns of its session, and the dark terminal's input row. */
+.live-details { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.live-turns li { min-width: 0; }
+.live-turns .lt-goal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-turns .r-val .chip { font-weight: 550; }
+.live-terminal .term-body { height: auto; min-height: 240px; max-height: 420px; margin: 0; }
+.live-terminal .term-body .m { color: #8498AD; }
+.live-term-row { padding: 10px 14px; border-top: 1px solid rgba(214, 232, 248, .08); font: 450 12.5px/1.7 var(--font-mono); }
+.live-term-row .p { color: #5CCBF9; }
+.live-term-row .btn { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+.live-term-row .btn:hover { color: #FFFFFF; background: rgba(214, 232, 248, .14); }
+.live-term-row:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--key) 60%, transparent); border-radius: 0 0 var(--r-l) var(--r-l); }
+.live-term-row .btn:not(.primary):not(.ghost):not(.danger) { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .18); box-shadow: none; }
+.live-term-row .btn:not(.primary):not(.ghost):not(.danger):hover { color: #FFFFFF; background: rgba(214, 232, 248, .16); border-color: rgba(214, 232, 248, .28); }
+
+/* The task's inspector: What it can reach is the map New task showed (the sites its Gateway allows), then one fact per
+   line. Where it runs shows the image by its short name; the full address is in its tooltip and its copy button. */
+.reach-map { margin-top: 10px; }
+.reach-map .gate-map { display: block; width: 100%; height: auto; }
+.facts.one-col { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.reach-facts { margin-top: 10px; }
+.img-short { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
+.img-short .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-short .btn.icon { flex: none; width: 26px; height: 26px; margin: -4px 0; }
+
+/* New task: the branch field and the common branch names share one line. */
+.branch-input { flex: 0 1 200px; width: 200px; min-width: 140px; }
+
+/* Home (live): the list's head says whose tasks these are (the cluster in use, and Change cluster), right next to the
+   title; Updated sits on the right. Then one section per tile (Needs you, Running, Paused, Done), each a card of rows. */
+.live-list-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; margin-top: 26px; }
+.live-list-head h2 { margin-right: auto; }
+.live-list-head h2:has(+ .llh-scope) { margin-right: 0; }
+.llh-scope { display: inline-flex; align-items: center; gap: 8px; }
+.live-sec { margin-top: 18px; }
+.live-list-head + .live-sec { margin-top: 12px; }
+.live-sec .section-head { margin-bottom: 8px; }
+.live-sec .section-head h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); }
+.card.task-card { padding: 6px; }
+button.station { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.station:disabled { cursor: default; }
+button.station:disabled:hover { transform: none; border-color: var(--line); }
+button.station:disabled::after { display: none; }
+/* Settings: the name Home greets you by. */
+.ls-name { flex: none; width: 220px; max-width: 100%; }
+.ns-detail { display: block; margin-top: 6px; color: var(--faint); overflow-wrap: anywhere; }
+
+/* Where agents run, as the desktop app's Environment page has it: the head's Check again, one line for the command
+   that runs (what, how long, the step ax is on, Cancel or Dismiss), the tools AX uses, the AX images (remembered in this
+   browser), and each remote cluster's read-only check with what to do next. */
+.places-head { margin-bottom: 0; }
+.places-head .btn-row { flex: none; padding-top: 4px; }
+.op-line { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--bg-subtle); }
+.op-line > .svg { flex: none; color: var(--key-ink); }
+.op-line .op-title { flex: none; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.op-line .op-time { flex: none; font: 500 12px/1 var(--font-mono); color: var(--muted); }
+.op-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 450 12px/1.4 var(--font-mono); color: var(--faint); }
+.op-line .btn { flex: none; margin-left: auto; }
+.live-op .stones { margin-top: 14px; }
+.op-note { margin-top: 8px; }
+.problem-lines { margin-top: 8px; }
+.problem-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 12.5px; line-height: 1.45; color: var(--wait); overflow-wrap: anywhere; }
+.problem-line .svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+.img-field { display: grid; gap: 4px; margin-top: 10px; }
+.img-field .input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--wait) 45%, var(--line)); }
+#live-images > summary .chip { margin-left: 6px; }
+.tool-v { margin-left: 4px; font-size: 11.5px; font-weight: 450; color: var(--muted); }
+#live-tools .ci-desc { overflow-wrap: anywhere; }
+.cl-card .cl-ctx { display: block; margin-top: 2px; font-size: 11px; color: var(--faint); overflow-wrap: anywhere; }
+.cl-check { margin-top: 10px; }
+.cl-check .setup-panel { margin-top: 0; padding: 4px 12px; }
+.cl-check .check-item { padding: 7px 0; gap: 10px; }
+.cl-check .check-item .ci-desc { overflow-wrap: anywhere; }
+.cl-next { margin-top: 8px; line-height: 1.5; color: var(--ink); }
+.cl-next a, .cl-guide a { white-space: nowrap; }
+.cl-why { margin-top: 8px; }
+.cl-card .cl-actions .op-step { flex: 1 1 160px; }
+.place-card { min-width: 0; }
+.cl-guides { display: grid; gap: 6px; margin-top: 12px; }
+.cl-guide[open] { padding-bottom: 4px; }
+.disclosure > summary:focus-visible { box-shadow: var(--ring); outline: none; }
+.cl-guide-list { margin: 2px 0 0; padding-left: 20px; line-height: 1.6; color: var(--ink); }
+.cl-guide-list li + li { margin-top: 6px; }
+.cl-guide-list .mono { font-size: 12px; }
+.btn.danger-text { color: var(--fail); }
+.btn.danger-text:hover:not(:disabled) { background: var(--fail-soft); }
+/* A section that is fine folds to one line that says so (the checks, the tools, a cluster's check); one with a problem
+   stays open. */
+.live-checks { margin-top: 12px; }
+.pl-fold { margin-top: 16px; }
+.pl-fold > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; cursor: pointer; border-radius: var(--r-xs); }
+.pl-fold > summary::-webkit-details-marker { display: none; }
+.pl-fold > summary:focus-visible { box-shadow: var(--ring); }
+.pl-fold > summary .chev { flex: none; color: var(--faint); transition: transform var(--dur-2) var(--ease); }
+.pl-fold[open] > summary .chev { transform: rotate(90deg); }
+.pl-fold > summary .pl-sub { flex: none; margin-top: 0; }
+.pl-fold > summary:hover .pl-sub { color: var(--muted); }
+.pl-fold .fold-sum { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.pl-fold .fold-body { padding-top: 4px; }
+.pl-fold .live-checks, .pl-fold .setup-panel { margin-top: 4px; }
+.fs-ok, .fs-warn, .fs-bad { display: inline-flex; align-items: center; gap: 5px; font-weight: 550; }
+.fs-ok { color: var(--done); }
+.fs-warn { color: var(--wait); }
+.fs-bad { color: var(--fail); }
+.fs-tools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fs-tools .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+.cl-check .pl-fold { margin-top: 0; }
+.cl-check .pl-fold > summary { min-height: 26px; }
+.cl-check .fold-sum { white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .pl-fold > summary .chev { transition: none; } }
+.fs-when { font-weight: 450; color: var(--faint); white-space: nowrap; }
+
+/* Logs (live): what a task's sandbox printed, one line each: the time, then the text. AX's runner and the worker's own
+   events are quieter than the agent; errors stand out. Sandbox start-up lines (gVisor) are off unless asked for. */
+.live-logs-term .term-body { height: auto; min-height: 200px; max-height: 520px; margin: 0; white-space: normal; }
+.live-logs-term .term-bar { gap: 10px; }
+.live-logs-term .lo-count { margin-left: auto; font-size: 12px; color: #8CA0B5; }
+.live-logs-term .chip.ll-live { box-shadow: none; color: #7CC8FF; background: rgba(124, 200, 255, .14); }
+.ll { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.ll-t { color: #6E8399; font-variant-numeric: tabular-nums; }
+.ll-x { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--term-ink); }
+.ll-runner .ll-x { color: #A9BACB; }
+.ll-sandbox .ll-x { color: #7F93A8; }
+.ll-event .ll-x { color: #7CC8FF; font-style: italic; }
+.ll-warn .ll-x { color: #F5C26B; }
+.ll-err .ll-x { color: #FF9DB0; }
+.ll-err { background: rgba(255, 157, 176, .07); margin: 0 -16px; padding: 0 16px; }
+.ll-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.ll-toggle input { margin: 0; accent-color: var(--key); }
+.tab-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--fail); vertical-align: 1px; }
+.tab-dot[hidden] { display: none; }
+.ns-logerr { color: var(--ink); }
+.ns-logerr .svg { color: var(--fail); vertical-align: -1px; }
+.ns-logerr .mono { font-size: 11.5px; overflow-wrap: anywhere; }
+
+/* Home (live): workspaces and network rules under the tasks, one row each: what it is, which tasks use it, and Delete
+   for the ones no task uses. */
+.live-res { margin-top: 26px; }
+.live-res .live-list-head { margin-top: 0; }
+.res-card { margin-top: 10px; padding-top: 10px; padding-bottom: 12px; }
+.res-card .pl-fold { margin-top: 0; }
+.res-h { margin-top: 14px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.res-h .muted { text-transform: none; letter-spacing: 0; font-weight: 450; }
+.res-list { margin: 6px 0 0; padding: 0; list-style: none; }
+.res-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.res-row:first-child { border-top: 0; }
+.res-row .rr-ic { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--surface); }
+.res-row .rr-main { flex: 1; min-width: 0; }
+.res-row .rr-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.res-row .rr-used { margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.res-row .rr-used .mono { font-size: 12px; }
+.res-row .rr-unused { color: var(--wait); }
+.res-row .rr-meta { font-size: 12px; font-weight: 450; color: var(--faint); }
+.res-row .rr-why { margin-top: 4px; font-size: 12px; color: var(--fail); overflow-wrap: anywhere; }
+.res-row .btn { flex: none; }
+.live-res-err { margin-top: 14px; }
+.ld-opt { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+.ld-opt input { flex: none; margin: 0; accent-color: var(--fail); }
+.task-head .env.env-bad { color: var(--fail); }
+/* Home's list head: when the list was read, and Refresh. Settings: the atespace field. Details: AX's conditions. */
+.llh-upd { margin-left: auto; font-size: 12px; color: var(--faint); }
+.live-list-head h2 + .llh-scope + .llh-upd { margin-left: auto; }
+.live-list-head .llh-upd + .btn.icon { margin-left: -6px; }
+.ls-ates { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ls-ates .input { width: 180px; }
+.ls-ates-why { display: block; margin-top: 6px; font-size: 12px; }
+.cond-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cond-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.cond-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.cond-table td.mono { font-size: 11.5px; }
+.cl-empty > div { flex: 1; min-width: 0; }
+
+/* Run on another cluster: the cluster and atespace side by side, and the original's fate. */
+.lp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; }
+.lp-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-top: 14px; }
+.lp-row .lp-label { font-weight: 550; color: var(--ink); }
+.op-exit { flex: none; padding: 1px 6px; border-radius: 6px; font: 500 11.5px/1.4 var(--font-mono); color: var(--fail); background: var(--fail-soft); }
+
+/* New task: step spacing, aligned top with the run plan, Customize workspace inside Set up the workspace, and More options. */
+.new-grid { margin-top: 24px; }
+.new-grid .step-block.first { margin-top: 0; }
+.new-grid .step-block { margin-top: 32px; padding-top: 28px; }
+.new-grid .step-head { margin-bottom: 16px; gap: 10px; }
+.new-grid .choice-grid { gap: 12px; }
+.new-grid .choice { padding: 16px 18px; gap: 12px; min-height: 146px; }
+.new-grid .radio-list { gap: 10px; }
+.new-grid .radio-card { padding: 15px 18px; gap: 14px; }
+.new-grid .radio-card .rc-desc { margin-top: 3px; line-height: 1.45; }
+.new-grid .radio-card .rc-right { flex: none; white-space: nowrap; padding-left: 12px; }
+.new-grid .prow { padding: 16px 20px; gap: 8px 24px; }
+.new-grid .panel-more > summary { padding: 14px 20px; }
+.prow-hint .svg { vertical-align: -2px; margin-right: 3px; }
+#live-ws-existing { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+#live-ws-existing .pills { margin-top: 0; }
+#live-ws-existing .pill .svg { flex: none; }
+.mcp-rows { display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
+.mcp-rows > .btn-row { margin-top: 2px; }
+.kv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.kv-row.kv-2 { grid-template-columns: minmax(120px, .65fr) minmax(0, 1.35fr) auto; }
+.size-custom { margin-top: 2px; gap: 14px; }
+.size-custom label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--muted); }
+.size-custom .input { width: 104px; }
+#live-new-manifest { max-height: 220px; }
+.live-cli-stack { display: grid; gap: 8px; }
+.more-block > summary { padding: 4px 0; }
+.plan-card.card { padding: 22px; }
+.plan-card .ready-list { margin-top: 16px; gap: 4px; }
+.plan-card .ready-list li { align-items: flex-start; padding: 7px 0; gap: 10px; }
+.plan-card .ready-list .rb { margin-top: 1px; }
+
+/* The cluster switcher in the top bar: the cluster in use (and the atespace when it isn't default), and a menu of the
+   clusters in your kubeconfig. */
+#live-foot { position: relative; }
+button.health-card { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
+.health-card .hc-chev { margin-left: auto; color: var(--faint); transition: transform var(--dur-2) var(--ease); }
+.health-card[aria-expanded="true"] .hc-chev { transform: rotate(180deg); }
+.cs-ates { padding: 1px 6px; border-radius: 6px; font: 500 11px/1.4 var(--font-mono); color: var(--muted); background: var(--surface); }
+.cs-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--bg); box-shadow: var(--float); }
+.cs-menu[hidden] { display: none; }
+.cs-head { padding: 6px 8px 4px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cs-item, .cs-foot { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: var(--r-s); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; text-decoration: none; }
+.cs-item:hover, .cs-foot:hover, .cs-item:focus-visible, .cs-foot:focus-visible { background: var(--surface); outline: none; }
+.cs-item .cs-text { flex: 1; min-width: 0; display: grid; }
+.cs-item .cs-name { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-item .cs-sub { font-size: 11.5px; color: var(--muted); }
+.cs-item[aria-checked="true"] > .svg:last-child { color: var(--key-ink); }
+.cs-foot { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 var(--r-s) var(--r-s); font-size: 12.5px; color: var(--muted); }
+@media (max-width: 980px) { .health-card .hc-chev { display: none; } }
+
+/* Compact task lists (Settings > Appearance). */
+.live-compact .task-row { padding-top: 7px; padding-bottom: 7px; }
+.live-compact .task-row .t-title { font-size: 13.5px; }
+.live-compact .task-row .t-meta { margin-top: 1px; font-size: 11.5px; }
+.live-compact .live-sec { margin-top: 12px; }
+
+/* The sandbox shell: tabs for several shells, colors programs print, and the keys it knows. */
+.term-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; }
+.term-tabs .tt-item { display: inline-flex; align-items: center; border-radius: 6px; }
+.term-tabs .tt-item.on { background: rgba(214, 232, 248, .10); }
+.term-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 0; background: transparent; color: #A9BACB; font: 500 12px/1 var(--font-mono); cursor: pointer; border-radius: 6px; }
+.term-tabs .tt-item.on > button[role="tab"] { color: #EEF4F9; }
+.term-tabs button:hover { color: #FFFFFF; }
+.term-tabs button:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--key) 70%, transparent); outline: none; }
+.term-tabs .tt-x { padding: 0 6px; }
+.term-tabs .tt-new { color: #7CC8FF; }
+.term-tabs .tt-dot { width: 6px; height: 6px; border-radius: 50%; background: #5EE0A6; }
+.term-keys { padding: 0 14px 10px; font-size: 11px; color: #8498AD; }
+.term-keys kbd { font-size: 10.5px; }
+.live-terminal .term-body .a-bold { font-weight: 700; }
+.live-terminal .term-body .a-k { color: #8498AD; }
+.live-terminal .term-body .a-r { color: #FF9DB0; }
+.live-terminal .term-body .a-g { color: #5EE0A6; }
+.live-terminal .term-body .a-y { color: #F5C26B; }
+.live-terminal .term-body .a-bl { color: #8AB4FF; }
+.live-terminal .term-body .a-m { color: #E4A3F5; }
+.live-terminal .term-body .a-c { color: #7CC8FF; }
+.live-terminal .term-body .a-w { color: #EEF4F9; }
+.term-keys kbd { color: #C9D6E3; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }

@@ -1,0 +1,123 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Pushing a vX.Y.Z[-PRERELEASE] tag builds ax-studio for Linux and macOS
+# (amd64 and arm64) and publishes the archives, with checksums.txt, to a GitHub
+# release for the tag. The binary reports the tag as its version. A tag with a
+# "-" (v0.1.0-rc.1) is published as a prerelease.
+#
+# A manual run builds the archives and keeps them as workflow artifacts,
+# without publishing anything.
+#
+# See "Release" in README.md.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A tag push and a re-run for the same tag never publish at the same time.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The tag filter above cannot express the whole format.
+      - name: Check the tag
+        if: github.ref_type == 'tag'
+        run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "error: '$GITHUB_REF_NAME' is not vX.Y.Z or vX.Y.Z-PRERELEASE" >&2
+            exit 1
+          fi
+
+      # The build runs third-party code (npm packages), so it gets no token:
+      # none is left in the git config, and only the last step is given one.
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install frontend dependencies & security audit
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+      - name: Test
+        run: make verify
+
+      - name: Build the release archives
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="${GITHUB_SHA::8}"
+          fi
+          make dist VERSION="$version"
+          ls -lh dist/
+          cat dist/checksums.txt
+
+          # The archive for this runner holds a binary that reports the version.
+          (cd dist && sha256sum --check checksums.txt)
+          tar -xzf dist/ax-studio_linux_amd64.tar.gz -C "$RUNNER_TEMP"
+          got="$("$RUNNER_TEMP/ax-studio" --version)"
+          if [ "$got" != "ax-studio $version" ]; then
+            echo "error: the binary reports '$got', not 'ax-studio $version'" >&2
+            exit 1
+          fi
+
+      - name: Keep the archives as workflow artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ax-studio-archives
+          path: |
+            dist/ax-studio_*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+
+      # A release is never changed once it exists: this fails if the tag
+      # already has one, so the files under a tag stay the same.
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          files=(dist/ax-studio_*.tar.gz dist/checksums.txt)
+          flags=(--title "AX Studio $TAG" --generate-notes --verify-tag)
+          case "$TAG" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${files[@]}" "${flags[@]}"

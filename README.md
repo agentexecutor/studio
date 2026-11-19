@@ -1,89 +1,96 @@
 # AX Studio
 
-A desktop app for [AX](https://github.com/google/ax): design tasks, watch them run, and create local
-AX clusters. Runs on macOS, Windows and Linux.
+Local web application for [AX](https://github.com/google/ax): set up local or remote agent clusters, compose tasks with guardrails, monitor live execution, review and apply sandbox Git diffs locally, continue multi-turn sessions, and promote tasks across Kubernetes clusters.
+
+AX Studio ships as a **single Go binary (`ax-studio`)** with an embedded web frontend served strictly on `http://127.0.0.1:8080`.
+
+> **The interface is changing.** The new UX in [`ux/`](ux/README.md) is served at `/`. It covers setup, the task list, a task's result and changes, New task, follow-ups and running on another cluster. The React pages it replaces are still served at `/classic/` for what it doesn't cover yet: the terminal and Guardrails. The screenshot and the workflows below describe the React pages.
 
 ![Activity](docs/screenshots/overview.png)
 
-- **Activity:** a sortable task table with running tasks on top, and the
-  atespace's workspaces. Resume, suspend or delete tasks, inspect conditions,
-  follow logs and delete workspaces.
-- **Deploy:** build tasks with a form or raw YAML, then create them.
-- **Terminal:** sessions into running tasks over `ax ssh`, in tabs that stay
-  connected while you use the rest of the app.
-- **Environments:** set up a local AX sandbox on kind, or connect to a team
-  cluster and install AX on it.
+## Core Workflows
 
-| | |
-|---|---|
-| ![Deploy](docs/screenshots/designer.png) **Deploy** | ![Terminal](docs/screenshots/terminal.png) **Terminal** |
-| ![Clusters](docs/screenshots/clusters.png) **Clusters** | ![Task logs](docs/screenshots/logs.png) **Task logs** |
+- **Where Agents Run:** Run host preflight checks and start a self-contained local Kind + Agent Substrate + AX sandbox (`ax local start`), or connect directly to any remote team cluster in `~/.kube/config` (`ax install`) with zero local VM footprint.
+- **Board & Activity:** Monitor tasks across `Working`, `Pending`, `Suspended`, `Failed`, and `Completed` states, inspect conditions and task output, and open interactive `ax ssh` terminal tabs.
+- **New Task & Guardrails:** Compose `Task`, `Workspace`, and `Gateway` manifests visually or in YAML, pick prebuilt agent templates, configure outbound HTTPS domain allow-lists, and store API keys as cluster `Secret`s (`ax.io/credential: "true"`) injected by `atenet-router` without exposing keys inside sandboxes.
+- **Changes & Continue:** Inspect uncommitted Git diffs inside a running debug-enabled sandbox (`spec.debug: true`), discard individual files, apply patches directly onto a local Git repository (`git apply --check`), or launch a follow-up turn sharing `spec.session_id`.
+- **Promote Across Clusters:** Run a task on a team cluster with `ax promote`: pick the target and the command's options, preview what it will create or reuse (`--preflight-only`), then promote the `Gateway` + `Workspace` + `Task`. `ax promote` is the single source of truth for promotion; the sandbox's files and the Secrets a Gateway names are not copied.
 
-The app calls the `ax` CLI and `kubectl`. It passes `--context` on every call,
-so browsing and managing tasks never changes your global context. Creating or
-starting a local cluster does: `ax local start` makes that cluster current.
+## Prerequisites
 
-## Develop
+- [`ax` CLI](https://github.com/google/ax) installed via `install.sh` (`~/.ax/bin/ax` and `~/.ax/bin/ax-studio`). No Node.js or Go is needed to run prebuilt releases.
+- An `ax` that has `ax local status -o json` (google/ax#640 or later). Studio is built against one AX version (see `go.mod`); use the `ax` and ax-server of that version or later.
+- For local sandboxes: Docker or rootful Podman on Linux (`>= 6.8` kernel), or OrbStack / Docker Desktop / Colima on macOS.
 
-```sh
-npm install
-npm run dev         # hot-reloading app
-npm run typecheck
+## Quick Start
+
+Install AX + AX Studio via `install.sh` and launch:
+
+```bash
+curl -fsSL https://github.com/google/ax/releases/latest/download/install.sh | sh
+export PATH="$HOME/.ax/bin:$PATH"
+ax studio                            # Opens http://127.0.0.1:8080 in your browser
 ```
 
-The app uses the `ax` on your PATH or in `~/.ax/bin`. To develop against
-another `ax`, such as one you built from source, set its full path in Settings
-(⌘,).
+Useful flags:
 
-To refresh a screenshot, build (`npm run build`) and run:
-
-```sh
-npx electron . --section=clusters --delay=7000 --screenshot=docs/screenshots/clusters.png
+```bash
+ax studio --port 8080                # Default loopback port (127.0.0.1:8080)
+ax studio --no-open                  # Do not open a browser automatically (SSH/remote or scripts)
+ax -n ax-system studio               # Target a custom AX control-plane namespace
 ```
 
-Other flags: `--context`, `--atespace`, `--task`, `--logs=expanded`, `--terminal=<command>`.
+Stopping `ax studio` (`Ctrl-C`) closes only the local web server; any local Kind cluster and running Tasks in Kubernetes continue running unaffected.
 
-## Package
+## Uninstall & Clean Up
 
-```sh
-npm run dist:mac    # .dmg and .zip
-npm run dist:win    # NSIS installer and .zip
-npm run dist:linux  # AppImage, .deb, .tar.gz
+1. **Stop the Web UI:** Press `Ctrl-C` in the terminal running `ax studio` / `ax-studio`.
+2. **Delete the local sandbox cluster (if created):**
+   ```bash
+   ax local delete
+   ```
+   *(Or click **Delete** on the Local Sandbox card in the **Environments** page before stopping AX Studio.)*
+3. **Uninstall AX from a remote cluster (optional):**
+   ```bash
+   ax --context <remote-context> uninstall
+   ```
+4. **Remove local binaries and caches:** All files installed by `install.sh` or cached on demand (`ax`, `ax-studio`, tunnel metadata, short-lived `ax ssh` certificates, and any fallback `kind`/`kubectl` binaries not already on your `PATH`) live under `~/.ax/`:
+   ```bash
+   rm -rf ~/.ax
+   ```
+   Pre-existing system tools (`docker`, `podman`, system/Homebrew `kubectl` and `kind`) and other `~/.kube/config` contexts are never modified or removed. Remove `export PATH="$HOME/.ax/bin:$PATH"` from `~/.zshrc` or `~/.bashrc` if you added it.
+
+## Development & Building from Source
+
+Building from source compiles the TypeScript/React frontend (`src/`) into `internal/studio/dist/` and embeds it, with the new UX in `ux/`, into the single `bin/ax-studio` Go binary (requires Go `1.27+` and Node.js `20+`):
+
+```bash
+make build                           # Installs frontend deps if needed, builds UI, and compiles bin/ax-studio
+./bin/ax-studio                      # Run locally built binary
+make verify                          # TypeScript check + UI smoke tests + Go race tests + gofmt + go vet
 ```
 
-Build each OS on that OS. macOS builds are unsigned; set `mac.identity` in
-`electron-builder.yml` to sign. To regenerate the icon on macOS:
+The new UX has no build step. To work on it, serve it from disk so a reload shows your edit (see [`ux/README.md`](ux/README.md)):
 
-```sh
-swift scripts/make-icon.swift ~/ax/assets/axel.svg build-resources/icon.icns
+```bash
+./bin/ax-studio --ux-dir ux
 ```
 
-## Environments
+## Release
 
-The Environments page drives `ax`. It checks this machine, then offers two
-places to run tasks:
+A release is the `ax-studio` binary for Linux and macOS (amd64 and arm64). Push a version tag and [the Release workflow](.github/workflows/release.yml) tests, builds and publishes `ax-studio_<os>_<arch>.tar.gz` for each platform, with a `checksums.txt`, to a GitHub release for the tag:
 
-- **Local Sandbox:** **Set Up Local Sandbox** runs `ax local start`, which
-  creates or resumes a kind cluster named `ax-local`, installs Agent Substrate
-  and AX, and downloads kind and kubectl into `~/.ax/bin` if you don't have
-  them. It needs only a running rootful `docker` or `podman`. The sandbox
-  becomes your current kubectl context. **Stop** and **Delete** run
-  `ax local stop` and `ax local delete`.
-- **Team clusters:** every other context in your kubeconfig. **Connect** points
-  the app at one without changing your kubectl context. **Check** looks at a
-  cluster with `kubectl`, read-only: whether it meets what Agent Substrate and
-  AX need, and whether each is installed, with what to do next. **Install AX**
-  runs `ax install` once Agent Substrate is there, and **Uninstall AX** runs
-  `ax uninstall`, which keeps the database's volume; `ax` can't install Substrate
-  on a remote cluster, so the page links to Substrate's guides for that. A
-  fold-out lists what a new cluster needs.
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
-`ax` has no default ax-server image yet, so the page asks for one before it
-sets anything up. The app remembers the images you enter.
+The binary reports the tag as its version (`ax-studio --version`). A tag with a `-`, such as `v0.1.0-rc.1`, is published as a prerelease. To try the build without publishing, run the workflow by hand from the Actions tab; the archives are kept as workflow artifacts.
 
-## Platform notes
+`install.sh` in [google/ax](https://github.com/google/ax) installs the Studio release it names, not the latest one. After a release, set `PINNED_STUDIO_VERSION` there to the new tag and `pinned_studio_sha256` to the four digests in `checksums.txt`.
 
-- **macOS/Linux:** the app reads PATH from your login shell, and also looks in
-  `~/.ax/bin` (or `$AX_HOME/bin`), where AX's installer puts `ax`.
-- **Windows:** AX has no Windows build of `ax`, so the Environments page
-  can't set up a sandbox there.
+## Security Model
+
+- **Loopback-Only BFF:** Refuses to bind to `0.0.0.0` or non-loopback interfaces; rejects non-loopback `Host` headers (DNS rebinding defense) and cross-origin `Origin` headers.
+- **Per-Process Session & CSRF:** Issues an ephemeral 256-bit `HttpOnly; SameSite=Strict` session cookie and requires constant-time `X-AX-CSRF-Token` verification on all mutating `POST` endpoints, paired with strict `Content-Security-Policy` (`script-src 'self'`).
+- **Allow-Listed Execution & Secret Redaction:** The browser can run only an allow-list of `ax` subcommands (never an arbitrary program or a local file path); credential Secret values are piped strictly over `stdin`, and tokens are scrubbed from diagnostic logs.

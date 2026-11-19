@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Copyright 2026 Google LLC
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AX Studio: run coding agents safely, anywhere</title>
+  <meta name="description" content="AX Studio lets you run, watch, and steer coding agents in a secure sandbox on your computer, then move them to a remote cluster with the same guardrails.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg?v=3">
+  <!-- Runs before the first paint: the demo reset links and the theme. -->
+  <script src="boot.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="views.css">
+  <link rel="stylesheet" href="mascot.css">
+  <link rel="stylesheet" href="polish.css">
+</head>
+<body>
+  <button type="button" class="skip-link" data-action="skip-to-main">Skip to main content</button>
+  <div id="root"></div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+  <div id="overlay"></div>
+  <script src="core.js"></script>
+  <script src="mascot.js"></script>
+  <script src="viz.js"></script>
+  <script src="failures.js"></script>
+  <script src="views.js"></script>
+  <script src="task.js"></script>
+  <script src="overlays.js"></script>
+  <!-- env.js says whether the Studio server is behind this page. api.js talks to it, and the live files show what it returns. -->
+  <script src="env.js"></script>
+  <script src="api.js"></script>
+  <script src="live.js"></script>
+  <script src="live-env.js"></script>
+  <script src="live-new.js"></script>
+  <script src="live-changes.js"></script>
+  <script src="live-logs.js"></script>
+  <script src="live-resources.js"></script>
+  <script src="live-nav.js"></script>
+  <script src="live-settings.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
