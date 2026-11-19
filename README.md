@@ -75,6 +75,19 @@ The new UX has no build step. To work on it, serve it from disk so a reload show
 ./bin/ax-studio --ux-dir ux
 ```
 
+## Release
+
+A release is the `ax-studio` binary for Linux and macOS (amd64 and arm64). Push a version tag and [the Release workflow](.github/workflows/release.yml) tests, builds and publishes `ax-studio_<os>_<arch>.tar.gz` for each platform, with a `checksums.txt`, to a GitHub release for the tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The binary reports the tag as its version (`ax-studio --version`). A tag with a `-`, such as `v0.1.0-rc.1`, is published as a prerelease. To try the build without publishing, run the workflow by hand from the Actions tab; the archives are kept as workflow artifacts.
+
+`install.sh` in [google/ax](https://github.com/google/ax) installs the Studio release it names, not the latest one. After a release, set `PINNED_STUDIO_VERSION` there to the new tag and `pinned_studio_sha256` to the four digests in `checksums.txt`.
+
 ## Security Model
 
 - **Loopback-Only BFF:** Refuses to bind to `0.0.0.0` or non-loopback interfaces; rejects non-loopback `Host` headers (DNS rebinding defense) and cross-origin `Origin` headers.
