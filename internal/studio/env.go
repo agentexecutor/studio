@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -94,6 +95,10 @@ type EnvOpSnapshot struct {
 	Purpose string `json:"purpose,omitempty"`
 	// ExitCode is the command's exit status when it failed with one.
 	ExitCode int `json:"exitCode,omitempty"`
+	// Problems are the pods that couldn't start on the cluster when a setup
+	// or an install failed, with what Kubernetes said about each: the reason
+	// a rollout timed out.
+	Problems []PodProblem `json:"problems,omitempty"`
 }
 
 // EnvStatusResponse is returned by GET /api/env/status.
@@ -116,6 +121,10 @@ type EnvStatusResponse struct {
 	Tools []ToolInfo `json:"tools"`
 	// AXFlags says which optional flags this ax takes.
 	AXFlags AXFlags `json:"axFlags"`
+	// AXUpdate is set when this ax is too old for Studio (it has no
+	// `ax local status -o json`). Local.State is "Unknown" then: ax can't say
+	// whether AX on this computer is set up.
+	AXUpdate *AXUpdate `json:"axUpdate,omitempty"`
 }
 
 // hasContainerCLI reports whether a docker or podman command is on PATH,
@@ -165,6 +174,10 @@ func (s *Server) axLocalStatus(ctx context.Context) (localStatus, error) {
 		Args: []string{"-n", s.axNamespace, "local", "status", "-o", "json"},
 	})
 	if err != nil {
+		// An ax from before `-o json` prints its usage and the flag it doesn't know.
+		if reason := tooOldReason(res.Stderr + "\n" + res.Stdout); reason != "" {
+			return localStatus{}, &axTooOldError{reason: reason}
+		}
 		lines := strings.Split(strings.TrimSpace(res.Stderr), "\n")
 		return localStatus{}, fmt.Errorf("%s", nonEmptyStr(strings.TrimSpace(lines[len(lines)-1]), err.Error()))
 	}
@@ -256,7 +269,17 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 		resp.ContainerMemBytes = local.Host.MemTotalBytes
 		resp.ContainerRootless = local.Host.Rootless
 	}
+	var tooOld *axTooOldError
+	if errors.As(localErr, &tooOld) {
+		// ax can't say whether AX on this computer is set up, so neither can Studio.
+		resp.Local.State = stateUnknown
+		resp.AXUpdate = s.axUpdate(tooOld.reason)
+	}
 	engine := containerEnginePreflight(local.Host, localErr)
+	if resp.AXUpdate != nil {
+		engine.Detail = "This ax is too old to check the container host: it has no `ax local status -o json`. Update ax, then check again."
+		engine.Command = resp.AXUpdate.Command
+	}
 	if localErr == nil && local.Host.Runtime == "" {
 		// No engine is running. Say what this computer has to start one with.
 		if runtime.GOOS == "darwin" {
@@ -318,20 +341,20 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 				Name:    e.Name,
 				Cluster: e.Cluster,
 				Current: e.Current,
-				IsLocal: e.Name == "ax-local" || e.Name == "local" || strings.HasPrefix(e.Name, "kind-"),
+				IsLocal: isLocalContextName(e.Name),
 			})
 		}
 	}
 	resp.Local.Access = s.localAccess(ctx, resp.Local, resp.Contexts)
 	resp.Tools = s.collectTools(ctx, fresh)
-	resp.AXFlags = s.axFlags(ctx)
+	resp.AXFlags = s.axFlags(ctx, fresh)
 
 	s.opMu.Lock()
 	if s.currentOp != nil {
 		if s.currentOp.Action == "local-up" && s.currentOp.Status == "failed" &&
 			resp.Local.State == stateRunning &&
-			strings.Contains(resp.Local.SubstrateStatus, "available") &&
-			strings.Contains(resp.Local.AXStatus, "available") {
+			allAvailable(resp.Local.SubstrateStatus) &&
+			allAvailable(resp.Local.AXStatus) {
 			s.currentOp = nil
 		} else {
 			cp := *s.currentOp
@@ -450,6 +473,11 @@ func (s *Server) runAXOperationFor(w http.ResponseWriter, action, purpose, targe
 				Stdout: logWriter,
 				Stderr: logWriter,
 			})
+		}
+		// A setup or an install that fails often only says it timed out
+		// waiting: the pods that can't start say why. Not after a cancel.
+		if runErr != nil && (action == "local-up" || action == "remote-install") && !errors.Is(opCtx.Err(), context.Canceled) {
+			s.explainFailure(logWriter.op, action, target)
 		}
 		return runErr
 	})
@@ -672,8 +700,13 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		nonEmptyStr(env.ContainerRuntime, "none"), env.ContainerKernel, env.ContainerRootless, env.ContainerMemBytes)
 	fmt.Fprintf(&b, "Free Disk Bytes: %d\n", env.FreeDiskBytes)
 	fmt.Fprintf(&b, "Active Context: %s\n", nonEmptyStr(kubeCtx, env.CurrentContext))
-	fmt.Fprintf(&b, "Local Cluster: state=%s substrate=%q ax=%q\n\n",
+	fmt.Fprintf(&b, "Local Cluster: state=%s substrate=%q ax=%q\n",
 		env.Local.State, env.Local.SubstrateStatus, env.Local.AXStatus)
+	if u := env.AXUpdate; u != nil {
+		fmt.Fprintf(&b, "AX CLI: too old for this Studio (%s). Studio is built against ax %s. Update: %s\n",
+			u.Reason, nonEmptyStr(u.Version, "(unknown)"), u.Command)
+	}
+	b.WriteString("\n")
 
 	fmt.Fprintf(&b, "--- Preflight Checks ---\n")
 	for _, p := range env.Preflight {
@@ -714,6 +747,15 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		} else {
 			b.WriteString(scrubSecrets(logsRes.Stdout))
 		}
+
+		// What Kubernetes says about the pods that can't start: the pull's
+		// error, the crash, the scheduler. It's what a timed-out rollout means.
+		fmt.Fprintf(&b, "\n--- Pods That Can't Start ---\n")
+		if lines := podProblemLines(s.podProblems(r.Context(), targetCtx, isLocalContextName(targetCtx))); len(lines) == 0 {
+			fmt.Fprintf(&b, "none found\n")
+		} else {
+			b.WriteString(scrubSecrets(strings.Join(lines, "\n")) + "\n")
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -723,6 +765,21 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 func scrubSecrets(s string) string {
 	return redactTokenLine.ReplaceAllString(s, "$1: [REDACTED]")
+}
+
+// availableRe reads "ax-server (1/1 available in ax-system)", as `ax local
+// status` reports a deployment.
+var availableRe = regexp.MustCompile(`(\d+)\s*/\s*(\d+)\s+available`)
+
+// allAvailable says whether every replica of a deployment `ax local status`
+// reports is available: "(1/1 available)" is, "(0/1 available)" isn't.
+func allAvailable(status string) bool {
+	if m := availableRe.FindStringSubmatch(status); m != nil {
+		ready, _ := strconv.Atoi(m[1])
+		total, _ := strconv.Atoi(m[2])
+		return ready > 0 && ready == total
+	}
+	return strings.Contains(status, "available") && !strings.Contains(status, "unavailable")
 }
 
 func nonEmptyStr(a, b string) string {

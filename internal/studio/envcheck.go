@@ -115,8 +115,8 @@ type envExtras struct {
 	tools   []ToolInfo
 	toolsAt time.Time
 
-	flagsOnce sync.Once
-	flags     AXFlags
+	flagsMu sync.Mutex
+	flags   *AXFlags
 
 	opCancel context.CancelFunc
 
@@ -207,15 +207,19 @@ func (s *Server) collectTools(ctx context.Context, fresh bool) []ToolInfo {
 	return append([]ToolInfo(nil), tools...)
 }
 
-// axFlags reads which optional flags this ax's `local start` takes, once.
-func (s *Server) axFlags(ctx context.Context) AXFlags {
-	s.extras.flagsOnce.Do(func() {
-		hctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		defer cancel()
-		res, _ := s.runner.Run(hctx, kube.Spec{Name: s.axBinary, Args: []string{"local", "start", "--help"}})
-		s.extras.flags.RunnerVolumeImage = strings.Contains(res.Stdout+res.Stderr, "--runner-volume-image")
-	})
-	return s.extras.flags
+// axFlags reads which optional flags this ax's `local start` takes. The answer
+// is kept until fresh asks again, as Check again does after ax is updated.
+func (s *Server) axFlags(ctx context.Context, fresh bool) AXFlags {
+	s.extras.flagsMu.Lock()
+	defer s.extras.flagsMu.Unlock()
+	if s.extras.flags != nil && !fresh {
+		return *s.extras.flags
+	}
+	hctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	res, _ := s.runner.Run(hctx, kube.Spec{Name: s.axBinary, Args: []string{"local", "start", "--help"}})
+	s.extras.flags = &AXFlags{RunnerVolumeImage: strings.Contains(res.Stdout+res.Stderr, "--runner-volume-image")}
+	return *s.extras.flags
 }
 
 // localAccess says whether kubectl can look inside the running local cluster:

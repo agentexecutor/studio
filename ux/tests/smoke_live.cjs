@@ -166,6 +166,8 @@ function makeBackend(opts) {
       return ok(`task.ax.io/${name} created\n`);
     }
     if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_WORKING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
+    /* An ax from before `ax promote` prints its usage and says so. */
+    if (a[0] === 'promote' && B.oldAx) return { status: 1, stdout: 'AX CLI - Autonomous agent execution control\n\nUsage:\n  ax [command] [flags]\n', stderr: 'unknown command: promote\n' };
     if (a[0] === 'promote' && a[1] === 'task') {
       const name = a[2], to = a[a.indexOf('--to') + 1], pre = a.includes('--preflight-only') ? ' (preflight only)' : '';
       const src = find(ctx, name);
@@ -1658,6 +1660,131 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const items = m.api.livePaletteItems();
     const labels = items.map((x) => x.label).join(' | ');
     need(labels, ['New task', 'Pause fix-flaky-tests', 'Open shell in sandbox', 'Connect to gke-team-dev', 'Fix the flaky tests.']);
+  });
+
+  // ---------- An ax too old for Studio: Update ax, with the command, never "Not set up" ----------
+  const UPDATE_CMD = 'GOBIN="$HOME/.ax/bin" go install github.com/google/ax/cmd/ax@v0.3.2-0.20261118234833-f35661116010';
+  const envOldAx = () => Object.assign(envRunning(), {
+    local: { name: 'N/A', state: 'Unknown', kubeContext: 'N/A', substrateStatus: 'N/A', axStatus: 'N/A', access: 'ok' },
+    preflight: [CHECKS_OK[0], { id: 'container_engine', label: 'Container runtime & VM', status: 'warn', detail: 'This ax is too old to check the container host: it has no `ax local status -o json`. Update ax, then check again.', command: UPDATE_CMD }, CHECKS_OK[2]],
+    axUpdate: { reason: 'flag provided but not defined: -o', version: 'v0.3.2-0.20261118234833-f35661116010', command: UPDATE_CMD },
+  });
+  const O = makeBackend({ env: envOldAx(), oldAx: true });
+  const o = makeContext(O);
+  await check('an old ax: Home lists the tasks with an Update ax banner and its command, and never says Not set up', async () => {
+    await settle();
+    await go(o, '#/');
+    const h = main(o);
+    need(h, ['id="live-ax-update"', '<strong>Update ax.</strong>', "It can't report how AX on this computer is doing", 'GOBIN=&quot;$HOME/.ax/bin&quot; go install github.com/google/ax/cmd/ax@v0.3.2-0.20261118234833-f35661116010',
+      'What ax said: flag provided but not defined: -o', 'AX Studio is built against ax <span class="mono">v0.3.2-0.20261118234833-f35661116010</span>', 'id="live-ax-update-check"', 'Fix the flaky tests.', 'id="live-tasks"']);
+    never(h, ['Not set up', 'Set up AX on this computer']);
+    const foot = o.els['#live-foot'].innerHTML;
+    need(foot, ['Connected · 2 running · Update ax', 'AX on this computer · update ax']);
+    never(foot, ['Not set up']);
+  });
+  await check('an old ax: Where agents run says Update ax, shows the command once, and offers no setup, update or repair', async () => {
+    await go(o, '#/places');
+    const h = main(o);
+    need(h, ['id="live-local-state"', '>Update ax</div>', 'Unknown: this ax is too old to report it.', 'id="live-ax-update"', 'gVisor · Update ax', 'ax local status -o json', 'This ax is too old to check the container host']);
+    never(h, ['data-action="live-setup-start"', 'Not set up', 'id="live-images"']);
+    if (h.split('data-text="GOBIN=').length !== 2) throw new Error('the update command shows once, in the callout');
+  });
+  await check('an old ax with no cluster in use: the setup page says Update ax, not Set up', async () => {
+    await go(o, '#/setup');
+    const h = main(o);
+    need(h, ['Update ax to use this computer', 'AX Studio needs a newer ax', 'id="live-ax-update"', 'What Studio asks ax: <code>ax local status -o json</code>']);
+    never(h, ['data-action="live-setup-start"', 'Not set up', 'What gets installed?']);
+  });
+  await check('an old ax: New task can still run on this computer when its tasks came back, and says Update ax', async () => {
+    await go(o, '#/new');
+    const h = main(o);
+    need(h, ['id="live-where-local"', '<span class="rc-right">Update ax</span>', 'In a gVisor sandbox on <span class="mono">ax-local</span>']);
+    never(h, ['Not set up', 'aria-disabled="true" data-action="live-new-where" data-where="local"']);
+    if (o.api.LIVE.draft.where !== 'ax-local') throw new Error('runs where the tasks are: ' + o.api.LIVE.draft.where);
+  });
+  await check('an old ax: Run on another cluster says this ax is older than ax promote, with the update command', async () => {
+    await go(o, '#/task/fix-flaky-tests');
+    o.api.liveOpenPromote('fix-flaky-tests');
+    await settle();
+    const d = dialog(o);
+    const h = d.querySelector('#lp-body').innerHTML;
+    need(h, ["This ax can't send tasks to another cluster yet.", "older than <span class=\"mono\">ax promote</span>", 'What ax said: unknown command: promote', 'go install github.com/google/ax/cmd/ax@v0.3.2-0.20261118234833-f35661116010']);
+    never(h, ['The check passed', 'The check found a problem:']);
+    if (!d.querySelector('#lp-go').disabled) throw new Error('Send stays off');
+    o.api.ACTIONS['close-dialog']();
+  });
+  await check('after ax is updated, Check again asks with fresh=1 and the page goes back to normal', async () => {
+    O.env = envRunning();
+    await go(o, '#/places');
+    await o.api.ACTIONS['live-env-refresh']({ dataset: { fresh: '1' } });
+    await settle();
+    if (o.api.LIVE.axUpdate !== null || o.api.LIVE.local.state !== 'Running') throw new Error(JSON.stringify([o.api.LIVE.axUpdate, o.api.LIVE.local]));
+    need(O.calls.join(' '), ['GET /api/env/status?fresh=1', 'POST /api/ax/exec']);
+    never(main(o), ['id="live-ax-update"', 'Update ax']);
+  });
+
+  // ---------- When setup fails: the pods that couldn't start, what Kubernetes said, and a hint ----------
+  await check('a failed setup lists the pods that can not start, with the pull error and a hint', async () => {
+    const S = makeBackend();
+    const s = makeContext(S);
+    await settle();
+    await go(s, '#/places');
+    s.api.LIVE.images.serverImage = 'registry.example.com/ax-server@' + DIGEST;
+    s.api.ACTIONS['live-setup-start']({ dataset: { verb: 'update' } });
+    await settle();
+    const id = s.api.LIVE.op.id;
+    S.push('streamLine', { id, line: 'error: timed out waiting for the condition' });
+    S.push('envOp', { id, action: 'local-up', target: 'ax-local', status: 'failed', stage: 'ax', error: 'exit status 1', purpose: 'update', exitCode: 1, started: 1, finished: 240000,
+      problems: [
+        { namespace: 'ax-system', pod: 'ax-server-5c8', container: 'ax-server', image: 'ghcr.io/google/ax/ax-server@sha256:abc', reason: 'ImagePullBackOff',
+          message: 'Failed to pull image "ghcr.io/google/ax/ax-server@sha256:abc": dial tcp 140.82.112.33:443: i/o timeout',
+          hint: 'The cluster can\'t reach the image registry. Containers on this computer may have no way out: check that docker info shows IPv4Forwarding: true, and any proxy or firewall.' },
+        { namespace: 'ate-workers', pod: 'worker-0', reason: 'Unschedulable', message: '0/1 nodes are available: 1 Insufficient memory.', hint: 'No node has enough memory or CPU free for this pod.' },
+      ] });
+    /* As `ax local status` reports it after the rollout timed out: running, but ax-server isn't available. */
+    S.env.local.axStatus = 'ax-server (0/1 available in ax-system)';
+    await settle();
+    s.api.render();
+    const h = main(s);
+    need(h, ['timed out waiting for the condition', 'id="live-op-problems"', "2 pods on the cluster can't start", 'ax-system/ax-server-5c8', 'Can&#39;t pull its image', 'ImagePullBackOff',
+      'dial tcp 140.82.112.33:443: i/o timeout', 'IPv4Forwarding: true', 'ate-workers/worker-0', 'Can&#39;t be scheduled', 'Insufficient memory']);
+    if (s.api.LIVE.op.problems.length !== 2) throw new Error('the problems are kept on the operation');
+  });
+
+  // ---------- Your own image: recent images as pills ----------
+  await check('Your own image offers Recent pills: images you ran from this browser first, then the ones on the cluster', async () => {
+    const IMG1 = 'ghcr.io/acme/agent@sha256:' + 'a1'.repeat(32);
+    const IMG2 = 'registry.example.com/team/bot@sha256:' + 'b2'.repeat(32);
+    const R = makeBackend();
+    R.tasks['ax-local'].push(taskDoc('bot-run', 'COMPLETED', { goal: 'Run the bot.', created: '2026-11-17T11:00:00Z', spec: { sessionId: 's-bot', profile: { image: IMG2 } } }));
+    const r = makeContext(R);
+    r.store['ax.live.recentImages'] = JSON.stringify([IMG1, 'ghcr.io/acme/agent:latest']);
+    await settle();
+    await go(r, '#/new');
+    r.api.ACTIONS['live-new-agent']({ dataset: { agent: 'image' } });
+    await settle();
+    const h = main(r);
+    need(h, ['id="live-image-recent"', 'aria-label="Recent images"', '<span class="gh-label">Recent</span>', `data-image="${IMG1}"`, `title="${IMG2}"`, 'agent@a1a1a1a1a1a1', 'bot@b2b2b2b2b2b2']);
+    never(h, ['data-image="ghcr.io/acme/agent:latest"', 'data-image="gcr.io/p/claude-code@sha256:abc"']);
+    if (h.indexOf(`data-image="${IMG1}"`) > h.indexOf(`data-image="${IMG2}"`)) throw new Error('the ones you ran come first');
+    r.api.ACTIONS['live-new-image-pick']({ dataset: { image: IMG2 } });
+    await settle();
+    if (r.api.LIVE.draft.image !== IMG2) throw new Error(r.api.LIVE.draft.image);
+    need(main(r), [`aria-pressed="true" data-action="live-new-image-pick" data-image="${IMG2}"`]);
+    /* Run remembers it, so it comes first next time. */
+    Object.assign(r.api.LIVE.draft, { goal: 'Run the bot again.', repo: 'https://github.com/acme/bot.git', source: 'git' });
+    await r.api.liveNewRun();
+    await settle();
+    if (JSON.parse(r.store['ax.live.recentImages'])[0] !== IMG2) throw new Error(r.store['ax.live.recentImages']);
+  });
+  await check('no recent images: the Recent pills stay hidden', async () => {
+    const E = makeBackend();
+    const e = makeContext(E);
+    await settle();
+    await go(e, '#/new');
+    e.api.ACTIONS['live-new-agent']({ dataset: { agent: 'image' } });
+    await settle();
+    need(main(e), ['id="live-image-recent" role="group" aria-label="Recent images" hidden']);
   });
 
   console.log(fails ? `\n${fails} FAILED of ${n}` : `\nALL OK (${n} checks)`);

@@ -138,14 +138,32 @@ func TestEnvStatusHostProblems(t *testing.T) {
 	})
 
 	t.Run("ax without a JSON status", func(t *testing.T) {
-		runner := &localStatusRunner{stderr: "Usage: ax local ...\nError: flag provided but not defined: -o\n", err: errors.New("exit status 1")}
+		runner := &localStatusRunner{stderr: "Usage:\n  ax local <start|stop|status|delete> [flags]\n\nError: flag provided but not defined: -o\n", err: errors.New("exit status 1")}
 		resp := newStatusServer(t, runner).collectEnvStatus(context.Background())
 		item := preflightItem(t, resp, "container_engine")
-		if item.Status != "warn" || !strings.Contains(item.Detail, "flag provided but not defined: -o") {
+		if item.Status != "warn" || !strings.Contains(item.Detail, "too old") || !strings.Contains(item.Command, "install") {
 			t.Errorf("unexpected container engine item: %+v", item)
 		}
-		if resp.Local.State != stateNotFound || resp.Local.Name != "N/A" {
-			t.Errorf("expected the placeholder local cluster, got %+v", resp.Local)
+		// ax can't say whether AX on this computer is set up: unknown, not missing.
+		if resp.Local.State != stateUnknown || resp.Local.Name != "N/A" {
+			t.Errorf("expected an unknown local cluster, got %+v", resp.Local)
+		}
+		if u := resp.AXUpdate; u == nil || u.Reason != "flag provided but not defined: -o" || u.Command != item.Command {
+			t.Errorf("unexpected update: %+v", u)
+		}
+		if !resp.CanStartLocal {
+			t.Error("an old ax shouldn't fail the host checks")
+		}
+	})
+
+	t.Run("ax that fails for another reason", func(t *testing.T) {
+		runner := &localStatusRunner{stderr: "Error: Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", err: errors.New("exit status 1")}
+		resp := newStatusServer(t, runner).collectEnvStatus(context.Background())
+		if resp.AXUpdate != nil || resp.Local.State != stateNotFound {
+			t.Errorf("only an ax that lacks the flag is too old: update=%+v local=%+v", resp.AXUpdate, resp.Local)
+		}
+		if item := preflightItem(t, resp, "container_engine"); item.Status != "warn" || !strings.Contains(item.Detail, "Cannot connect to the Docker daemon") {
+			t.Errorf("unexpected container engine item: %+v", item)
 		}
 	})
 }

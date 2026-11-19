@@ -111,7 +111,8 @@ function liveSetAboutHTML() {
   const muted = (s) => `<span class="muted">${s}</span>`;
   const ax = LIVE.axError
     ? `<span class="ls-bad">${esc(LIVE.axError)}</span>`
-    : `${info.axBinary ? `${mono(info.axBinary)}<br>` : ''}${muted('ax version')} ${LIVE.axVersion ? esc(LIVE.axVersion) : 'Checking…'}`;
+    : `${info.axBinary ? `${mono(info.axBinary)}<br>` : ''}${muted('ax version')} ${LIVE.axVersion ? esc(LIVE.axVersion) : 'Checking…'}${LIVE.axUpdate
+      ? `<br><span class="ls-bad">Too old for this Studio: it has no <span class="mono">ax local status -o json</span>. Update it:</span><div style="margin-top:6px">${cliHint(LIVE.axUpdate.command)}</div>` : ''}`;
   const kept = (k) => (LIVE.images && LIVE.images[k] ? String(LIVE.images[k]).trim() : '');
   const images = `AX server: ${env.serverImageEnv ? `${mono(env.serverImageEnv)} ${muted('(from AX_SERVER_IMAGE)')}` : kept('serverImage') ? `${mono(kept('serverImage'))} ${muted('(kept in this browser)')}` : 'None yet'}<br>
     ${muted('Change them under AX images on')} <a href="#/places">Where agents run</a>`;

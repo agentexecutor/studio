@@ -43,6 +43,7 @@ const LIVE = {
   offlineAt: 0,
   axVersion: '',         // from ax version
   axError: '',           // why the ax command couldn't run; setup, New task and sending a task to a cluster need it
+  axUpdate: null,        // { reason, version, command } when this ax is too old for Studio (no `ax local status -o json`)
   env: null,             // what the server last said about this computer and your kubeconfig
   envError: '',
   envAt: 0,
@@ -51,7 +52,7 @@ const LIVE = {
   axFlags: {},           // which optional flags this ax takes ({ runnerVolumeImage })
   clusterChecks: {},     // context -> a read-only check of that cluster: { checking, error, requirements, substrate, router, workerPools, ax, axImage }
   canStartLocal: false,
-  local: null,           // { name, state: NotFound | Stopped | Running, context, substrate, server }
+  local: null,           // { name, state: NotFound | Stopped | Running | Unknown (ax too old to say), context, substrate, server }
   op: null,              // setup in progress, or the last one: { id, action, stage, status, error, logs, started, finished, stageStarted, step, canceled }
   opDismissed: '',       // the operation whose result you dismissed
   localVerb: 'setup',    // what the `ax local start` that runs was for: setup, start, update or repair
@@ -144,7 +145,7 @@ function liveUseAtespace(name) {
 function liveRouteTask() { const r = parseRoute(); return r.parts[0] === 'task' && r.parts[1] ? decodeURIComponent(r.parts[1]) : ''; }
 function liveSnapshot() {
   const cur = liveRouteTask();
-  return JSON.stringify([LIVE.phase, LIVE.tasks.map((t) => [t.name, t.state, t.goal, t.created]), LIVE.error, LIVE.contexts, LIVE.envError, LIVE.local, LIVE.checks, LIVE.tools,
+  return JSON.stringify([LIVE.phase, LIVE.tasks.map((t) => [t.name, t.state, t.goal, t.created]), LIVE.error, LIVE.contexts, LIVE.envError, LIVE.local, LIVE.checks, LIVE.tools, LIVE.axUpdate,
     LIVE.context, LIVE.busy, LIVE.loaded, LIVE.axError, LIVE.op && [LIVE.op.id, LIVE.op.status], cur && LIVE.detail[cur], cur && LIVE.gateways]);
 }
 async function liveStart() {
@@ -205,6 +206,7 @@ async function liveLoadEnv(fresh) {
     LIVE.checks = env.preflight || [];
     LIVE.tools = env.tools || [];
     LIVE.axFlags = env.axFlags || {};
+    LIVE.axUpdate = env.axUpdate && env.axUpdate.command ? { reason: env.axUpdate.reason || '', version: env.axUpdate.version || '', command: env.axUpdate.command } : null;
     LIVE.canStartLocal = !!env.canStartLocal;
     LIVE.local = { name: l.name || '', state: l.state || 'NotFound', context: l.kubeContext && l.kubeContext !== 'N/A' ? l.kubeContext : '', substrate: l.substrateStatus || '', server: l.axStatus || '', access: l.access || 'ok' };
     LIVE.contexts = (env.contexts || []).map((c) => ({ name: c.name, cluster: c.cluster || '', current: !!c.current, isLocal: !!c.isLocal }));
@@ -612,8 +614,9 @@ function liveIsLocal(context) {
   const c = LIVE.contexts.find((x) => x.name === context);
   return !!(c && c.isLocal);
 }
-/** The cluster in use is AX on this computer, and it isn't running. */
-function liveLocalDown() { return !!(LIVE.context && liveIsLocal(LIVE.context) && LIVE.local && LIVE.local.state !== 'Running'); }
+/** The cluster in use is AX on this computer, and it isn't running. When ax is too old to say (Unknown), it isn't
+    called down: the task list shows what the cluster says, and a banner asks you to update ax. */
+function liveLocalDown() { return !!(LIVE.context && liveIsLocal(LIVE.context) && LIVE.local && LIVE.local.state !== 'Running' && LIVE.local.state !== 'Unknown'); }
 function liveWhere(context) {
   return liveIsLocal(context) ? `<span class="env" title="${esc(context)}">${icon('laptop')}On this computer</span>` : `<span class="env" title="${esc(context)}">${icon('cloud')}${esc(context || 'Current cluster')}</span>`;
 }
@@ -749,13 +752,15 @@ function liveViewHome() {
       ${FIRST_IDEAS.map((x) => `<button type="button" class="pill fi-idea" data-action="live-first-idea" data-goal="${esc(x.goal)}">${icon(x.ic, 'xs')}${esc(x.label)}</button>`).join('')}
     </div>` : '';
   const res = typeof liveResHTML === 'function' && !LIVE.error ? liveResHTML() : '';
-  const body = !LIVE.loaded ? ''
+  /* An ax too old for Studio comes first: it is why this computer can't be checked, and why some actions fail. */
+  const axUpd = typeof liveAxUpdateHTML === 'function' ? liveAxUpdateHTML() : '';
+  const body = axUpd + (!LIVE.loaded ? ''
     : list.length ? `${problem}${flow}<div id="live-tasks">${listHead}${sections}</div>${res}`
       : problem || `${listHead}<div class="card card-pad" id="live-empty" style="margin-top:10px">
             <div class="live-title">No tasks here yet</div>
             <p class="small" style="margin-top:4px;max-width:70ch">Start one above, or from the command line. Tasks on this cluster show up as soon as they're created.</p>
           ${ideas}
-          <div style="margin-top:12px;display:grid;gap:8px">${cliHint(liveCmd(['apply', '-f', 'task.yaml']))}${cliHint(liveCmd(['resume', 'task', '<name>']))}</div></div>${res}`;
+          <div style="margin-top:12px;display:grid;gap:8px">${cliHint(liveCmd(['apply', '-f', 'task.yaml']))}${cliHint(liveCmd(['resume', 'task', '<name>']))}</div></div>${res}`);
   const html = `
     <section class="stage" aria-labelledby="live-home-h1">
       <div class="stage-copy">
@@ -1168,11 +1173,12 @@ function liveFootStatus() {
   const remoteOp = !!op && (op.action === 'remote-install' || op.action === 'remote-uninstall');
   const opHere = liveOpRunning() && (remoteOp ? op.target === LIVE.context : liveOpIsLocal(op) && (!LIVE.context || liveIsLocal(LIVE.context)));
   const setup = opHere || !LIVE.context || liveLocalDown();
-  const bad = LIVE.phase !== 'ready' || !!LIVE.error || setup;
+  const bad = LIVE.phase !== 'ready' || !!LIVE.error || setup || (!!LIVE.axUpdate && liveIsLocal(LIVE.context));
   const title = LIVE.phase === 'offline' ? 'Not connected' : !LIVE.context ? 'No cluster yet' : liveIsLocal(LIVE.context) ? 'This computer' : liveShortCtx(LIVE.context);
   const sub = LIVE.phase === 'starting' ? 'Connecting…' : LIVE.phase === 'offline' ? "AX Studio isn't answering"
-    : opHere ? `${typeof liveOpShort === 'function' ? liveOpShort(op) : 'Working'}…` : !LIVE.context ? 'Set up AX to start' : liveLocalDown() ? (LIVE.local.state === 'Stopped' ? 'AX is stopped' : 'AX is not set up')
-      : LIVE.error ? LIVE_ERROR_WORDS[liveErrorKind()].foot : `Connected · ${plural(LIVE.tasks.filter((t) => liveState(t.state).active).length, 'running', 'running')}`;
+    : opHere ? `${typeof liveOpShort === 'function' ? liveOpShort(op) : 'Working'}…` : !LIVE.context ? (LIVE.axUpdate ? 'Update ax to start' : 'Set up AX to start') : liveLocalDown() ? (LIVE.local.state === 'Stopped' ? 'AX is stopped' : 'AX is not set up')
+      : LIVE.error ? (LIVE.axUpdate && liveIsLocal(LIVE.context) ? 'Update ax' : LIVE_ERROR_WORDS[liveErrorKind()].foot)
+        : `Connected · ${plural(LIVE.tasks.filter((t) => liveState(t.state).active).length, 'running', 'running')}${LIVE.axUpdate && liveIsLocal(LIVE.context) ? ' · Update ax' : ''}`;
   return { bad, title, sub };
 }
 function liveChrome(top) {

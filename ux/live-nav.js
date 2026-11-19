@@ -122,7 +122,8 @@ function liveCtxSwitchHTML() {
   const ates = LIVE.atespace !== 'default' ? ` <span class="cs-ates">${esc(LIVE.atespace)}</span>` : '';
   const items = LIVE.contexts.slice().sort((a, b) => (liveIsLocal(b.name) - liveIsLocal(a.name)) || a.name.localeCompare(b.name)).map((c) => {
     const local = liveIsLocal(c.name);
-    const csub = local ? (LIVE.local && LIVE.local.state === 'Running' ? 'AX on this computer' : LIVE.local && LIVE.local.state === 'Stopped' ? 'AX on this computer · stopped' : 'Not set up') : (c.current ? 'Current in your kubeconfig' : 'Remote cluster');
+    const st = LIVE.local && LIVE.local.state;
+    const csub = local ? (st === 'Running' ? 'AX on this computer' : st === 'Stopped' ? 'AX on this computer · stopped' : st === 'Unknown' ? 'AX on this computer · update ax' : 'Not set up') : (c.current ? 'Current in your kubeconfig' : 'Remote cluster');
     return `<button type="button" class="cs-item" role="menuitemradio" aria-checked="${c.name === cur}" data-action="live-use-context" data-context="${esc(c.name)}" title="${esc(c.name)}">
         ${icon(local ? 'laptop' : 'cloud', 'sm')}<span class="cs-text"><span class="cs-name">${esc(local ? 'This computer' : liveShortCtx(c.name))}</span><span class="cs-sub">${esc(csub)}</span></span>${c.name === cur ? icon('check', 'sm') : ''}</button>`;
   }).join('');

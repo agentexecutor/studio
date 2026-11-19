@@ -96,16 +96,49 @@ function liveRememberRepo(url) {
   try { localStorage.setItem(LIVE_RECENT_KEY, JSON.stringify([url].concat(liveRecentRepos().filter((x) => x !== url)).slice(0, 5))); } catch (e) { /* ignore */ }
 }
 
+/* ---------- Images you ran before (in this browser), and the ones the cluster's tasks run ---------- */
+const LIVE_RECENT_IMAGES_KEY = 'ax.live.recentImages';
+function liveMyRecentImages() {
+  try {
+    const a = JSON.parse(localStorage.getItem(LIVE_RECENT_IMAGES_KEY) || '[]');
+    return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && LIVE_DIGEST_RE.test(x)).slice(0, 5) : [];
+  } catch (e) { return []; }
+}
+/** Your own images to pick with one click, newest first: the ones you ran from this browser, then the ones tasks on
+    the cluster in use run. Templates' images have their own cards, and AX only runs an image by its digest. */
+function liveRecentImages() {
+  const templates = Object.keys(LIVE_AGENTS).map((k) => LIVE_AGENTS[k].image);
+  const onCluster = LIVE.tasks.slice().sort((a, b) => String(b.created).localeCompare(String(a.created)))
+    .map((t) => ((((t.doc || {}).spec || {}).profile || {}).image || '').trim());
+  const out = [];
+  liveMyRecentImages().concat(onCluster).forEach((im) => { if (LIVE_DIGEST_RE.test(im) && !templates.includes(im) && !out.includes(im)) out.push(im); });
+  return out.slice(0, 4);
+}
+function liveRememberImage(ref) {
+  if (!LIVE_DIGEST_RE.test(ref)) return;
+  try { localStorage.setItem(LIVE_RECENT_IMAGES_KEY, JSON.stringify([ref].concat(liveMyRecentImages().filter((x) => x !== ref)).slice(0, 5))); } catch (e) { /* ignore */ }
+}
+function liveImagePillsHTML(d, recent) {
+  return recent.length ? `<span class="gh-label">Recent</span>${recent.map((r) => `<button type="button" class="pill mono" aria-pressed="${d.image.trim() === r}" data-action="live-new-image-pick" data-image="${esc(r)}" title="${esc(r)}">${icon('box', 'xs')}${esc(liveImageShort(r))}</button>`).join('')}` : '';
+}
+
 /* ---------- Where it runs ---------- */
-/** AX on this computer is running, and its cluster is in the kubeconfig. */
+/** AX on this computer is running, and its cluster is in the kubeconfig. When ax is too old to say (Unknown), the
+    cluster in use counts when it is this computer's and its task list just came back. */
 function liveLocalReady() {
   const L = LIVE.local;
+  if (L && L.state === 'Unknown') return !!(LIVE.context && liveIsLocal(LIVE.context) && LIVE.loaded && !LIVE.error);
   return !!(L && L.state === 'Running' && L.context && LIVE.contexts.some((c) => c.name === L.context));
+}
+/** The context of AX on this computer: what ax reported, or the cluster in use when ax is too old to report it. */
+function liveLocalContext() {
+  const L = LIVE.local || {};
+  return L.context || (L.state === 'Unknown' && liveIsLocal(LIVE.context) ? LIVE.context : '');
 }
 /** The cluster in use, if a task can run there; else this computer; else the first remote cluster. */
 function liveNewDefaultWhere() {
   if (LIVE.context && LIVE.contexts.some((c) => c.name === LIVE.context) && (!liveIsLocal(LIVE.context) || liveLocalReady())) return LIVE.context;
-  if (liveLocalReady()) return LIVE.local.context;
+  if (liveLocalReady()) return liveLocalContext();
   const r = LIVE.contexts.find((c) => !liveIsLocal(c.name));
   return r ? r.name : '';
 }
@@ -351,6 +384,8 @@ async function liveNewRun() {
     if (r.status !== 0) throw new Error(liveLastLine(r.stderr || r.stdout) || 'ax apply failed.');
     created = d.raw ? liveYAMLTaskName(d.yaml) : liveDraftName(d);
     if (!d.raw && !d.workspace && d.source === 'git') liveRememberRepo(d.repo.trim());
+    /* Your own image is one click away next time. */
+    if (!d.raw && !LIVE_AGENTS[d.agent]) liveRememberImage(d.image.trim());
     step('Starting it…');
     const s = created ? await studioApi.ax(scope.concat(['resume', 'task', created])) : { status: 0 };
     LIVE.draft = null;
@@ -385,6 +420,7 @@ function liveNewAgentHTML(d) {
         <span class="prow-hint" id="live-new-key-hint">${icon('lock', 'xs')} Stored on the cluster as a secret and added to the agent's requests outside the sandbox, so the agent never holds it.</span>`, { labelId: 'live-key-label', sub: 'Only the first time' }),
   ] : [
     prow('Image', `<input class="input mono" type="text" id="live-new-image" data-live-new="image" value="${esc(d.image)}" placeholder="registry.example.com/team/agent@sha256:…" autocomplete="off" spellcheck="false" aria-labelledby="live-image-label" aria-describedby="live-new-image-hint">
+        ${d.from ? '' : (() => { const recent = liveRecentImages(); return `<div class="pills" id="live-image-recent" role="group" aria-label="Recent images" ${recent.length ? '' : 'hidden'}>${liveImagePillsHTML(d, recent)}</div>`; })()}
         <span class="prow-hint" id="live-new-image-hint">It must end in its digest (<span class="mono">@sha256:…</span>). AX runs the image as it is, with your goal.</span>`, { labelId: 'live-image-label', sub: 'Its address and digest' }),
   ];
   return `${picker}<div class="panel tpl-panel">${rows.join('')}</div>`;
@@ -400,15 +436,18 @@ function liveNewWhereHTML(d) {
     return `<div class="radio-list"><div class="radio-card info is-on" id="live-where-fixed"><span class="rc-icon" aria-hidden="true">${icon(onLocal ? 'laptop' : 'cloud')}</span>
       <span class="rc-main"><span class="rc-title">${onLocal ? 'On this computer' : esc(d.where)}</span><span class="rc-desc">A follow-up runs where its session is, so it can reuse the workspace and network rules.</span></span></div></div>`;
   }
-  const localDesc = localOk ? `In a gVisor sandbox on <span class="mono">${esc(L.context)}</span>. Starts in seconds, and costs nothing in the cloud.`
-    : L.state === 'Stopped' ? 'AX on this computer is stopped.' : "AX isn't set up on this computer yet.";
+  const tooOld = L.state === 'Unknown';
+  const localCtx = liveLocalContext();
+  const localDesc = localOk ? `In a gVisor sandbox on <span class="mono">${esc(localCtx)}</span>. Starts in seconds, and costs nothing in the cloud.`
+    : tooOld ? "This ax is too old to say whether AX on this computer runs." : L.state === 'Stopped' ? 'AX on this computer is stopped.' : "AX isn't set up on this computer yet.";
+  const fixLocal = tooOld ? 'Update ax' : L.state === 'Stopped' ? 'Start AX on this computer' : 'Set up AX on this computer';
   const remoteRight = !onLocal && d.where ? esc(d.where) : remotes.length ? plural(remotes.length, 'cluster') : 'None in your kubeconfig';
-  const hint = !localOk && !remotes.length ? `<p class="hint" style="margin-top:8px"><a href="#/places">Set up AX on this computer</a>, or add a cluster to your kubeconfig.</p>`
-    : !localOk ? `<p class="hint" style="margin-top:8px"><a href="#/places">${L.state === 'Stopped' ? 'Start' : 'Set up'} AX on this computer</a> to run here.</p>`
+  const hint = !localOk && !remotes.length ? `<p class="hint" style="margin-top:8px"><a href="#/places">${fixLocal}</a>, or add a cluster to your kubeconfig.</p>`
+    : !localOk ? `<p class="hint" style="margin-top:8px"><a href="#/places">${fixLocal}</a> to run here.</p>`
       : !remotes.length ? '<p class="hint" style="margin-top:8px">Add a remote cluster to your kubeconfig and it shows up here.</p>' : '';
   return `<div class="radio-list" role="radiogroup" aria-labelledby="live-step-where">
       <button type="button" class="radio-card" role="radio" aria-checked="${onLocal}" ${localOk ? '' : 'aria-disabled="true"'} data-action="live-new-where" data-where="local" id="live-where-local">
-        <span class="rc-dot"></span><span class="rc-main"><span class="rc-title">On this computer</span><span class="rc-desc">${localDesc}</span></span><span class="rc-right">${localOk ? 'Best to start' : L.state === 'Stopped' ? 'Stopped' : 'Not set up'}</span></button>
+        <span class="rc-dot"></span><span class="rc-main"><span class="rc-title">On this computer</span><span class="rc-desc">${localDesc}</span></span><span class="rc-right">${tooOld ? 'Update ax' : localOk ? 'Best to start' : L.state === 'Stopped' ? 'Stopped' : 'Not set up'}</span></button>
       <button type="button" class="radio-card" role="radio" aria-checked="${!onLocal && !!d.where}" ${remotes.length ? '' : 'aria-disabled="true"'} data-action="live-new-where" data-where="remote" id="live-where-remote">
         <span class="rc-dot"></span><span class="rc-main"><span class="rc-title">On a remote cluster</span><span class="rc-desc">On a shared GKE or Kubernetes cluster from your kubeconfig. It keeps running when your laptop closes.</span></span><span class="rc-right">${remoteRight}</span></button>
     </div>
@@ -637,9 +676,9 @@ function liveReadyItems(d) {
   return [
     { ok: agentOk, todo: 'give the image address', t: A ? `${A.name} · <span class="mono">${esc(A.model)}</span>` : 'Your own image',
       s: A ? (d.key.trim() ? 'The key is stored on the cluster when you run' : 'Its key is added outside the sandbox') : (d.image.trim() ? esc(liveImageShort(d.image.trim())) : 'An image address with @sha256:…') },
-    { ok: whereOk, todo: liveIsLocal(d.where) ? 'start AX on this computer' : 'choose where it runs',
+    { ok: whereOk, todo: liveIsLocal(d.where) ? (L.state === 'Unknown' ? 'update ax' : 'start AX on this computer') : 'choose where it runs',
       t: !d.where ? 'Where it runs' : liveIsLocal(d.where) ? 'On this computer' : `On ${esc(d.where)}`,
-      s: !d.where ? 'Set up AX, or add a cluster' : liveIsLocal(d.where) ? (whereOk ? 'gVisor sandbox · starts in seconds' : L.state === 'Stopped' ? 'AX is stopped here' : "AX isn't set up here") : 'A remote cluster from your kubeconfig' },
+      s: !d.where ? (L.state === 'Unknown' ? 'Update ax, or add a cluster' : 'Set up AX, or add a cluster') : liveIsLocal(d.where) ? (whereOk ? 'gVisor sandbox · starts in seconds' : L.state === 'Stopped' ? 'AX is stopped here' : L.state === 'Unknown' ? 'Update ax to check AX here' : "AX isn't set up here") : 'A remote cluster from your kubeconfig' },
     { ok: wsOk, todo: d.source === 'existing' ? 'pick a workspace' : 'add a Git repo, or choose Empty workspace', t: d.workspace ? 'Workspace from the last turn' : d.source === 'existing' ? 'An existing workspace' : d.source === 'git' ? 'Git repo' : 'Empty workspace',
       s: d.workspace ? esc(d.workspace) : d.source === 'existing' ? (d.existing ? `<span class="mono">${esc(d.existing)}</span>` : 'One already on the cluster')
         : d.source === 'git' ? (liveRepoHost(repo) ? `${esc(liveRepoShort(repo))}${d.branch.trim() ? ` · ${esc(d.branch.trim())}` : ''}` : 'An https:// Git address') : 'An empty /workspace' },
@@ -734,6 +773,7 @@ function liveNewRefreshParts(d, k) {
     const ws = $('#live-ws-more-sum'); if (ws) ws.textContent = liveWsMoreSum(d);
   }
   if (k === 'branch') { const bp = $('#live-branch-picks'); if (bp) bp.innerHTML = liveBranchPillsHTML(d); }
+  if (k === 'image') { const ip = $('#live-image-recent'); if (ip) ip.innerHTML = liveImagePillsHTML(d, liveRecentImages()); }
   if (k === 'cpu' || k === 'memory') { const sh = $('#live-size-hint'); if (sh) sh.textContent = liveNewSizeHint(d); }
   const mf = $('#live-new-manifest'); if (mf) mf.innerHTML = esc(liveNewYAML(d, 'text', ''));
   const cli = $('#live-new-cli'); if (cli) cli.innerHTML = liveNewCliHTML(d);
@@ -797,6 +837,11 @@ function livePromoteNote(line) {
 function liveKeysNote(secrets) {
   return `That cluster needs its own copy of ${secrets.length === 1 ? 'the key' : 'the keys'} ${secrets.map((x) => `<span class="mono">${esc(x)}</span>`).join(', ')}. Keys aren't copied.`;
 }
+/** The line of ax's output that says it doesn't know a command or a flag, without "Error: ". */
+function liveTooOldLine(text) {
+  const line = String(text || '').split('\n').map((l) => l.trim()).find((l) => /unknown command|flag provided but not defined|unknown (shorthand )?flag/i.test(l));
+  return (line || liveLastLine(text)).replace(/^Error:\s*/i, '');
+}
 function liveOpenPromote(name) {
   const targets = LIVE.contexts;
   const others = targets.filter((c) => c.name !== LIVE.context);
@@ -830,6 +875,11 @@ function liveOpenPromote(name) {
       check = '<p class="small" style="margin-top:14px;color:var(--wait)" id="lp-check">An atespace name is lowercase letters, digits and dashes.</p>';
     } else if (p.checking) {
       check = `<p class="small muted" id="lp-check" style="margin-top:14px">${icon('loader', 'xs')} Checking ${esc(liveShortCtx(p.to))}…</p>`;
+    } else if (p.check && !p.check.ok && /unknown command:?\s*"?promote|flag provided but not defined/i.test(p.check.text || '')) {
+      /* An ax from before `ax promote` (or one of its flags) can't send it: say so, and how to update ax. */
+      check = `<div class="callout warn" role="alert" style="margin-top:14px" id="lp-check">${icon('alert')}<div style="min-width:0;flex:1"><strong>This ax can't send tasks to another cluster yet.</strong> It's older than <span class="mono">ax promote</span>. Update ax, then try again.
+          ${LIVE.axUpdate ? `<div class="live-cli-wrap" style="margin-top:8px">${cliHint(LIVE.axUpdate.command)}</div>` : ''}
+          <p class="xsmall muted" style="margin-top:6px;overflow-wrap:anywhere">What ax said: ${esc(liveTooOldLine(p.check.text))}</p></div></div>`;
     } else if (p.check) {
       const lines = String(p.check.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
       const notes = lines.filter((l) => /^Note:/i.test(l));
@@ -934,7 +984,7 @@ const LIVE_NEW_ACTIONS = {
     const remotes = LIVE.contexts.filter((c) => !liveIsLocal(c.name));
     if (el.dataset.where === 'local') {
       if (!liveLocalReady()) return;
-      d.where = LIVE.local.context;
+      d.where = liveLocalContext();
     } else {
       if (!remotes.length) return;
       if (!d.where || liveIsLocal(d.where)) d.where = (remotes.find((c) => c.name === LIVE.context) || remotes[0]).name;
@@ -1016,6 +1066,7 @@ const LIVE_NEW_ACTIONS = {
     d.size = el.dataset.size;
     render({ keepScroll: true });
   },
+  'live-new-image-pick': (el) => { const d = LIVE.draft; if (d && !d.busy) { d.image = el.dataset.image || ''; d.error = ''; render({ keepScroll: true }); } },
   'live-new-raw': () => { const d = LIVE.draft; if (d) { d.yaml = liveNewYAML(d, 'text', ''); d.raw = true; d.error = ''; render({ keepScroll: true }); } },
   'live-new-form': () => { if (LIVE.draft) { LIVE.draft.raw = false; LIVE.draft.error = ''; render({ keepScroll: true }); } },
   'live-new-run': () => liveNewRun(),

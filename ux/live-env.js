@@ -169,6 +169,9 @@ function liveSetOp(op) {
     purpose: op.purpose || (same ? LIVE.op.purpose : ''),
     /* The command's exit status when it failed. */
     exitCode: op.exitCode || 0,
+    /* The pods that couldn't start when it failed, as the server found them: { namespace, pod, container, image,
+       reason, message, hint }. */
+    problems: Array.isArray(op.problems) ? op.problems : same ? LIVE.op.problems || [] : [],
   };
   if (op.status === 'running') LIVE.opDismissed = '';
 }
@@ -258,16 +261,37 @@ function liveOpInnerHTML(opts) {
   const why = failed && !op.canceled ? (liveLastLine(lines.join('\n')) || op.error || 'It stopped without saying why.') : '';
   return `${head}
     ${op.canceled ? '<p class="small sub op-note">What it already did stays done. Running it again picks up from there.</p>' : ''}
-    ${why ? `<div class="callout warn" role="alert" style="margin-top:14px">${icon('alert')}<div><strong>${esc(words.fail + '.')}</strong> <span style="overflow-wrap:anywhere">${esc(why)}</span></div></div>` : ''}
+    ${why ? `<div class="callout warn" role="alert" style="margin-top:14px">${icon('alert')}<div style="min-width:0;flex:1"><strong>${esc(words.fail + '.')}</strong> <span style="overflow-wrap:anywhere">${esc(why)}</span>${liveOpProblemsHTML(op)}</div></div>` : ''}
     ${withLog && lines.length ? `<div class="live-title" style="margin-top:14px">Output</div>
       <pre class="manifest" id="live-op-log" style="margin-top:8px;max-height:260px;overflow:auto" tabindex="0" aria-label="Output">${esc(lines.join('\n'))}</pre>` : ''}`;
+}
+/* Kubernetes' reasons a pod can't start, in the UI's words. The reason itself stays next to them. */
+const LIVE_POD_REASONS = {
+  ErrImagePull: "Can't pull its image", ImagePullBackOff: "Can't pull its image", InvalidImageName: 'Its image name is wrong',
+  ErrImageNeverPull: "Its image isn't on the node", CrashLoopBackOff: 'Keeps crashing', Unschedulable: "Can't be scheduled",
+  CreateContainerConfigError: "Its settings don't work", CreateContainerError: "Its container can't be created", RunContainerError: "Its container can't run",
+};
+/** When a setup or an install fails, the pods that couldn't start, as the server found them on the cluster: what
+    Kubernetes said about each, and what it most likely means. A rollout that timed out is usually one of these. */
+function liveOpProblemsHTML(op) {
+  const list = (op && op.problems) || [];
+  if (!list.length) return '';
+  return `<div class="op-problems" id="live-op-problems">
+      <div class="op-problems-h">${list.length === 1 ? 'A pod on the cluster can\'t start' : `${list.length} pods on the cluster can't start`}</div>
+      <ul class="op-problem-list">${list.map((p) => `<li>
+        <div class="op-problem-who"><span class="mono">${esc(p.namespace)}/${esc(p.pod)}</span>${p.container ? ` <span class="muted">· ${esc(p.container)}</span>` : ''}</div>
+        <div class="op-problem-why"><strong>${esc(LIVE_POD_REASONS[p.reason] || p.reason)}</strong>${LIVE_POD_REASONS[p.reason] ? ` <span class="muted mono">${esc(p.reason)}</span>` : ''}</div>
+        ${p.message ? `<div class="op-problem-msg mono">${esc(p.message)}</div>` : ''}
+        ${p.hint ? `<div class="op-problem-hint">${icon('info', 'xs')}<span>${esc(p.hint)}</span></div>` : ''}
+      </li>`).join('')}</ul></div>`;
 }
 /** Progress, or the result until you dismiss it. Installing or removing AX on a cluster shows on that cluster's card. */
 function liveOpHTML(opts) {
   const op = LIVE.op;
   if (!op || LIVE.opDismissed === op.id || !liveOpIsLocal(op)) return '';
   if (op.status === 'ok' && parseRoute().parts[0] !== 'places') return '';
-  if (op.action === 'local-up' && op.status === 'failed' && !op.canceled && LIVE.local && LIVE.local.state === 'Running' && /available/i.test(LIVE.local.server || '')) return '';
+  /* A setup that failed is old news once AX here runs and every part is available (not "0/1 available"). */
+  if (op.action === 'local-up' && op.status === 'failed' && !op.canceled && LIVE.local && LIVE.local.state === 'Running' && liveAvailable(LIVE.local.server) && liveAvailable(LIVE.local.substrate)) return '';
   return `<div id="live-op" class="live-op" style="margin-top:12px">${liveOpInnerHTML(opts)}</div>`;
 }
 
@@ -321,7 +345,8 @@ function liveChecksHTML() {
   const look = { ok: ['ok', 'check'], warn: ['warn', 'alert'], fail: ['no', 'x'] };
   return `<div class="setup-panel live-checks"><ul class="check-list" aria-label="What AX on this computer needs">${LIVE.checks.map((c) => {
     const [cls, ic] = look[c.status] || look.warn;
-    const fix = c.command ? `<div style="margin-top:8px">${cliHint(c.command)}</div>` : '';
+    /* The update command for an old ax has its own callout, so the check doesn't repeat it. */
+    const fix = c.command && !(LIVE.axUpdate && c.command === LIVE.axUpdate.command) ? `<div style="margin-top:8px">${cliHint(c.command)}</div>` : '';
     return setupCheckItem(cls, ic, esc(LIVE_CHECK_TITLES[c.id] || c.label || 'Check'), `<span id="live-check-${esc(c.id)}">${esc(c.detail || '')}</span>${fix}`);
   }).join('')}</ul></div>`;
 }
@@ -370,7 +395,25 @@ function liveLocalHealth() {
     if (liveAvailable(L.substrate) && liveAvailable(L.server) && !/degraded/i.test(L.substrate || '')) return { ok: true, text: 'Running' };
     return { ok: false, text: 'Starting or degraded', fix: 'repair' };
   }
+  /* An ax without `ax local status -o json` can't say whether AX here is set up: it isn't "Not set up". */
+  if (L.state === 'Unknown') return { ok: false, text: 'Update ax', fix: 'update-ax' };
   return { ok: false, text: L.state === 'Stopped' ? 'Stopped' : 'Not set up' };
+}
+/* ---------- An ax too old for Studio ---------- */
+/** Says this ax is older than AX Studio needs, what that stops, and the command that updates it (from the server:
+    install.sh for a release, go install for a commit with no release yet). { compact: true } leaves out Check again,
+    for a page that has its own. */
+function liveAxUpdateHTML(opts) {
+  const u = LIVE.axUpdate;
+  if (!u) return '';
+  const compact = !!(opts && opts.compact);
+  const said = [u.reason ? `What ax said: ${esc(u.reason)}` : '', u.version ? `AX Studio is built against ax <span class="mono">${esc(u.version)}</span>` : ''].filter(Boolean).join(' · ');
+  return `<div class="callout warn ax-update" id="live-ax-update" role="status" style="margin-top:14px">${icon('alert')}<div style="min-width:0;flex:1">
+      <strong>Update ax.</strong> This ax is older than AX Studio needs. It can't report how AX on this computer is doing, so Studio can't check it, set it up or repair it. Update ax, then check again.
+      <div class="live-cli-wrap" style="margin-top:8px">${cliHint(u.command)}</div>
+      ${said ? `<p class="xsmall muted" style="margin-top:6px;overflow-wrap:anywhere">${said}</p>` : ''}
+      ${compact ? '' : `<div class="btn-row" style="margin-top:10px"><button type="button" class="btn sm" data-action="live-env-refresh" data-fresh="1" id="live-ax-update-check">${icon('refresh', 'sm')}Check again</button></div>`}
+    </div></div>`;
 }
 /** What stops `ax local start`: ax missing, a failed check (only before setup), or the images. */
 function liveLocalBlockers(forSetup) {
@@ -393,13 +436,17 @@ function liveLocalHTML() {
   if (LIVE.envError && !L) return `<div class="health-line attn" style="margin-top:4px"><span class="hd"></span>Couldn't check</div><p class="small" style="margin-top:8px;overflow-wrap:anywhere">${esc(LIVE.envError)}</p><div class="btn-row" style="margin-top:10px"><button class="btn sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>`;
   if (!L) return '<p class="small muted" style="margin-top:8px">Checking…</p>';
   const busy = liveOpRunning();
-  const running = L.state === 'Running', stopped = L.state === 'Stopped';
+  const running = L.state === 'Running', stopped = L.state === 'Stopped', unknown = L.state === 'Unknown';
   const line = busy ? '' : running ? `<div class="health-line" style="margin-top:4px" id="live-local-state"><span class="hd"></span>Running</div>`
-    : `<div class="health-line attn" style="margin-top:4px" id="live-local-state"><span class="hd"></span>${stopped ? 'Stopped' : 'Not set up'}</div>`;
+    : `<div class="health-line attn" style="margin-top:4px" id="live-local-state"><span class="hd"></span>${stopped ? 'Stopped' : unknown ? 'Update ax' : 'Not set up'}</div>`;
   const noAx = LIVE.axError ? `<div class="callout warn" style="margin-top:12px">${icon('alert')}<div><strong>Studio couldn't run the <span class="mono">ax</span> command, and setup needs it.</strong> Install AX (see github.com/google/ax), then check again. <span class="muted" style="overflow-wrap:anywhere">${esc(LIVE.axError)}</span></div></div>` : '';
   let body;
   if (busy) {
     body = '';
+  } else if (unknown) {
+    /* Nothing to set up, start or repair with until ax is new enough to say what's here. */
+    body = `${liveAxUpdateHTML()}${noAx}
+      <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} What Studio asks ax: <code>ax local status -o json</code></p>`;
   } else if (running) {
     body = `<div style="margin-top:12px">${liveKV([['Cluster', esc(L.name)], ['Kube context', `<span class="mono">${esc(L.context)}</span>`], ['Agent Substrate', esc(L.substrate)], ['AX server', esc(L.server)]])}</div>
       <div class="btn-row" style="margin-top:14px"><button class="btn sm" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}">${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
@@ -543,7 +590,8 @@ function liveClusterCardHTML(c) {
         </div>
         ${!busy && checked ? (clusterBlock ? `<p class="xsmall muted cl-why">${hasAX ? 'Upgrade' : 'Install'} AX: ${esc(clusterBlock)}</p>`
           : `<p class="xsmall muted cl-why" data-why-images data-verb="${hasAX ? 'Upgrade' : 'Install'}" ${blockers.length ? '' : 'hidden'}>${hasAX ? 'Upgrade' : 'Install'} AX: ${esc(blockers.join(' '))}</p>`) : ''}
-        ${failed ? `<div class="callout warn" role="alert" style="margin-top:10px">${icon('alert')}<div><strong>${esc(op.canceled ? `${liveOpWords(op).doing}: canceled` : liveOpWords(op).fail)}.</strong> <span style="overflow-wrap:anywhere">${esc(why)}</span>
+        ${failed ? `<div class="callout warn" role="alert" style="margin-top:10px">${icon('alert')}<div style="min-width:0;flex:1"><strong>${esc(op.canceled ? `${liveOpWords(op).doing}: canceled` : liveOpWords(op).fail)}.</strong> <span style="overflow-wrap:anywhere">${esc(why)}</span>
+          ${op.canceled ? '' : liveOpProblemsHTML(op)}
           <div class="btn-row" style="margin-top:8px"><button type="button" class="btn ghost sm" data-action="live-op-dismiss">Dismiss</button></div></div></div>` : ''}
       </div>
     </div>`;
@@ -590,12 +638,15 @@ function liveLayersHTML() {
   const running = L.state === 'Running', stopped = L.state === 'Stopped';
   const real = (s) => (s && s !== 'N/A' ? s : '');
   const chip = (cls, ic, text) => `<span class="chip ${cls}">${icon(ic)}${text}</span>`;
-  /* A cluster kubectl can't look into isn't one with nothing installed: say it's unknown, and why. */
-  const unknown = running && L.access === 'no-context' ? `Unknown: the ${L.context || 'ax-local'} context isn't in your kubeconfig. Repair puts it back.`
-    : running && L.access === 'unreachable' ? "Unknown: the cluster's API server isn't answering." : '';
+  /* A cluster kubectl can't look into isn't one with nothing installed: say it's unknown, and why. So is one an old ax
+     can't report. */
+  const tooOld = L.state === 'Unknown';
+  const unknown = tooOld ? 'Unknown: this ax is too old to report it.'
+    : running && L.access === 'no-context' ? `Unknown: the ${L.context || 'ax-local'} context isn't in your kubeconfig. Repair puts it back.`
+      : running && L.access === 'unreachable' ? "Unknown: the cluster's API server isn't answering." : '';
   /* Each layer covers some of setup's steps (by index in LIVE_SETUP_STEPS). */
   const layers = [
-    { ic: 'box', name: 'Kubernetes (Kind)', steps: [0, 0], tech: running || stopped ? `kind · ${L.name || 'ax-local'}${running && L.access === 'no-context' ? ' · its containers run, but your kubeconfig has no context for it' : ''}` : 'Not created yet', ready: running, live: '' },
+    { ic: 'box', name: 'Kubernetes (Kind)', steps: [0, 0], tech: tooOld ? unknown : running || stopped ? `kind · ${L.name || 'ax-local'}${running && L.access === 'no-context' ? ' · its containers run, but your kubeconfig has no context for it' : ''}` : 'Not created yet', ready: running, live: '' },
     { ic: 'shield', name: 'Agent Substrate + gVisor workers', steps: [1, 2], tech: unknown || real(L.substrate) || 'Installed by setup', ready: running && liveAvailable(L.substrate), live: real(L.substrate) },
     { ic: 'server', name: 'AX control plane (ax-server + Postgres)', steps: [3, 3], tech: unknown || real(L.server) || 'Installed by setup', ready: running && liveAvailable(L.server), live: real(L.server) },
   ];
@@ -609,7 +660,8 @@ function liveLayersHTML() {
       else if (now && setupOp.status === 'failed') st = chip('failed', 'xCircle', setupOp.canceled ? 'Canceled' : 'Failed');
       else if (now) st = chip('running', 'loader', `Installing · <span data-fmt="elapsed" data-since="${(setupOp.stageStarted || {})[LIVE_SETUP_STEPS[Math.max(at, l.steps[0])].key] || setupOp.started}">${liveDuration(ms)}</span>`);
       else st = chip('paused', 'clock', setupOp.status === 'failed' ? 'Not reached' : 'Waiting');
-    } else if (running && unknown && i > 0) st = chip('waiting', 'alert', 'Unknown');
+    } else if (tooOld) st = chip('waiting', 'alert', 'Unknown');
+    else if (running && unknown && i > 0) st = chip('waiting', 'alert', 'Unknown');
     else if (running) st = l.ready ? chip('done', 'checkCircle', 'Running') : chip('waiting', 'clock', 'Starting');
     else if (stopped) st = chip('paused', 'pause', 'Stopped');
     else st = chip('paused', 'clock', 'Not set up');
@@ -638,6 +690,10 @@ function liveLocalPlaceHTML() {
   let actions = '', cli = 'ax local status', note = '';
   if (localBusy) {
     actions = '';
+  } else if (L.state === 'Unknown') {
+    /* Setup, Start, Update and Repair all need an ax that can say what's here: the callout above says how to get one. */
+    actions = '';
+    cli = 'ax local status -o json';
   } else if (running) {
     const connect = inUse ? '' : `<button type="button" class="btn sm" data-action="live-use-context" data-context="${esc(L.context)}">${icon('link', 'sm')}Connect</button>`;
     actions = health.ok
@@ -655,6 +711,7 @@ function liveLocalPlaceHTML() {
     note = !LIVE.canStartLocal ? 'Fix what the checks found, then check again.' : '';
   }
   const blockers = !localBusy ? liveLocalBlockers(!running && !stopped) : [];
+  const tooOld = L.state === 'Unknown';
   return `${liveOpHTML({ log: false, stones: false })}
     ${LIVE.checks.length ? liveFoldHTML('live-fold-checks', 'This computer', liveFoldSum(LIVE.checks), liveChecksHTML(), LIVE.checks.some((c) => c.status !== 'ok'))
       : '<div class="pl-sub">This computer</div><p class="small muted" style="margin-top:8px">Checking…</p>'}
@@ -662,8 +719,9 @@ function liveLocalPlaceHTML() {
       : '<div class="pl-sub">Tools AX uses</div><p class="small muted" style="margin-top:8px">Looking for ax, kubectl and kind…</p>'}
     <div class="pl-sub">What runs here</div>
     ${liveLayersHTML()}
+    ${tooOld ? liveAxUpdateHTML({ compact: true }) : ''}
     ${noAx}
-    ${!localBusy ? liveImagesHTML() : ''}
+    ${!localBusy && !tooOld ? liveImagesHTML() : ''}
     ${actions ? `<div class="btn-row" style="margin-top:14px">${actions}</div>` : ''}
     ${blockers.length && actions ? `<div class="problem-lines">${liveImageProblemsHTML(blockers.filter((b) => !liveImageProblems().includes(b)))}</div>` : ''}
     ${note ? `<p class="small sub" style="margin-top:8px">${note}</p>` : ''}
@@ -684,7 +742,7 @@ function liveAqueductHTML() {
   const L = LIVE.local || {};
   const remote = LIVE.contexts.filter((c) => !liveIsLocal(c.name));
   const active = LIVE.tasks.filter((t) => liveState(t.state).active).length;
-  const localSub = L.state === 'Running' ? `gVisor · ${liveIsLocal(LIVE.context) ? `${active} running` : 'Running'}` : L.state === 'Stopped' ? 'gVisor · Stopped' : 'gVisor · Not set up';
+  const localSub = L.state === 'Running' ? `gVisor · ${liveIsLocal(LIVE.context) ? `${active} running` : 'Running'}` : L.state === 'Stopped' ? 'gVisor · Stopped' : L.state === 'Unknown' ? 'gVisor · Update ax' : 'gVisor · Not set up';
   const remoteSub = remote.length ? `Kubernetes · ${plural(remote.length, 'cluster')}` : 'Kubernetes · ~/.kube/config';
   const s = 54;
   return `<svg class="aqueduct-map" viewBox="0 0 820 132" role="img" aria-label="Tasks move from this computer to a remote Kubernetes cluster with the same task file and network rules." style="margin-top:14px">
@@ -714,7 +772,7 @@ function liveViewPlaces() {
   const localCtx = L && L.context ? LIVE.contexts.find((c) => c.name === L.context) : null;
   const ctxLine = L && L.context
     ? `Context <span class="mono">${esc(L.context)}</span>${localCtx && localCtx.current ? ' · Current in your kubeconfig' : ''}`
-    : 'Nothing set up here yet';
+    : L && L.state === 'Unknown' ? "This ax can't say what's set up here" : 'Nothing set up here yet';
   const remote = LIVE.contexts.filter((c) => !liveIsLocal(c.name));
   /* The cluster Studio is connected to is worth a look without being asked; the others wait for Check. */
   if (LIVE.context && !liveIsLocal(LIVE.context) && !LIVE.clusterChecks[LIVE.context] && remote.some((c) => c.name === LIVE.context)) setTimeout(() => liveCheckCluster(LIVE.context), 0);
@@ -752,6 +810,7 @@ function liveViewSetup(asHome) {
   if (settingUp) { title = 'Setting up AX on this computer'; lede = 'This takes a few minutes. You can leave this page: setup keeps going.'; }
   else if (L.state === 'Running') { title = 'AX is running on this computer'; lede = 'Your agents run here, each in its own sandbox.'; }
   else if (L.state === 'Stopped') { title = 'AX on this computer is stopped'; lede = 'Start it to see your tasks and run new ones.'; }
+  else if (L.state === 'Unknown') { title = 'Update ax to use this computer'; lede = 'AX Studio needs a newer ax to check AX on this computer and to set it up.'; }
   else { title = 'Set up AX on this computer'; lede = 'AX runs your agents on this computer, each in its own sandbox. Setup takes a few minutes.'; }
   const html = `
     <div class="cuj-head" style="margin-bottom:14px">${axo(mood, { decorative: true, id: 'setup-axo' })}<div class="cuj-head-copy"><h1 tabindex="-1">${title}</h1><p class="lede">${lede}</p></div></div>
@@ -926,7 +985,10 @@ const LIVE_ENV_ACTIONS = {
   'live-env-refresh': async (el) => {
     const btn = el && el.id ? el : null;
     if (btn) btn.disabled = true;
-    await liveLoadEnv(!!(el && el.dataset.fresh === '1'));
+    const fresh = !!(el && el.dataset.fresh === '1');
+    /* After you update ax, its version in Settings is read again too. */
+    if (fresh) liveCheckAx();
+    await liveLoadEnv(fresh);
     LIVE.failedAt = 0;
     Object.keys(LIVE.clusterChecks).forEach((name) => { if (LIVE.contexts.some((c) => c.name === name)) liveCheckCluster(name); else delete LIVE.clusterChecks[name]; });
     await liveRefresh(true);
