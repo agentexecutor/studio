@@ -61,6 +61,10 @@ func kubeconfigPaths() []string {
 	return nil
 }
 
+// KubeconfigPaths returns the kubeconfig files Studio reads contexts from:
+// $KUBECONFIG when it is set, otherwise ~/.kube/config.
+func KubeconfigPaths() []string { return kubeconfigPaths() }
+
 // CurrentContext returns the active Kubernetes context from override, $KUBECONTEXT,
 // or kubeconfig. Switching the context is left to `ax ctx <name>`.
 func CurrentContext(override string) (string, error) {

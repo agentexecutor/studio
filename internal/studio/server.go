@@ -57,6 +57,8 @@ type Options struct {
 	Addr        string
 	AXNamespace string
 	AXBinary    string
+	// Version is the ax-studio build version, shown in Settings.
+	Version string
 	// StaticFS holds the built React pages, served under /classic/. It
 	// defaults to the embedded build.
 	StaticFS fs.FS
@@ -81,6 +83,7 @@ type Server struct {
 	addr           string
 	axNamespace    string
 	axBinary       string
+	version        string
 	staticFS       fs.FS
 	uxFS           fs.FS
 	runner         kube.Runner
@@ -110,6 +113,14 @@ type Server struct {
 	// only one caller at a time finds or starts the tunnel to its ax-server.
 	dialMu    sync.Mutex
 	dialLocks map[string]*sync.Mutex
+
+	// userOnce reads the user's name once, for Home's greeting.
+	userOnce sync.Once
+	userName userName
+
+	// extras is what the environment checks keep between calls, and the
+	// running operation's cancel function.
+	extras envExtras
 }
 
 // NewServer constructs a configured AX Studio server and initializes its
@@ -177,10 +188,16 @@ func NewServer(opts Options) (*Server, error) {
 
 	shutCtx, shutCancel := context.WithCancel(context.Background())
 
+	version := strings.TrimSpace(opts.Version)
+	if version == "" {
+		version = "dev"
+	}
+
 	return &Server{
 		addr:           addr,
 		axNamespace:    axNS,
 		axBinary:       axBin,
+		version:        version,
 		staticFS:       staticFS,
 		uxFS:           uxFS,
 		runner:         runner,
@@ -241,14 +258,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/env/local/stop", s.requireMutatingAuth(s.handleLocalAction("stop")))
 	mux.HandleFunc("/api/env/local/delete", s.requireMutatingAuth(s.handleLocalAction("delete")))
 	mux.HandleFunc("/api/env/install", s.requireMutatingAuth(s.handleRemoteInstall))
+	mux.HandleFunc("/api/env/uninstall", s.requireMutatingAuth(s.handleRemoteUninstall))
+	mux.HandleFunc("/api/env/cancel", s.requireMutatingAuth(s.handleEnvCancel))
+	mux.HandleFunc("/api/env/check", s.requireSession(s.handleClusterCheck))
 	mux.HandleFunc("/api/env/context", s.requireMutatingAuth(s.handleSelectContext))
 	mux.HandleFunc("/api/secrets/credential", s.requireMutatingAuth(s.handleCreateCredentialSecret))
 	mux.HandleFunc("/api/tasks", s.requireSession(s.handleListTasks))
 	mux.HandleFunc("/api/tasks/get", s.requireSession(s.handleGetTask))
+	mux.HandleFunc("/api/gateways/get", s.requireSession(s.handleGetGateway))
+	mux.HandleFunc("/api/gateways", s.requireSession(s.handleListGateways))
+	mux.HandleFunc("/api/gateways/delete", s.requireMutatingAuth(s.handleDeleteResource("gateway")))
+	mux.HandleFunc("/api/workspaces", s.requireSession(s.handleListWorkspaces))
+	mux.HandleFunc("/api/models", s.requireSession(s.handleListModels))
+	mux.HandleFunc("/api/tasks/move", s.requireMutatingAuth(s.handleTaskMove))
+	mux.HandleFunc("/api/workspaces/delete", s.requireMutatingAuth(s.handleDeleteResource("workspace")))
 	mux.HandleFunc("/api/tasks/suspend", s.requireMutatingAuth(s.handleTaskAction("suspend")))
 	mux.HandleFunc("/api/tasks/resume", s.requireMutatingAuth(s.handleTaskAction("resume")))
 	mux.HandleFunc("/api/tasks/delete", s.requireMutatingAuth(s.handleTaskAction("delete")))
 	mux.HandleFunc("/api/tasks/changes", s.requireSession(s.handleTaskChanges))
+	mux.HandleFunc("/api/tasks/logs", s.requireSession(s.handleTaskLogs))
 	mux.HandleFunc("/api/tasks/discard-file", s.requireMutatingAuth(s.handleDiscardFile))
 	mux.HandleFunc("/api/tasks/apply-local", s.requireMutatingAuth(s.handleApplyLocal))
 	mux.HandleFunc("/api/tasks/push-branch", s.requireMutatingAuth(s.handlePushBranch))
@@ -462,6 +490,13 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		"pathSeparator": string(filepath.Separator),
 		"axNamespace":   s.axNamespace,
 		"version":       "v1alpha1",
+		// Shown in Settings: what this Studio is, which ax it runs, and
+		// which kubeconfig its clusters come from.
+		"studioVersion": s.version,
+		"axBinary":      s.axBinary,
+		"kubeconfig":    strings.Join(kube.KubeconfigPaths(), string(os.PathListSeparator)),
+		// Home greets the user by name, as the account or git knows it.
+		"user": s.user(r.Context()),
 	})
 }
 

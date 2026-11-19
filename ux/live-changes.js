@@ -80,10 +80,17 @@ function liveChangesWanted(name, stateName) {
   if (c.loading) return;
   if (!c.at || (stateName && c.forState && stateName !== c.forState)) Promise.resolve().then(() => liveLoadChanges(name));
 }
-/** Redraws only this section, so an open diff keeps its place. */
+/** Redraws only this section, so an open diff keeps its place, and the count on the Changes tab. */
 function liveChangesPaint(name) {
   const box = $('#live-changes');
   if (box && box.dataset && box.dataset.task === name) box.innerHTML = liveChangesInnerHTML(name);
+  const cnt = $('#count-changes');
+  if (cnt && liveRouteTask() === name) { const n = liveChangesCount(name); cnt.textContent = n ? String(n) : ''; cnt.hidden = !n; }
+}
+/** How many files the task changed and hasn't pushed, once Studio has read them. 0 before that. */
+function liveChangesCount(name) {
+  const c = LIVE.changes[name];
+  return c && c.data && c.data.available && c.data.files ? c.data.files.length : 0;
 }
 
 /* ---------- The section on a task's page ---------- */
@@ -117,18 +124,17 @@ function liveChangesInnerHTML(name) {
         <button class="btn sm" data-action="live-changes-apply" data-task="${esc(name)}">${icon('download', 'sm')}Apply to a folder on this computer…</button>
       </div>`;
   }
-  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <h2 id="live-changes-h" class="h-display-sm">Changes</h2>
-      <button class="btn ghost sm" data-action="live-changes-refresh" data-task="${esc(name)}" ${c.loading ? 'disabled' : ''}>${icon(c.loading ? 'loader' : 'refresh', 'sm')}${c.loading ? 'Reading…' : 'Refresh'}</button></div>
-    <p class="small muted" style="margin-top:4px">What the agent changed in its sandbox and hasn't pushed.</p>
+  return `<h2 id="live-changes-h" class="sr-only">Changes</h2>
+    <div class="log-bar"><span class="lb-text">What the agent changed in its sandbox and hasn't pushed.</span>
+      <span class="lb-actions"><button class="btn ghost sm" data-action="live-changes-refresh" data-task="${esc(name)}" ${c.loading ? 'disabled' : ''}>${icon(c.loading ? 'loader' : 'refresh', 'sm')}${c.loading ? 'Reading…' : 'Refresh'}</button></span></div>
     ${c.note ? `<div class="callout" role="status" style="margin-top:12px" id="live-changes-note">${icon('check')}<div style="overflow-wrap:anywhere">${c.note}</div></div>` : ''}
     ${body}`;
 }
-/** The Changes section, for a task with debug access. '' for any other task. */
+/** The Changes tab, for a task with debug access. '' for any other task. */
 function liveChangesHTML(name, t, stateName) {
   if (!t.debug) return '';
   liveChangesWanted(name, stateName);
-  return `<section class="card card-pad" style="margin-top:14px" aria-labelledby="live-changes-h" id="live-changes" data-task="${esc(name)}">${liveChangesInnerHTML(name)}</section>`;
+  return `<section aria-labelledby="live-changes-h" id="live-changes" data-task="${esc(name)}">${liveChangesInnerHTML(name)}</section>`;
 }
 
 /* ---------- Push to a branch ---------- */

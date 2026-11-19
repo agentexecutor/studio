@@ -54,7 +54,7 @@ html[data-theme="dark"] .main:has(.stage) .sanctuary-atmo { opacity: .82; }
   padding: 12px 0 26px;
 }
 .stage-copy { flex: 1; min-width: 0; max-width: 620px; }
-.stage h1 { font-size: clamp(26px, 2.6vw, 34px); letter-spacing: -0.034em; }
+.stage h1 { font-size: clamp(22px, 1.95vw, 28px); letter-spacing: -0.03em; }
 .stage h1 em { font-style: normal; color: var(--ink); }
 .stage .lede { margin-top: 8px; font-size: 14.5px; line-height: 1.55; color: var(--muted); max-width: 56ch; }
 .stage .lede strong { color: var(--ink); font-weight: 600; }
@@ -195,8 +195,8 @@ html[data-theme="dark"] .main:has(.stage) .sanctuary-atmo { opacity: .82; }
 }
 .station .st-num {
   font-family: var(--font-sans);
-  font-size: 24px; font-weight: 600; line-height: 1;
-  letter-spacing: -0.035em;
+  font-size: 21px; font-weight: 600; line-height: 1;
+  letter-spacing: -0.03em;
 }
 .station .st-label { margin-top: 2px; font-size: 13px; font-weight: 600; }
 .station .st-sub { font-size: 12px; color: var(--faint); min-height: 18px; display: flex; align-items: center; }
@@ -545,7 +545,7 @@ button.link:hover { color: var(--ink) !important; text-decoration: underline; }
 .lineage-crumb a { font-weight: 550; }
 .task-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .task-head .th-main { flex: 1; min-width: 280px; }
-.task-head h1 { font-size: clamp(22px, 2.2vw, 28px); }
+.task-head h1 { font-size: clamp(17px, 1.35vw, 19px); letter-spacing: -0.018em; line-height: 1.25; }
 .task-head .th-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; }
 .task-head .th-meta .env { background: transparent; border: 0; padding: 0; height: auto; font-size: 12.5px; }
 
@@ -1236,7 +1236,7 @@ html[data-theme="dark"] .setup-atmo { opacity: .68; }
 .setup-card { width: min(616px, 100%); padding: 8px 0; }
 .setup-card .su-head { display: flex; align-items: center; gap: 18px; }
 .setup-card .su-head .axo { --axo-size: 96px; margin: -8px -4px -10px -8px; }
-.setup-card h1 { font-size: clamp(26px, 2.8vw, 34px); }
+.setup-card h1 { font-size: clamp(20px, 1.7vw, 24px); }
 .setup-card .lede { margin-top: 6px; font-size: 14.5px; color: var(--muted); }
 .setup-panel { margin-top: 22px; padding: 2px 16px; border-radius: var(--r-l); background: color-mix(in srgb, var(--bg-subtle) 90%, var(--bg)); backdrop-filter: blur(8px); border: 1px solid var(--line); }
 .setup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 22px; }

@@ -2178,8 +2178,8 @@ let gPending = false;
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
   trapFocus(e);
-  /* The command palette and the single-key shortcuts lead to demo pages, so they're off with real data. */
-  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (dialogState) closeDialog(); else if (!liveOn()) openPalette(); return; }
+  /* The command palette works with real data too: live.js gives it the real tasks, clusters and actions. */
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); if (dialogState) closeDialog(); else openPalette(); return; }
   /* A focused dropdown handles its own keys first (arrows, Enter, Space, Escape, Tab, typing a name). */
   const selBtn = e.target && e.target.closest && e.target.closest('.sel-btn');
   if (selBtn && selKeydown(e, selBtn)) return;
@@ -2214,17 +2214,19 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (dialogState || mod || e.altKey || liveOn()) return;
-  /* WCAG 2.1.4: single-key shortcuts can be turned off in Settings → Accessibility. */
+  if (dialogState || mod || e.altKey) return;
+  /* WCAG 2.1.4: single-key shortcuts can be turned off under Accessibility in Settings. */
   if (!state.singleKeys) return;
   if (gPending) {
     gPending = false;
-    const map = { h: '#/', r: '#/guardrails', s: '#/settings', p: '#/places', n: '#/new' };
+    /* With real data, only the pages that are real: Guardrails isn't connected to AX yet. */
+    const map = liveOn() ? { h: '#/', s: '#/settings', p: '#/places', n: '#/new' } : { h: '#/', r: '#/guardrails', s: '#/settings', p: '#/places', n: '#/new' };
     if (map[e.key]) { e.preventDefault(); navigate(map[e.key]); }
     return;
   }
   if (e.key === 'g') { gPending = true; setTimeout(() => { gPending = false; }, 1200); return; }
-  if (e.key === 'n') { e.preventDefault(); state.draft = null; navigate('#/new'); }
+  /* A New task you started stays as you left it with real data; the demo starts a fresh one. */
+  if (e.key === 'n') { e.preventDefault(); if (!liveOn()) state.draft = null; navigate('#/new'); }
   else if (e.key === '?') { e.preventDefault(); openShortcuts(); }
   else if (e.key === '/') { e.preventDefault(); openPalette(); }
   else if (e.key === 't') { setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'); }

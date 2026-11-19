@@ -35,13 +35,27 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// taskStubServer is an ax-server that keeps tasks in memory.
+// taskStubServer is an ax-server that keeps tasks and gateways in memory.
 type taskStubServer struct {
 	v1alpha1.UnimplementedAXServer
-	mu    sync.Mutex
-	tasks map[string]*v1alpha1.Task
+	mu         sync.Mutex
+	tasks      map[string]*v1alpha1.Task
+	gateways   map[string]*v1alpha1.Gateway
+	workspaces map[string]*v1alpha1.Workspace
+	listLimit  int64 // the limit the last ListTasks asked for
+}
+
+func (s *taskStubServer) GetGateway(_ context.Context, req *v1alpha1.GetGatewayRequest) (*v1alpha1.Gateway, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g := s.gateways[req.GetAtespace()+"/"+req.GetName()]
+	if g == nil {
+		return nil, status.Errorf(codes.NotFound, "gateway %s/%s not found", req.GetAtespace(), req.GetName())
+	}
+	return g, nil
 }
 
 func (s *taskStubServer) find(atespace, name string) (*v1alpha1.Task, error) {
@@ -56,6 +70,7 @@ func (s *taskStubServer) ListTasks(_ context.Context, req *v1alpha1.ListTasksReq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	resp := &v1alpha1.ListTasksResponse{}
+	s.listLimit = req.GetLimit()
 	for _, t := range s.tasks {
 		if t.GetMetadata().GetAtespace() == req.GetAtespace() {
 			resp.Tasks = append(resp.Tasks, t)
@@ -120,7 +135,18 @@ func newTaskTestServer(t *testing.T) (http.Handler, *http.Cookie, string, *taskS
 			},
 			Status: &v1alpha1.TaskStatus{State: v1alpha1.TaskState_TASK_STATE_WORKING},
 		},
+	}, gateways: map[string]*v1alpha1.Gateway{}, workspaces: map[string]*v1alpha1.Workspace{
+		"default/ws-fix": {ApiVersion: "ax.io/v1alpha1", Kind: "Workspace", Metadata: &v1alpha1.ObjectMeta{Name: "ws-fix", Atespace: "default"},
+			Status: &v1alpha1.WorkspaceStatus{Phase: "Failed", LastSetupError: "git clone: repository not found"}},
 	}}
+	// A Gateway as Studio writes one: the model's host, where the key is added, and the hosts it may reach.
+	gw := &v1alpha1.Gateway{}
+	if err := protojson.Unmarshal([]byte(`{"apiVersion":"ax.io/v1alpha1","kind":"Gateway","metadata":{"name":"gw-fix","atespace":"default"},
+		"spec":{"egress":[{"https":{"hostnames":["generativelanguage.googleapis.com"],"effects":{"replaceHeaders":[{"header":"x-goog-api-key","credentialUri":"ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY"}]}}},
+		{"https":{"hostnames":["github.com","pypi.org"]}}]}}`), gw); err != nil {
+		t.Fatal(err)
+	}
+	stub.gateways["default/gw-fix"] = gw
 	grpcSrv := grpc.NewServer()
 	v1alpha1.RegisterAXServer(grpcSrv, stub)
 	go func() { _ = grpcSrv.Serve(ln) }()
@@ -287,6 +313,73 @@ func TestTaskEndpoints(t *testing.T) {
 	}
 	if rec = get("/api/tasks"); !strings.Contains(rec.Body.String(), `"tasks":[]`) {
 		t.Errorf("expected no tasks after the delete, got %s", rec.Body.String())
+	}
+}
+
+func TestGatewayEndpointSaysWhatATaskCanReach(t *testing.T) {
+	h, cookie, _, _ := newTaskTestServer(t)
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+path, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. A Gateway comes as data: each rule's hosts, and the header a key is added to.
+	rec := get("/api/gateways/get?context=ax-local&atespace=default&name=gw-fix")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get returned %d: %s", rec.Code, rec.Body.String())
+	}
+	var one struct {
+		Gateway struct {
+			Kind string `json:"kind"`
+			Spec struct {
+				Egress []struct {
+					HTTPS struct {
+						Hostnames []string `json:"hostnames"`
+						Effects   struct {
+							ReplaceHeaders []struct {
+								Header string `json:"header"`
+							} `json:"replaceHeaders"`
+						} `json:"effects"`
+					} `json:"https"`
+				} `json:"egress"`
+			} `json:"spec"`
+		} `json:"gateway"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &one); err != nil {
+		t.Fatalf("decoding gateway: %v", err)
+	}
+	g := one.Gateway
+	if g.Kind != "Gateway" || len(g.Spec.Egress) != 2 {
+		t.Fatalf("unexpected gateway: %s", rec.Body.String())
+	}
+	if got := g.Spec.Egress[0].HTTPS; strings.Join(got.Hostnames, ",") != "generativelanguage.googleapis.com" ||
+		len(got.Effects.ReplaceHeaders) != 1 || got.Effects.ReplaceHeaders[0].Header != "x-goog-api-key" {
+		t.Errorf("expected the model's host with its key header, got %+v", got)
+	}
+	if got := strings.Join(g.Spec.Egress[1].HTTPS.Hostnames, ","); got != "github.com,pypi.org" {
+		t.Errorf("expected the allowed hosts, got %q", got)
+	}
+
+	// 2. A Gateway that isn't there is a 404 with ax-server's message.
+	if rec = get("/api/gateways/get?name=gw-missing"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "not found") {
+		t.Errorf("expected 404 with ax-server's message, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Names that could be read as flags or paths are refused before any call, and a session is required.
+	for _, path := range []string{"/api/gateways/get?name=--help", "/api/gateways/get?name=../x", "/api/gateways/get?context=--kubeconfig&name=gw-fix"} {
+		if rec = get(path); rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for %s, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/gateways/get?name=gw-fix", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 without a session, got %d", rec.Code)
 	}
 }
 

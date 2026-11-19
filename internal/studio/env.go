@@ -66,12 +66,15 @@ type LocalClusterInfo struct {
 	KubeContext     string `json:"kubeContext"`
 	SubstrateStatus string `json:"substrateStatus"`
 	AXStatus        string `json:"axStatus"`
+	// Access says whether kubectl can look inside a running cluster: "ok",
+	// "no-context" or "unreachable". Without it, what's installed is unknown.
+	Access string `json:"access"`
 }
 
 // EnvOpSnapshot reports an active or completed environment operation.
 type EnvOpSnapshot struct {
 	ID       string   `json:"id"`
-	Action   string   `json:"action"` // "local-up" | "local-stop" | "local-delete" | "remote-install"
+	Action   string   `json:"action"` // "local-up" | "local-stop" | "local-delete" | "remote-install" | "remote-uninstall"
 	Target   string   `json:"target"`
 	Stage    string   `json:"stage,omitempty"` // "kind" | "substrate" | "workers" | "ax"
 	Status   string   `json:"status"`          // "running" | "ok" | "failed"
@@ -79,6 +82,19 @@ type EnvOpSnapshot struct {
 	Logs     []string `json:"logs,omitempty"`
 	Started  int64    `json:"started"`
 	Finished int64    `json:"finished,omitempty"`
+	// StageStarted is when each stage began (Unix ms), for the ones that have.
+	StageStarted map[string]int64 `json:"stageStarted,omitempty"`
+	// Step is the step ax last announced ("==> Deploying ax-server..."), without the arrow.
+	Step string `json:"step,omitempty"`
+	// Canceled is set when the command was interrupted from the UI.
+	Canceled bool `json:"canceled,omitempty"`
+	// Purpose is what a local-up was started for ("setup", "start", "update" or
+	// "repair"), so every window words it the same way.
+	Purpose string `json:"purpose,omitempty"`
+	// ExitCode is the command's exit status when it failed with one.
+	ExitCode int `json:"exitCode,omitempty"`
+	// To is where a task-move sends the task ("context/atespace").
+	To string `json:"to,omitempty"`
 }
 
 // EnvStatusResponse is returned by GET /api/env/status.
@@ -98,6 +114,10 @@ type EnvStatusResponse struct {
 	Contexts          []ContextSummary `json:"contexts"`
 	CurrentContext    string           `json:"currentContext"`
 	Operation         *EnvOpSnapshot   `json:"operation,omitempty"`
+	// Tools are ax, kubectl and kind as ax will find them.
+	Tools []ToolInfo `json:"tools"`
+	// AXFlags says which optional flags this ax takes.
+	AXFlags AXFlags `json:"axFlags"`
 }
 
 // hasContainerCLI reports whether a docker or podman command is on PATH,
@@ -120,6 +140,12 @@ func freeDiskSpaceBytes(dir string) uint64 {
 }
 
 func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
+	return s.collectEnvStatusFresh(ctx, false)
+}
+
+// collectEnvStatusFresh checks this computer and the kubeconfig. fresh asks
+// for the tools' versions again rather than the ones kept for a minute.
+func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatusResponse {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "."
@@ -148,8 +174,8 @@ func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
 		fixCmd := "sudo systemctl start docker"
 		detail := "No running rootful Docker or Podman engine detected."
 		if runtime.GOOS == "darwin" {
-			fixCmd = "colima start --cpu 4 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs"
-			detail = "Start OrbStack, Docker Desktop, or Colima (>= 6 GiB RAM) to run sandboxes locally, or connect directly to a team cluster."
+			// macOS runs containers in a Linux VM that one of a few apps provides: say which are installed, and how to start one.
+			detail, fixCmd = s.macVMAdvice()
 		} else if !s.hasContainerCLI() {
 			// There is no engine to start: neither one is installed.
 			fixCmd = ""
@@ -283,6 +309,9 @@ func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
 			})
 		}
 	}
+	resp.Local.Access = s.localAccess(ctx, resp.Local, resp.Contexts)
+	resp.Tools = s.collectTools(ctx, fresh)
+	resp.AXFlags = s.axFlags(ctx)
 
 	s.opMu.Lock()
 	if s.currentOp != nil {
@@ -294,6 +323,7 @@ func (s *Server) collectEnvStatus(ctx context.Context) EnvStatusResponse {
 		} else {
 			cp := *s.currentOp
 			cp.Logs = append([]string(nil), s.currentOp.Logs...)
+			cp.StageStarted = copyStages(s.currentOp.StageStarted)
 			resp.Operation = &cp
 		}
 	}
@@ -307,7 +337,7 @@ func (s *Server) handleEnvStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.collectEnvStatus(r.Context()))
+	writeJSON(w, http.StatusOK, s.collectEnvStatusFresh(r.Context(), r.URL.Query().Get("fresh") == "1"))
 }
 
 type localActionRequest struct {
@@ -316,7 +346,13 @@ type localActionRequest struct {
 	ServerImage       string `json:"serverImage"`
 	DefaultTaskImage  string `json:"defaultTaskImage"`
 	RunnerVolumeImage string `json:"runnerVolumeImage"`
+	// Purpose is the button that started `ax local start`: setup, start,
+	// update or repair. It only changes how the operation is worded.
+	Purpose string `json:"purpose"`
 }
+
+// localUpPurposes are the reasons the UI runs `ax local start` for.
+var localUpPurposes = map[string]bool{"": true, "setup": true, "start": true, "update": true, "repair": true}
 
 func validateOptionalFlagImage(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
@@ -374,13 +410,23 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--runner-volume-image", runnerImg)
 	}
 
-	s.runAXOperation(w, "local-up", name, "kind", args)
+	purpose := strings.TrimSpace(req.Purpose)
+	if !localUpPurposes[purpose] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid purpose %q", purpose))
+		return
+	}
+	s.runAXOperationFor(w, "local-up", purpose, name, "kind", args)
 }
 
 // runAXOperation starts `ax <args>` as the environment operation action on
 // target, streaming its output to the UI, and responds with the operation.
 func (s *Server) runAXOperation(w http.ResponseWriter, action, target, stage string, args []string) {
-	snap, err := s.startEnvOperation(action, target, stage, func(opCtx context.Context, logWriter *opLogWriter) error {
+	s.runAXOperationFor(w, action, "", target, stage, args)
+}
+
+// runAXOperationFor is runAXOperation with the purpose the operation records.
+func (s *Server) runAXOperationFor(w http.ResponseWriter, action, purpose, target, stage string, args []string) {
+	snap, err := s.startEnvOperationFor(action, purpose, target, stage, func(opCtx context.Context, logWriter *opLogWriter) error {
 		res, runErr := s.runner.Run(opCtx, kube.Spec{
 			Name:   s.axBinary,
 			Args:   args,
@@ -709,6 +755,12 @@ func (w *opLogWriter) Write(p []byte) (int, error) {
 }
 
 func (s *Server) startEnvOperation(action, target, initialStage string, fn func(context.Context, *opLogWriter) error) (EnvOpSnapshot, error) {
+	return s.startEnvOperationFor(action, "", target, initialStage, fn)
+}
+
+// startEnvOperationFor is startEnvOperation with the purpose the operation
+// records.
+func (s *Server) startEnvOperationFor(action, purpose, target, initialStage string, fn func(context.Context, *opLogWriter) error, opts ...func(*EnvOpSnapshot)) (EnvOpSnapshot, error) {
 	s.opMu.Lock()
 	if s.currentOp != nil && s.currentOp.Status == "running" {
 		busy := fmt.Errorf("operation %q on %q is already running", s.currentOp.Action, s.currentOp.Target)
@@ -716,16 +768,31 @@ func (s *Server) startEnvOperation(action, target, initialStage string, fn func(
 		return EnvOpSnapshot{}, busy
 	}
 	opID := fmt.Sprintf("op-%d", time.Now().UnixNano())
+	now := time.Now().UnixMilli()
 	snap := &EnvOpSnapshot{
 		ID:      opID,
 		Action:  action,
 		Target:  target,
 		Stage:   initialStage,
 		Status:  "running",
-		Started: time.Now().UnixMilli(),
+		Started: now,
+		Purpose: purpose,
 	}
+	if initialStage != "" {
+		snap.StageStarted = map[string]int64{initialStage: now}
+	}
+	for _, o := range opts {
+		o(snap)
+	}
+	parentCtx := s.shutdownCtx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	opCtx, cancel := context.WithTimeout(parentCtx, 20*time.Minute)
+	s.extras.opCancel = cancel
 	s.currentOp = snap
 	cp := *snap
+	cp.StageStarted = copyStages(snap.StageStarted)
 	s.opMu.Unlock()
 
 	s.hub.Publish("envOp", cp)
@@ -733,11 +800,6 @@ func (s *Server) startEnvOperation(action, target, initialStage string, fn func(
 	s.opWg.Add(1)
 	go func() {
 		defer s.opWg.Done()
-		parentCtx := s.shutdownCtx
-		if parentCtx == nil {
-			parentCtx = context.Background()
-		}
-		opCtx, cancel := context.WithTimeout(parentCtx, 20*time.Minute)
 		defer cancel()
 		lw := &opLogWriter{srv: s, op: opID}
 		err := fn(opCtx, lw)
@@ -745,14 +807,21 @@ func (s *Server) startEnvOperation(action, target, initialStage string, fn func(
 		s.opMu.Lock()
 		if s.currentOp != nil && s.currentOp.ID == opID {
 			s.currentOp.Finished = time.Now().UnixMilli()
-			if err != nil {
+			switch {
+			case s.currentOp.Canceled:
+				s.currentOp.Status = "failed"
+				s.currentOp.Error = "Canceled"
+			case err != nil:
 				s.currentOp.Status = "failed"
 				s.currentOp.Error = err.Error()
-			} else {
+				s.currentOp.ExitCode = exitCodeOf(err)
+			default:
 				s.currentOp.Status = "ok"
 			}
 			doneSnap := *s.currentOp
 			doneSnap.Logs = append([]string(nil), s.currentOp.Logs...)
+			doneSnap.StageStarted = copyStages(s.currentOp.StageStarted)
+			s.extras.opCancel = nil
 			s.opMu.Unlock()
 			s.hub.Publish("envOp", doneSnap)
 			return
@@ -763,6 +832,44 @@ func (s *Server) startEnvOperation(action, target, initialStage string, fn func(
 	return cp, nil
 }
 
+func copyStages(m map[string]int64) map[string]int64 {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// opStages is the order `ax local start` builds things in.
+var opStages = []string{"kind", "substrate", "workers", "ax"}
+
+// stageFor says which stage one of ax's "==> " progress lines starts.
+func stageFor(line string) string {
+	switch {
+	case strings.Contains(line, "Kind cluster"):
+		return "kind"
+	case strings.Contains(line, "WorkerPool"):
+		return "workers"
+	case strings.Contains(line, "ax-postgres") || strings.Contains(line, "ax-server") || strings.Contains(line, "AX is ready") || strings.Contains(line, "Substrate permissions"):
+		return "ax"
+	case strings.Contains(line, "Substrate"):
+		return "substrate"
+	}
+	return ""
+}
+
+func stageIndex(stage string) int {
+	for i, s := range opStages {
+		if s == stage {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *Server) appendOpLog(opID, line string) {
 	clean := scrubSecrets(line)
 	s.opMu.Lock()
@@ -770,25 +877,31 @@ func (s *Server) appendOpLog(opID, line string) {
 		s.opMu.Unlock()
 		return
 	}
-	switch {
-	case strings.Contains(clean, "Kind cluster"):
-		s.currentOp.Stage = "kind"
-	case strings.Contains(clean, "WorkerPool"):
-		s.currentOp.Stage = "workers"
-	case strings.Contains(clean, "ax-postgres") || strings.Contains(clean, "ax-server") || strings.Contains(clean, "AX is ready") || strings.Contains(clean, "Configuring Agent Substrate permissions"):
-		s.currentOp.Stage = "ax"
-	case strings.Contains(clean, "Substrate"):
-		s.currentOp.Stage = "substrate"
+	/* Only ax's own "==> " progress lines move the stage, and only forward: a later line that names an earlier layer
+	   doesn't take setup back. */
+	if step, ok := strings.CutPrefix(strings.TrimSpace(clean), "==> "); ok {
+		s.currentOp.Step = step
+		if next := stageFor(step); next != "" && stageIndex(next) > stageIndex(s.currentOp.Stage) {
+			s.currentOp.Stage = next
+			if s.currentOp.StageStarted == nil {
+				s.currentOp.StageStarted = map[string]int64{}
+			}
+			s.currentOp.StageStarted[next] = time.Now().UnixMilli()
+		}
 	}
 	if len(s.currentOp.Logs) < 2000 {
 		s.currentOp.Logs = append(s.currentOp.Logs, clean)
 	}
 	stage := s.currentOp.Stage
+	step := s.currentOp.Step
+	started := copyStages(s.currentOp.StageStarted)
 	s.opMu.Unlock()
 
 	s.hub.Publish("streamLine", map[string]any{
-		"id":    opID,
-		"line":  clean,
-		"stage": stage,
+		"id":           opID,
+		"line":         clean,
+		"stage":        stage,
+		"step":         step,
+		"stageStarted": started,
 	})
 }

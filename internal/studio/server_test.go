@@ -85,6 +85,39 @@ func TestValidateLoopbackAddr(t *testing.T) {
 	}
 }
 
+// Settings shows what this Studio is, which ax it runs and which kubeconfig its
+// clusters come from, so the bootstrap response carries them.
+func TestBootstrapDescribesThisStudio(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "kubeconfig")
+	t.Setenv("KUBECONFIG", cfg)
+	for _, tc := range []struct {
+		version, want string
+	}{
+		{version: "v0.2.0", want: "v0.2.0"},
+		{version: "", want: "dev"},
+	} {
+		srv, err := NewServer(Options{Addr: "127.0.0.1:0", AXBinary: "/opt/ax/bin/ax", Version: tc.version})
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/bootstrap", nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		var body struct {
+			StudioVersion string `json:"studioVersion"`
+			AXBinary      string `json:"axBinary"`
+			Kubeconfig    string `json:"kubeconfig"`
+			AXNamespace   string `json:"axNamespace"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding bootstrap: %v (%s)", err, rec.Body.String())
+		}
+		if body.StudioVersion != tc.want || body.AXBinary != "/opt/ax/bin/ax" || body.Kubeconfig != cfg || body.AXNamespace != v1alpha1.DefaultSystemNamespace {
+			t.Errorf("Version %q: bootstrap = %+v", tc.version, body)
+		}
+	}
+}
+
 func TestServerSecurityControls(t *testing.T) {
 	srv, err := NewServer(Options{Addr: "127.0.0.1:0"})
 	if err != nil {

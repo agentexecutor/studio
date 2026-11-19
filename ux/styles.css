@@ -199,9 +199,9 @@ h1, h2, h3, h4, p, figure { margin: 0; }
 h1, .display {
   font-family: var(--font-sans);
   font-weight: 600;
-  font-size: clamp(24px, 2.3vw, 31px);
-  letter-spacing: -0.032em;
-  line-height: 1.16;
+  font-size: clamp(19px, 1.5vw, 21px);
+  letter-spacing: -0.022em;
+  line-height: 1.2;
 }
 h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.016em; line-height: 1.35; }
 h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.012em; line-height: 1.35; }

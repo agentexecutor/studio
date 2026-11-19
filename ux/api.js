@@ -30,7 +30,7 @@ const STUDIO = {
   /** Where the pages this UI is replacing are still served, or '' when this build doesn't include them. */
   classic: (typeof window !== 'undefined' && window.AX_STUDIO && window.AX_STUDIO.classic) || '',
   token: '',
-  info: null,            // { os, home, pathSeparator, axNamespace, version }, from /api/bootstrap
+  info: null,            // { os, home, pathSeparator, axNamespace, version, studioVersion, axBinary, kubeconfig }, from /api/bootstrap
   booting: null,
   events: null,
   listeners: {},         // event type -> Set of callbacks
@@ -71,7 +71,12 @@ function studioBootstrap(force) {
       if (!res.ok) throw await studioFail(res);
       const data = await res.json();
       STUDIO.token = data.csrfToken || '';
-      STUDIO.info = { os: data.os, home: data.home, pathSeparator: data.pathSeparator, axNamespace: data.axNamespace || 'ax-system', version: data.version };
+      STUDIO.info = {
+        os: data.os, home: data.home, pathSeparator: data.pathSeparator, axNamespace: data.axNamespace || 'ax-system', version: data.version,
+        studioVersion: data.studioVersion || '', axBinary: data.axBinary || '', kubeconfig: data.kubeconfig || '',
+        /* The user's name as this computer knows it (their account, else git), for Home's greeting. */
+        user: { name: (data.user && data.user.name) || '', source: (data.user && data.user.source) || '' },
+      };
       studioListen();
       return STUDIO.info;
     })().finally(() => { STUDIO.booting = null; });
@@ -138,15 +143,27 @@ function studioOn(type, cb) {
 /* ---------- The calls ---------- */
 const studioApi = {
   /** This computer and the clusters in your kubeconfig: checks, AX on this computer, contexts, and any setup in progress. */
-  env: () => studioGet('/api/env/status'),
+  /** This computer, its tools and your kubeconfig. fresh asks for the tools' versions again. */
+  env: (fresh) => studioGet('/api/env/status' + (fresh ? '?fresh=1' : '')),
+  /** A read-only look at a cluster: what it offers, and whether Agent Substrate and AX are on it. */
+  envCheck: (context) => studioGet('/api/env/check' + studioQuery({ context })),
+  /** Removes AX from a cluster (ax uninstall). The database's volume is kept. Progress comes as events. */
+  remoteUninstall: (context) => studioPost('/api/env/uninstall', { context }),
+  /** Interrupts the setup, stop, remove, install or uninstall that runs. */
+  envCancel: () => studioPost('/api/env/cancel', {}),
   /** Sets up or starts AX on this computer (ax local start). Progress comes as "envOp" and "streamLine" events. */
-  localUp: (images) => studioPost('/api/env/local/up', Object.assign({ name: 'ax-local', workers: 1 }, images)),
+  localUp: (images, purpose) => studioPost('/api/env/local/up', Object.assign({ name: 'ax-local', workers: 1, purpose: purpose || '' }, images)),
   localStop: () => studioPost('/api/env/local/stop', { name: 'ax-local' }),
   localDelete: () => studioPost('/api/env/local/delete', { name: 'ax-local' }),
+  /** Installs or upgrades AX on a cluster that already runs Agent Substrate (ax install). Progress comes as events too. */
+  remoteInstall: (context, images) => studioPost('/api/env/install', Object.assign({ context }, images)),
+  /** A plain-text report of this computer and a cluster (its AX pods and recent ax-server logs), secrets removed. */
+  diagnostics: (context) => studioGet('/api/env/diagnostics' + studioQuery({ context })),
 
   /** Tasks, read from the AX server as data. */
   tasks: (context, atespace) => studioGet('/api/tasks' + studioQuery({ context, atespace })),
   task: (context, atespace, name) => studioGet('/api/tasks/get' + studioQuery({ context, atespace, name })),
+  gateway: (context, atespace, name) => studioGet('/api/gateways/get' + studioQuery({ context, atespace, name })),
   /** verb is suspend, resume or delete. */
   taskAction: (verb, context, atespace, name) => studioPost(`/api/tasks/${verb}`, { context, atespace, name }),
   discardFile: (context, atespace, task, path) => studioPost('/api/tasks/discard-file', { context, atespace, task, path }),

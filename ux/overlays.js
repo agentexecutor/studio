@@ -300,10 +300,13 @@ function openPalette(initial) {
 
 /* ---------- Shortcuts ---------- */
 function openShortcuts() {
-  const rows = [[`${MOD} K`, 'Search or run any command'], ['N', 'New task'], ['G then H', 'Go home'], ['G then R', 'Go to Guardrails'], ['G then P', 'Go to Where agents run'], ['G then S', 'Go to Settings'], ['T', 'Switch light / dark theme'], [`${MOD} ↵`, 'Run task / send message'], ['?', 'Show this list'], ['Esc', 'Close dialogs']];
+  /* With real data, only the shortcuts that lead somewhere real (live-settings.js has the same list). */
+  const live = typeof liveOn === 'function' && liveOn() && typeof liveShortcutRows === 'function';
+  const rows = live ? liveShortcutRows()
+    : [[`${MOD} K`, 'Search or run any command'], ['N', 'New task'], ['G then H', 'Go home'], ['G then R', 'Go to Guardrails'], ['G then P', 'Go to Where agents run'], ['G then S', 'Go to Settings'], ['T', 'Switch light / dark theme'], [`${MOD} ↵`, 'Run task / send message'], ['?', 'Show this list'], ['Esc', 'Close dialogs']];
   openDialog(dialogShell('sc', 'Keyboard shortcuts', `Everything in AX Studio works from the keyboard. Arrow keys move between tabs and options.${state.singleKeys ? '' : ' Single-key shortcuts are off.'}`,
     `<table class="table"><tbody>${rows.map(([k, d]) => `<tr><td style="width:42%">${k.split(' ').map((x) => (x === 'then' ? '<span class="muted small"> then </span>' : `<kbd>${x}</kbd> `)).join('')}</td><td>${d}</td></tr>`).join('')}</tbody></table>
-    <p class="small muted" style="margin-top:12px">Turn single-key shortcuts on or off in <a href="#/settings/accessibility" data-action="close-dialog">Settings → Accessibility</a>.</p>`, '', false));
+    <p class="small muted" style="margin-top:12px">Turn single-key shortcuts on or off under <a href="#/settings/accessibility" data-action="close-dialog">Accessibility in Settings</a>.</p>`, '', false));
 }
 
 /* ---------- Axel's story ("Why an axolotl?") ----------

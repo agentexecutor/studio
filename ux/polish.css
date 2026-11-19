@@ -62,7 +62,9 @@ html[data-theme="dark"] {
 /* ---------- 2. Base ---------- */
 ::selection { background: color-mix(in srgb, var(--key) 24%, transparent); }
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-h1, .display { font-weight: 650; letter-spacing: -0.04em; }
+/* Page titles are a third smaller than the prototype's: a page's title is 21 px at full width, a task's 19 px, the
+   setup card's 24 px, and the display title (Home, the setup and journey heads) 28 px. */
+h1, .display { font-weight: 650; letter-spacing: -0.022em; }
 .h-display-sm { font-weight: 650; letter-spacing: -0.026em; }
 .lede { text-wrap: pretty; }
 h1, h2, .h-display-sm { text-wrap: balance; }
@@ -153,7 +155,7 @@ html[data-theme="dark"] .nav a[aria-current="page"] { background: var(--surface)
 
 /* ---------- 7. Home: hero ---------- */
 .stage { padding: 18px 0 30px; }
-.stage h1 { font-size: clamp(30px, 3.1vw, 42px); letter-spacing: -0.045em; line-height: 1.08; }
+.stage h1 { font-size: clamp(22px, 1.95vw, 28px); letter-spacing: -0.03em; line-height: 1.14; }
 .stage h1 em {
   background: var(--grad-brand);
   -webkit-background-clip: text; background-clip: text;
@@ -253,7 +255,7 @@ html[data-theme="dark"] .main:has(.stage) .sanctuary-atmo::after { mix-blend-mod
   border-color: color-mix(in srgb, var(--c) 36%, var(--line));
   background: radial-gradient(280px 150px at 0% 0%, var(--cs), transparent 74%), var(--glass-2);
 }
-.station .st-num { font-size: 30px; font-weight: 650; letter-spacing: -0.045em; }
+.station .st-num { font-size: 21px; font-weight: 650; letter-spacing: -0.03em; }
 .station::after {
   content: "";
   position: absolute; right: 16px; top: 18px; width: 16px; height: 16px;
@@ -400,7 +402,7 @@ html[data-theme="dark"] .jr-step.ok .jr-bead { color: var(--circle-ink); }
 .setup-card.view-enter > .su-head { animation: none; }
 .su-body.phase-fade { animation: suFade .34s var(--ease-glide) both; }
 @keyframes suFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.setup-card h1 { font-size: clamp(28px, 2.9vw, 36px); letter-spacing: -0.042em; }
+.setup-card h1 { font-size: clamp(20px, 1.7vw, 24px); letter-spacing: -0.028em; }
 .setup-panel { border-radius: 16px; background: var(--glass-2); box-shadow: var(--hl); }
 .su-now { border-radius: 14px; background: var(--glass-2); box-shadow: var(--hl); transition: opacity .28s var(--ease-glide), transform .28s var(--ease-glide); }
 .setup-card .su-head { align-items: flex-start; }
@@ -686,7 +688,7 @@ html { scrollbar-gutter: stable; scroll-padding-top: 72px; }   /* no sideways sh
 .cuj-head { display: flex; align-items: flex-start; gap: 18px; margin-top: 12px; }
 .cuj-head .axo { --axo-size: 104px; flex: none; margin: -6px -6px -10px -10px; }
 .cuj-head-copy { min-width: 0; }
-.cuj-head h1 { font-size: clamp(30px, 3.2vw, 42px); line-height: 1.08; letter-spacing: -0.045em; text-wrap: balance; }
+.cuj-head h1 { font-size: clamp(22px, 1.95vw, 28px); line-height: 1.14; letter-spacing: -0.03em; text-wrap: balance; }
 .cuj-num {
   display: block; width: fit-content; margin-bottom: 10px; padding: 3px 11px;
   border-radius: var(--r-full); font-size: 13px; font-weight: 650; letter-spacing: .02em;
@@ -1559,3 +1561,328 @@ a.byo-card, a.byo-card:hover { color: inherit; text-decoration: none; }
 .live-file .lf-status { flex: none; min-width: 58px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .live-file .lf-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 550 12.5px/1.4 var(--font-mono); color: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .live-file > summary .chev { transition: none; } }
+
+/* Where agents run: each place's head (icon, name, context, state), what runs on this computer, the remote clusters
+   with Connect and Install / Upgrade AX, and one Output panel for whatever ran last. */
+.app.live .place-top { align-items: flex-start; gap: 12px; }
+.app.live .place-top .p-icon { flex: none; }
+.pl-head { min-width: 0; flex: 1; }
+.pl-ctx { margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.pl-state { flex: none; margin-left: auto; padding-top: 4px; }
+.pl-sub { margin-top: 18px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.app.live .layers { margin-top: 6px; }
+.app.live .layer .l-ic { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--surface); }
+.app.live .layer .l-ic .svg { width: 16px; height: 16px; }
+.app.live .layer .l-text { min-width: 0; flex: 1; }
+.app.live .layer .l-tech { overflow-wrap: anywhere; }
+.app.live .layer .chip { flex: none; }
+.cl-list { display: grid; gap: 8px; margin-top: 14px; padding: 2px; }
+.cl-card { align-items: flex-start; gap: 12px; cursor: default; }
+.cl-card .cl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cl-card .cl-cluster { margin-top: 2px; font: 450 11.5px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.cl-card .cl-actions { margin-top: 10px; gap: 8px; }
+.cl-empty { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: var(--r-m); color: var(--muted); }
+.cl-empty > .svg { flex: none; width: 20px; height: 20px; margin-top: 2px; }
+.cl-empty code { overflow-wrap: anywhere; }
+.live-output { margin-top: 22px; }
+.live-output .term-bar { flex-wrap: wrap; row-gap: 6px; }
+.live-output .lo-title { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 600; color: #EEF4F9; }
+.live-output .lo-title .svg { width: 14px; height: 14px; }
+.live-output .lo-cmd { font: 450 11.5px/1.4 var(--font-mono); color: #C9D6E3; background: rgba(214, 232, 248, .08); padding: 2px 8px; border-radius: 6px; overflow-wrap: anywhere; }
+.live-output .lo-count { margin-left: auto; font-size: 12px; color: #8CA0B5; }
+.live-output .btn.ghost.lo-clear { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+.live-output .btn.ghost.lo-clear:hover:not(:disabled) { color: #FFFFFF; background: rgba(214, 232, 248, .14); }
+.live-output .lo-body { height: auto; min-height: 96px; max-height: 300px; margin: 0; overflow-wrap: anywhere; }
+.live-output .lo-body .m { color: #8498AD; }
+/* The status chip sits on the dark bar in both themes, so it uses the bar's own light tints. */
+.live-output .term-bar .chip { box-shadow: none; }
+.live-output .term-bar .chip.running { color: #7CC8FF; background: rgba(124, 200, 255, .14); }
+.live-output .term-bar .chip.done { color: #5EE0A6; background: rgba(94, 224, 166, .14); }
+.live-output .term-bar .chip.failed { color: #FF9DB0; background: rgba(255, 157, 176, .14); }
+
+/* Settings: Axel next to his story, long values that wrap, and the shortcuts table. */
+.ls-axel { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; background: radial-gradient(circle at 50% 60%, var(--key-soft), transparent 70%); }
+.ls-axel svg.axo { width: 42px; height: 42px; }
+.ls-wrap { overflow-wrap: anywhere; }
+.ls-bad { color: var(--fail); font-weight: 550; overflow-wrap: anywhere; }
+.ls-keys { margin-top: 10px; }
+.ls-keys td { padding: 7px 10px; }
+.ls-keys td:first-child { width: 38%; white-space: nowrap; }
+/* A dialog stays centred and on screen even when it holds very wide text (a report's long lines scroll inside it):
+   the scrim's one column is the scrim's width, so wide content can't stretch it past the window. */
+.scrim { grid-template-columns: minmax(0, 1fr); }
+
+/* New task (live): the run plan's "What it can reach", the cluster pills under Where should it run, and the image pill. */
+.plan-card .pc-foot:empty { display: none; }
+.plan-card .pc-reach { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.plan-card .pc-reach .gate-map { width: 100%; height: auto; }
+.pc-kicker { margin-bottom: 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.where-pills { margin-top: 10px; }
+.ready-list .rt .mono { font-weight: 500; font-size: 12px; }
+
+/* A task's page (live): Details under Activity, the turns of its session, and the dark terminal's input row. */
+.live-details { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.live-turns li { min-width: 0; }
+.live-turns .lt-goal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-turns .r-val .chip { font-weight: 550; }
+.live-terminal .term-body { height: auto; min-height: 240px; max-height: 420px; margin: 0; }
+.live-terminal .term-body .m { color: #8498AD; }
+.live-term-row { padding: 10px 14px; border-top: 1px solid rgba(214, 232, 248, .08); font: 450 12.5px/1.7 var(--font-mono); }
+.live-term-row .p { color: #5CCBF9; }
+.live-term-row .btn { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+.live-term-row .btn:hover { color: #FFFFFF; background: rgba(214, 232, 248, .14); }
+.live-term-row:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--key) 60%, transparent); border-radius: 0 0 var(--r-l) var(--r-l); }
+.live-term-row .btn:not(.primary):not(.ghost):not(.danger) { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .18); box-shadow: none; }
+.live-term-row .btn:not(.primary):not(.ghost):not(.danger):hover { color: #FFFFFF; background: rgba(214, 232, 248, .16); border-color: rgba(214, 232, 248, .28); }
+
+/* The task's inspector: What it can reach is the map New task showed (the sites its Gateway allows), then one fact per
+   line. Where it runs shows the image by its short name; the full address is in its tooltip and its copy button. */
+.reach-map { margin-top: 10px; }
+.reach-map .gate-map { display: block; width: 100%; height: auto; }
+.facts.one-col { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.reach-facts { margin-top: 10px; }
+.img-short { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; }
+.img-short .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-short .btn.icon { flex: none; width: 26px; height: 26px; margin: -4px 0; }
+
+/* New task: the branch field and the common branch names share one line. */
+.branch-input { flex: 0 1 200px; width: 200px; min-width: 140px; }
+
+/* Home (live): the list's head says whose tasks these are (the cluster in use, and Change cluster), right next to the
+   title; Updated sits on the right. Then one section per tile (Needs you, Running, Paused, Done), each a card of rows. */
+.live-list-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; margin-top: 26px; }
+.live-list-head h2 { margin-right: auto; }
+.live-list-head h2:has(+ .llh-scope) { margin-right: 0; }
+.llh-scope { display: inline-flex; align-items: center; gap: 8px; }
+.live-sec { margin-top: 18px; }
+.live-list-head + .live-sec { margin-top: 12px; }
+.live-sec .section-head { margin-bottom: 8px; }
+.live-sec .section-head h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); }
+.card.task-card { padding: 6px; }
+button.station { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.station:disabled { cursor: default; }
+button.station:disabled:hover { transform: none; border-color: var(--line); }
+button.station:disabled::after { display: none; }
+/* Settings: the name Home greets you by. */
+.ls-name { flex: none; width: 220px; max-width: 100%; }
+.ns-detail { display: block; margin-top: 6px; color: var(--faint); overflow-wrap: anywhere; }
+
+/* Where agents run, as the desktop app's Environment page has it: the head's Check again, one line for the command
+   that runs (what, how long, the step ax is on, Cancel or Dismiss), the tools AX uses, the AX images (remembered in this
+   browser), and each remote cluster's read-only check with what to do next. */
+.places-head { margin-bottom: 0; }
+.places-head .btn-row { flex: none; padding-top: 4px; }
+.op-line { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--bg-subtle); }
+.op-line > .svg { flex: none; color: var(--key-ink); }
+.op-line .op-title { flex: none; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.op-line .op-time { flex: none; font: 500 12px/1 var(--font-mono); color: var(--muted); }
+.op-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 450 12px/1.4 var(--font-mono); color: var(--faint); }
+.op-line .btn { flex: none; margin-left: auto; }
+.live-op .stones { margin-top: 14px; }
+.op-note { margin-top: 8px; }
+.problem-lines { margin-top: 8px; }
+.problem-line { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-size: 12.5px; line-height: 1.45; color: var(--wait); overflow-wrap: anywhere; }
+.problem-line .svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+.img-field { display: grid; gap: 4px; margin-top: 10px; }
+.img-field .input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--wait) 45%, var(--line)); }
+#live-images > summary .chip { margin-left: 6px; }
+.tool-v { margin-left: 4px; font-size: 11.5px; font-weight: 450; color: var(--muted); }
+#live-tools .ci-desc { overflow-wrap: anywhere; }
+.cl-card .cl-ctx { display: block; margin-top: 2px; font-size: 11px; color: var(--faint); overflow-wrap: anywhere; }
+.cl-check { margin-top: 10px; }
+.cl-check .setup-panel { margin-top: 0; padding: 4px 12px; }
+.cl-check .check-item { padding: 7px 0; gap: 10px; }
+.cl-check .check-item .ci-desc { overflow-wrap: anywhere; }
+.cl-next { margin-top: 8px; line-height: 1.5; color: var(--ink); }
+.cl-next a, .cl-guide a { white-space: nowrap; }
+.cl-why { margin-top: 8px; }
+.cl-card .cl-actions .op-step { flex: 1 1 160px; }
+.place-card { min-width: 0; }
+.cl-guides { display: grid; gap: 6px; margin-top: 12px; }
+.cl-guide[open] { padding-bottom: 4px; }
+.disclosure > summary:focus-visible { box-shadow: var(--ring); outline: none; }
+.cl-guide-list { margin: 2px 0 0; padding-left: 20px; line-height: 1.6; color: var(--ink); }
+.cl-guide-list li + li { margin-top: 6px; }
+.cl-guide-list .mono { font-size: 12px; }
+.btn.danger-text { color: var(--fail); }
+.btn.danger-text:hover:not(:disabled) { background: var(--fail-soft); }
+/* A section that is fine folds to one line that says so (the checks, the tools, a cluster's check); one with a problem
+   stays open. */
+.live-checks { margin-top: 12px; }
+.pl-fold { margin-top: 16px; }
+.pl-fold > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; cursor: pointer; border-radius: var(--r-xs); }
+.pl-fold > summary::-webkit-details-marker { display: none; }
+.pl-fold > summary:focus-visible { box-shadow: var(--ring); }
+.pl-fold > summary .chev { flex: none; color: var(--faint); transition: transform var(--dur-2) var(--ease); }
+.pl-fold[open] > summary .chev { transform: rotate(90deg); }
+.pl-fold > summary .pl-sub { flex: none; margin-top: 0; }
+.pl-fold > summary:hover .pl-sub { color: var(--muted); }
+.pl-fold .fold-sum { min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.pl-fold .fold-body { padding-top: 4px; }
+.pl-fold .live-checks, .pl-fold .setup-panel { margin-top: 4px; }
+.fs-ok, .fs-warn, .fs-bad { display: inline-flex; align-items: center; gap: 5px; font-weight: 550; }
+.fs-ok { color: var(--done); }
+.fs-warn { color: var(--wait); }
+.fs-bad { color: var(--fail); }
+.fs-tools { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fs-tools .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+.cl-check .pl-fold { margin-top: 0; }
+.cl-check .pl-fold > summary { min-height: 26px; }
+.cl-check .fold-sum { white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .pl-fold > summary .chev { transition: none; } }
+.fs-when { font-weight: 450; color: var(--faint); white-space: nowrap; }
+
+/* Logs (live): what a task's sandbox printed, one line each: the time, then the text. AX's runner and the worker's own
+   events are quieter than the agent; errors stand out. Sandbox start-up lines (gVisor) are off unless asked for. */
+.live-logs-term .term-body { height: auto; min-height: 200px; max-height: 520px; margin: 0; white-space: normal; }
+.live-logs-term .term-bar { gap: 10px; }
+.live-logs-term .lo-count { margin-left: auto; font-size: 12px; color: #8CA0B5; }
+.live-logs-term .chip.ll-live { box-shadow: none; color: #7CC8FF; background: rgba(124, 200, 255, .14); }
+.ll { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.ll-t { color: #6E8399; font-variant-numeric: tabular-nums; }
+.ll-x { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--term-ink); }
+.ll-runner .ll-x { color: #A9BACB; }
+.ll-sandbox .ll-x { color: #7F93A8; }
+.ll-event .ll-x { color: #7CC8FF; font-style: italic; }
+.ll-warn .ll-x { color: #F5C26B; }
+.ll-err .ll-x { color: #FF9DB0; }
+.ll-err { background: rgba(255, 157, 176, .07); margin: 0 -16px; padding: 0 16px; }
+.ll-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.ll-toggle input { margin: 0; accent-color: var(--key); }
+.tab-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--fail); vertical-align: 1px; }
+.tab-dot[hidden] { display: none; }
+.ns-logerr { color: var(--ink); }
+.ns-logerr .svg { color: var(--fail); vertical-align: -1px; }
+.ns-logerr .mono { font-size: 11.5px; overflow-wrap: anywhere; }
+
+/* Home (live): workspaces and network rules under the tasks, one row each: what it is, which tasks use it, and Delete
+   for the ones no task uses. */
+.live-res { margin-top: 26px; }
+.live-res .live-list-head { margin-top: 0; }
+.res-card { margin-top: 10px; padding-top: 10px; padding-bottom: 12px; }
+.res-card .pl-fold { margin-top: 0; }
+.res-h { margin-top: 14px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.res-h .muted { text-transform: none; letter-spacing: 0; font-weight: 450; }
+.res-list { margin: 6px 0 0; padding: 0; list-style: none; }
+.res-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.res-row:first-child { border-top: 0; }
+.res-row .rr-ic { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: var(--surface); }
+.res-row .rr-main { flex: 1; min-width: 0; }
+.res-row .rr-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.res-row .rr-used { margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.res-row .rr-used .mono { font-size: 12px; }
+.res-row .rr-unused { color: var(--wait); }
+.res-row .rr-meta { font-size: 12px; font-weight: 450; color: var(--faint); }
+.res-row .rr-why { margin-top: 4px; font-size: 12px; color: var(--fail); overflow-wrap: anywhere; }
+.res-row .btn { flex: none; }
+.live-res-err { margin-top: 14px; }
+.ld-opt { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+.ld-opt input { flex: none; margin: 0; accent-color: var(--fail); }
+.task-head .env.env-bad { color: var(--fail); }
+/* Home's list head: when the list was read, and Refresh. Settings: the atespace field. Details: AX's conditions. */
+.llh-upd { margin-left: auto; font-size: 12px; color: var(--faint); }
+.live-list-head h2 + .llh-scope + .llh-upd { margin-left: auto; }
+.live-list-head .llh-upd + .btn.icon { margin-left: -6px; }
+.ls-ates { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ls-ates .input { width: 180px; }
+.ls-ates-why { display: block; margin-top: 6px; font-size: 12px; }
+.cond-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cond-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.cond-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.cond-table td.mono { font-size: 11.5px; }
+.cl-empty > div { flex: 1; min-width: 0; }
+
+/* Run on another cluster: the cluster and atespace side by side, the original's fate, and the move's steps as they run. */
+.lp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; }
+.lp-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-top: 14px; }
+.lp-row .lp-label { font-weight: 550; color: var(--ink); }
+.move-steps { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.move-steps li { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.move-steps li .svg { flex: none; margin-top: 2px; }
+.move-steps li.done .svg { color: var(--done); }
+.move-steps li.now .svg { color: var(--key-ink); animation: spin 1s linear infinite; }
+.move-steps li.failed .svg { color: var(--fail); }
+.op-exit { flex: none; padding: 1px 6px; border-radius: 6px; font: 500 11.5px/1.4 var(--font-mono); color: var(--fail); background: var(--fail-soft); }
+@media (prefers-reduced-motion: reduce) { .move-steps li.now .svg { animation: none; } }
+
+/* New task: step spacing, aligned top with the run plan, Customize workspace inside Set up the workspace, and More options. */
+.new-grid { margin-top: 24px; }
+.new-grid .step-block.first { margin-top: 0; }
+.new-grid .step-block { margin-top: 32px; padding-top: 28px; }
+.new-grid .step-head { margin-bottom: 16px; gap: 10px; }
+.new-grid .choice-grid { gap: 12px; }
+.new-grid .choice { padding: 16px 18px; gap: 12px; min-height: 146px; }
+.new-grid .radio-list { gap: 10px; }
+.new-grid .radio-card { padding: 15px 18px; gap: 14px; }
+.new-grid .radio-card .rc-desc { margin-top: 3px; line-height: 1.45; }
+.new-grid .radio-card .rc-right { flex: none; white-space: nowrap; padding-left: 12px; }
+.new-grid .prow { padding: 16px 20px; gap: 8px 24px; }
+.new-grid .panel-more > summary { padding: 14px 20px; }
+.prow-hint .svg { vertical-align: -2px; margin-right: 3px; }
+#live-ws-existing { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+#live-ws-existing .pills { margin-top: 0; }
+#live-ws-existing .pill .svg { flex: none; }
+.mcp-rows { display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
+.mcp-rows > .btn-row { margin-top: 2px; }
+.kv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.kv-row.kv-2 { grid-template-columns: minmax(120px, .65fr) minmax(0, 1.35fr) auto; }
+.size-custom { margin-top: 2px; gap: 14px; }
+.size-custom label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--muted); }
+.size-custom .input { width: 104px; }
+#live-new-manifest { max-height: 220px; }
+.live-cli-stack { display: grid; gap: 8px; }
+.more-block > summary { padding: 4px 0; }
+.plan-card.card { padding: 22px; }
+.plan-card .ready-list { margin-top: 16px; gap: 4px; }
+.plan-card .ready-list li { align-items: flex-start; padding: 7px 0; gap: 10px; }
+.plan-card .ready-list .rb { margin-top: 1px; }
+
+/* The cluster switcher in the top bar: the cluster in use (and the atespace when it isn't default), and a menu of the
+   clusters in your kubeconfig. */
+#live-foot { position: relative; }
+button.health-card { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
+.health-card .hc-chev { margin-left: auto; color: var(--faint); transition: transform var(--dur-2) var(--ease); }
+.health-card[aria-expanded="true"] .hc-chev { transform: rotate(180deg); }
+.cs-ates { padding: 1px 6px; border-radius: 6px; font: 500 11px/1.4 var(--font-mono); color: var(--muted); background: var(--surface); }
+.cs-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-l); background: var(--bg); box-shadow: var(--float); }
+.cs-menu[hidden] { display: none; }
+.cs-head { padding: 6px 8px 4px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cs-item, .cs-foot { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: var(--r-s); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; text-decoration: none; }
+.cs-item:hover, .cs-foot:hover, .cs-item:focus-visible, .cs-foot:focus-visible { background: var(--surface); outline: none; }
+.cs-item .cs-text { flex: 1; min-width: 0; display: grid; }
+.cs-item .cs-name { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-item .cs-sub { font-size: 11.5px; color: var(--muted); }
+.cs-item[aria-checked="true"] > .svg:last-child { color: var(--key-ink); }
+.cs-foot { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 var(--r-s) var(--r-s); font-size: 12.5px; color: var(--muted); }
+@media (max-width: 980px) { .health-card .hc-chev { display: none; } }
+
+/* Compact task lists (Settings > Appearance). */
+.live-compact .task-row { padding-top: 7px; padding-bottom: 7px; }
+.live-compact .task-row .t-title { font-size: 13.5px; }
+.live-compact .task-row .t-meta { margin-top: 1px; font-size: 11.5px; }
+.live-compact .live-sec { margin-top: 12px; }
+
+/* The sandbox shell: tabs for several shells, colors programs print, and the keys it knows. */
+.term-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; }
+.term-tabs .tt-item { display: inline-flex; align-items: center; border-radius: 6px; }
+.term-tabs .tt-item.on { background: rgba(214, 232, 248, .10); }
+.term-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 0; background: transparent; color: #A9BACB; font: 500 12px/1 var(--font-mono); cursor: pointer; border-radius: 6px; }
+.term-tabs .tt-item.on > button[role="tab"] { color: #EEF4F9; }
+.term-tabs button:hover { color: #FFFFFF; }
+.term-tabs button:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--key) 70%, transparent); outline: none; }
+.term-tabs .tt-x { padding: 0 6px; }
+.term-tabs .tt-new { color: #7CC8FF; }
+.term-tabs .tt-dot { width: 6px; height: 6px; border-radius: 50%; background: #5EE0A6; }
+.term-keys { padding: 0 14px 10px; font-size: 11px; color: #8498AD; }
+.term-keys kbd { font-size: 10.5px; }
+.live-terminal .term-body .a-bold { font-weight: 700; }
+.live-terminal .term-body .a-k { color: #8498AD; }
+.live-terminal .term-body .a-r { color: #FF9DB0; }
+.live-terminal .term-body .a-g { color: #5EE0A6; }
+.live-terminal .term-body .a-y { color: #F5C26B; }
+.live-terminal .term-body .a-bl { color: #8AB4FF; }
+.live-terminal .term-body .a-m { color: #E4A3F5; }
+.live-terminal .term-body .a-c { color: #7CC8FF; }
+.live-terminal .term-body .a-w { color: #EEF4F9; }
+.term-keys kbd { color: #C9D6E3; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }

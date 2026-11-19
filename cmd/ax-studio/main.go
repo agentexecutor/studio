@@ -134,6 +134,7 @@ func run(args []string) error {
 		Addr:        addr,
 		AXNamespace: parsed.axNamespace,
 		AXBinary:    parsed.axBin,
+		Version:     version,
 		UXFS:        uxFS,
 		OnListening: func(boundURL string) {
 			fmt.Printf("==> AX Studio running at %s (press Ctrl-C to stop)\n", boundURL)

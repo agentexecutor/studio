@@ -145,7 +145,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), axReadTimeout)
 	defer cancel()
-	resp, err := client.ListTasks(ctx, &v1alpha1.ListTasksRequest{Atespace: atespace})
+	resp, err := client.ListTasks(ctx, &v1alpha1.ListTasksRequest{Atespace: atespace, Limit: resourceListLimit})
 	if err != nil {
 		writeAXError(w, err)
 		return
@@ -203,6 +203,46 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	// The YAML is for reading. If it can't be produced the task still loads.
 	file, _ := jsonToYAML(doc)
 	writeJSON(w, http.StatusOK, map[string]any{"task": json.RawMessage(doc), "yaml": file})
+}
+
+// handleGetGateway serves GET /api/gateways/get: one Gateway, as data. The
+// task page shows what a task can reach from the Gateway it names.
+func (s *Server) handleGetGateway(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	q := r.URL.Query()
+	kubeCtx, atespace, err := taskScope(q.Get("context"), q.Get("atespace"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name := strings.TrimSpace(q.Get("name"))
+	if err := kube.ValidateName(name); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid gateway name: %v", err))
+		return
+	}
+	client, conn, err := s.dialAXForContext(kubeCtx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), axReadTimeout)
+	defer cancel()
+	gw, err := client.GetGateway(ctx, &v1alpha1.GetGatewayRequest{Atespace: atespace, Name: name})
+	if err != nil {
+		writeAXError(w, err)
+		return
+	}
+	doc, err := taskJSON.Marshal(gw)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("encoding gateway: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"gateway": json.RawMessage(doc)})
 }
 
 // handleTaskAction serves POST /api/tasks/{suspend,resume,delete} for the
