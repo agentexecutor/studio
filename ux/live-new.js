@@ -122,7 +122,7 @@ function liveNewRepick(d) {
 /** What the form shows that comes from the cluster, not from you. When it changes, the form is drawn again. */
 function liveNewEnvSig() {
   const L = LIVE.local || {};
-  return [LIVE.context, LIVE.contexts.map((c) => c.name).join(','), L.state || '', L.context || '', (LIVE.env || {}).defaultTaskImageEnv || ''].join('|');
+  return [LIVE.context, LIVE.contexts.map((c) => c.name).join(','), L.state || '', L.context || ''].join('|');
 }
 
 /* ---------- The draft ---------- */
@@ -386,8 +386,7 @@ function liveNewAgentHTML(d) {
         <span class="prow-hint" id="live-new-key-hint">${icon('lock', 'xs')} Stored on the cluster as a secret and added to the agent's requests outside the sandbox, so the agent never holds it.</span>`, { labelId: 'live-key-label', sub: 'Only the first time' }),
   ] : [
     prow('Image', `<input class="input mono" type="text" id="live-new-image" data-live-new="image" value="${esc(d.image)}" placeholder="registry.example.com/team/agent@sha256:…" autocomplete="off" spellcheck="false" aria-labelledby="live-image-label" aria-describedby="live-new-image-hint">
-        ${env.defaultTaskImageEnv && !d.from ? `<div class="pills" role="group" aria-label="Suggested image"><button type="button" class="pill mono" aria-pressed="${d.image === env.defaultTaskImageEnv}" data-action="live-new-image-pick" data-image="${esc(env.defaultTaskImageEnv)}" title="${esc(env.defaultTaskImageEnv)}">${icon('box', 'xs')}AX task runner · ${esc(liveImageShort(env.defaultTaskImageEnv))}</button></div>` : ''}
-        <span class="prow-hint" id="live-new-image-hint">It must end in its digest (<span class="mono">@sha256:…</span>). ${d.from ? "Leave it empty to use AX's default task image, as the last turn did." : 'AX runs the image as it is, with your goal.'}</span>`, { labelId: 'live-image-label', sub: 'Its address and digest' }),
+        <span class="prow-hint" id="live-new-image-hint">It must end in its digest (<span class="mono">@sha256:…</span>). AX runs the image as it is, with your goal.</span>`, { labelId: 'live-image-label', sub: 'Its address and digest' }),
   ];
   return `${picker}<div class="panel tpl-panel">${rows.join('')}</div>`;
 }
@@ -1093,7 +1092,6 @@ const LIVE_NEW_ACTIONS = {
     d.size = el.dataset.size;
     render({ keepScroll: true });
   },
-  'live-new-image-pick': (el) => { const d = LIVE.draft; if (d) { d.image = el.dataset.image || ''; d.error = ''; render({ keepScroll: true }); } },
   'live-new-raw': () => { const d = LIVE.draft; if (d) { d.yaml = liveNewYAML(d, 'text', ''); d.raw = true; d.error = ''; render({ keepScroll: true }); } },
   'live-new-form': () => { if (LIVE.draft) { LIVE.draft.raw = false; LIVE.draft.error = ''; render({ keepScroll: true }); } },
   'live-new-run': () => liveNewRun(),

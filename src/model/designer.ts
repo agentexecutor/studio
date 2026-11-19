@@ -80,8 +80,8 @@ export const PRESETS: { id: Preset; title: string; group?: string }[] = [
 ]
 
 /**
- * Leave spec.profile.image empty by default so ax-server uses its configured
- * AX_DEFAULT_TASK_IMAGE without hardcoding a private/staging registry.
+ * No image by default: a template brings its own, and a custom task names
+ * one. AX has no default task image.
  */
 export const DEFAULT_RUNNER_IMAGE = ''
 

@@ -21,7 +21,6 @@ export interface ClustersState {
   loaded: boolean
   workers: number
   serverImage: string
-  defaultTaskImage: string
   runnerVolumeImage: string
   op: EnvOpSnapshot | null
   log: ConsoleLine[]
@@ -35,7 +34,6 @@ class ClustersStore {
     loaded: false,
     workers: 1,
     serverImage: '',
-    defaultTaskImage: '',
     runnerVolumeImage: '',
     op: null,
     log: [],
@@ -95,8 +93,7 @@ class ClustersStore {
         log = env.operation.logs.map((text) => ({ id: this.lineID++, text }))
       }
       const serverImage = this.state.serverImage || env.serverImageEnv || ''
-      const defaultTaskImage = this.state.defaultTaskImage || env.defaultTaskImageEnv || ''
-      this.set({ env, op, log, serverImage, defaultTaskImage, loaded: true })
+      this.set({ env, op, log, serverImage, loaded: true })
     } finally {
       this.set({ loading: false })
     }
@@ -104,10 +101,9 @@ class ClustersStore {
 
   /** The image references the user filled in; an empty one is left to ax. */
   private get images(): ImageOverrides {
-    const { serverImage, defaultTaskImage, runnerVolumeImage } = this.state
+    const { serverImage, runnerVolumeImage } = this.state
     return {
       serverImage: serverImage.trim() || undefined,
-      defaultTaskImage: defaultTaskImage.trim() || undefined,
       runnerVolumeImage: runnerVolumeImage.trim() || undefined,
     }
   }

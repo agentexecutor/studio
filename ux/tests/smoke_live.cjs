@@ -1552,11 +1552,11 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
   });
   await check('Set up starts it on the server, with the images you gave, and shows each stage as its output arrives', async () => {
-    f.api.LIVE.images.defaultTaskImage = ' registry.example.com/task-runner@' + DIGEST + ' ';
+    f.api.LIVE.images.serverImage = ' registry.example.com/ax-server@' + DIGEST + ' ';
     f.api.ACTIONS['live-setup-start']();
     await settle();
     const sent = F.posts.find((x) => x.path === '/api/env/local/up');
-    if (JSON.stringify(sent.body) !== JSON.stringify({ name: 'ax-local', workers: 1, purpose: 'setup', defaultTaskImage: 'registry.example.com/task-runner@' + DIGEST })) throw new Error(JSON.stringify(sent.body));
+    if (JSON.stringify(sent.body) !== JSON.stringify({ name: 'ax-local', workers: 1, purpose: 'setup', serverImage: 'registry.example.com/ax-server@' + DIGEST })) throw new Error(JSON.stringify(sent.body));
     need(main(f), ['Setting up AX on this computer', 'Creating the Kubernetes cluster']);
     const id = f.api.LIVE.op.id;
     F.push('streamLine', { id, line: '==> Installing Agent Substrate v1.0.0 (ate-system)...', stage: 'substrate' });

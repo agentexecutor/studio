@@ -108,7 +108,6 @@ type EnvStatusResponse struct {
 	ContainerRootless bool             `json:"containerRootless"`
 	CanStartLocal     bool             `json:"canStartLocal"`
 	ServerImageEnv    string           `json:"serverImageEnv,omitempty"`
-	DefaultTaskImgEnv string           `json:"defaultTaskImageEnv,omitempty"`
 	Preflight         []PreflightItem  `json:"preflight"`
 	Local             LocalClusterInfo `json:"local"`
 	Contexts          []ContextSummary `json:"contexts"`
@@ -153,11 +152,10 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 	diskBytes := freeDiskSpaceBytes(home)
 
 	resp := EnvStatusResponse{
-		OS:                runtime.GOOS,
-		Arch:              runtime.GOARCH,
-		FreeDiskBytes:     diskBytes,
-		ServerImageEnv:    strings.TrimSpace(os.Getenv("AX_SERVER_IMAGE")),
-		DefaultTaskImgEnv: strings.TrimSpace(os.Getenv("AX_DEFAULT_TASK_IMAGE")),
+		OS:             runtime.GOOS,
+		Arch:           runtime.GOARCH,
+		FreeDiskBytes:  diskBytes,
+		ServerImageEnv: strings.TrimSpace(os.Getenv("AX_SERVER_IMAGE")),
 	}
 
 	// 1. OS & CPU Architecture check.
@@ -344,7 +342,6 @@ type localActionRequest struct {
 	Name              string `json:"name"`
 	Workers           int    `json:"workers"`
 	ServerImage       string `json:"serverImage"`
-	DefaultTaskImage  string `json:"defaultTaskImage"`
 	RunnerVolumeImage string `json:"runnerVolumeImage"`
 	// Purpose is the button that started `ax local start`: setup, start,
 	// update or repair. It only changes how the operation is worded.
@@ -381,11 +378,6 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	taskImg, err := validateOptionalFlagImage(req.DefaultTaskImage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	runnerImg, err := validateOptionalFlagImage(req.RunnerVolumeImage)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -402,9 +394,6 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	args := []string{"-n", s.axNamespace, "local", "start", "--name", name, "--workers", strconv.Itoa(workers)}
 	if srvImg != "" {
 		args = append(args, "--server-image", srvImg)
-	}
-	if taskImg != "" {
-		args = append(args, "--default-task-image", taskImg)
 	}
 	if runnerImg != "" {
 		args = append(args, "--runner-volume-image", runnerImg)
@@ -477,7 +466,6 @@ func (s *Server) handleLocalAction(subcmd string) http.HandlerFunc {
 type remoteInstallRequest struct {
 	Context           string `json:"context"`
 	ServerImage       string `json:"serverImage"`
-	DefaultTaskImage  string `json:"defaultTaskImage"`
 	RunnerVolumeImage string `json:"runnerVolumeImage"`
 }
 
@@ -497,11 +485,6 @@ func (s *Server) handleRemoteInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	taskImg, err := validateOptionalFlagImage(req.DefaultTaskImage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	runnerImg, err := validateOptionalFlagImage(req.RunnerVolumeImage)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -511,9 +494,6 @@ func (s *Server) handleRemoteInstall(w http.ResponseWriter, r *http.Request) {
 	args := []string{"--context", targetCtx, "-n", s.axNamespace, "install"}
 	if srvImg != "" {
 		args = append(args, "--server-image", srvImg)
-	}
-	if taskImg != "" {
-		args = append(args, "--default-task-image", taskImg)
 	}
 	if runnerImg != "" {
 		args = append(args, "--runner-volume-image", runnerImg)

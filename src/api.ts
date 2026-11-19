@@ -103,7 +103,6 @@ export interface EnvStatusResponse {
   containerRootless: boolean
   canStartLocal: boolean
   serverImageEnv?: string
-  defaultTaskImageEnv?: string
   preflight: PreflightItem[]
   local: LocalClusterInfo
   contexts: ContextSummary[]
@@ -114,7 +113,6 @@ export interface EnvStatusResponse {
 /** Image references passed to `ax local start` and `ax install`; an unset one keeps ax's default. */
 export interface ImageOverrides {
   serverImage?: string
-  defaultTaskImage?: string
   runnerVolumeImage?: string
 }
 

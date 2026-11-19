@@ -114,7 +114,6 @@ function liveSetAboutHTML() {
     : `${info.axBinary ? `${mono(info.axBinary)}<br>` : ''}${muted('ax version')} ${LIVE.axVersion ? esc(LIVE.axVersion) : 'Checking…'}`;
   const kept = (k) => (LIVE.images && LIVE.images[k] ? String(LIVE.images[k]).trim() : '');
   const images = `AX server: ${env.serverImageEnv ? `${mono(env.serverImageEnv)} ${muted('(from AX_SERVER_IMAGE)')}` : kept('serverImage') ? `${mono(kept('serverImage'))} ${muted('(kept in this browser)')}` : 'None yet'}<br>
-    Default task image: ${env.defaultTaskImageEnv ? `${mono(env.defaultTaskImageEnv)} ${muted('(from AX_DEFAULT_TASK_IMAGE)')}` : kept('defaultTaskImage') ? `${mono(kept('defaultTaskImage'))} ${muted('(kept in this browser)')}` : "AX's own"}<br>
     ${muted('Change them under AX images on')} <a href="#/places">Where agents run</a>`;
   /* The atespace Studio lists and starts tasks in. Like the cluster, it's Studio's own choice. */
   const ates = `<span class="ls-ates"><input class="input mono" id="ls-atespace" value="${esc(LIVE.atespace)}" aria-label="Atespace" autocomplete="off" spellcheck="false" maxlength="63">

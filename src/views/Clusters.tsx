@@ -255,7 +255,7 @@ export function Clusters() {
 
         <details className="card" style={{ padding: '10px 14px', marginTop: 12 }}>
           <summary className="caption muted" style={{ cursor: 'pointer', fontWeight: 600 }}>
-            Installer Image Overrides (optional · --server-image / --default-task-image / --runner-volume-image)
+            Installer Image Overrides (optional · --server-image / --runner-volume-image)
           </summary>
           <div className="form-grid" style={{ marginTop: 10 }}>
             <label className="caption">Server image</label>
@@ -265,14 +265,6 @@ export function Clusters() {
               disabled={running}
               placeholder="Defaults to $AX_SERVER_IMAGE or built-in release image"
               onChange={(e) => clusters.set({ serverImage: e.target.value })}
-            />
-            <label className="caption">Default task image</label>
-            <input
-              className="input mono"
-              value={c.defaultTaskImage}
-              disabled={running}
-              placeholder="Optional ($AX_DEFAULT_TASK_IMAGE)"
-              onChange={(e) => clusters.set({ defaultTaskImage: e.target.value })}
             />
             <label className="caption">Runner volume image</label>
             <input

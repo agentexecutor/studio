@@ -96,7 +96,7 @@ function liveOpCommand(op) {
 /* What you typed under "AX images", kept in this browser (they are image names, not secrets), as the desktop app does. */
 const LIVE_IMAGES_KEY = 'ax.live.images';
 LIVE.images = (() => {
-  const empty = { serverImage: '', defaultTaskImage: '', runnerVolumeImage: '' };
+  const empty = { serverImage: '', runnerVolumeImage: '' };
   try { return Object.assign(empty, JSON.parse(localStorage.getItem(LIVE_IMAGES_KEY) || '{}')); } catch (e) { return empty; }
 })();
 LIVE.imagesOpen = false;
@@ -109,7 +109,7 @@ function liveImageProblems() {
   /* ax has no ax-server image of its own yet, and only finds that out at its last step, after Kubernetes and Agent
      Substrate are up. So it's asked for first. */
   if (!im.serverImage.trim() && !env.serverImageEnv) out.push('Give the AX server image: AX has none of its own yet.');
-  [['The AX server image', im.serverImage], ['The default task image', im.defaultTaskImage], ['The runner volume image', LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? im.runnerVolumeImage : '']].forEach(([label, raw]) => {
+  [['The AX server image', im.serverImage], ['The runner volume image', LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? im.runnerVolumeImage : '']].forEach(([label, raw]) => {
     const v = String(raw || '').trim();
     if (v && (v.startsWith('-') || /\s/.test(v))) out.push(`${label} isn't an image name.`);
     else if (v.includes('sha256:') && !/@sha256:[0-9a-f]{64}$/.test(v)) out.push(`${label} must give its digest as name@sha256: and 64 characters.`);
@@ -119,7 +119,7 @@ function liveImageProblems() {
 /** The images to send with setup or an install: the ones typed here; the server adds its own from its environment. */
 function liveImagesToSend() {
   const out = {};
-  ['serverImage', 'defaultTaskImage'].concat(LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? ['runnerVolumeImage'] : []).forEach((k) => {
+  ['serverImage'].concat(LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? ['runnerVolumeImage'] : []).forEach((k) => {
     const v = String(LIVE.images[k] || '').trim();
     if (v) out[k] = v;
   });
@@ -352,13 +352,11 @@ function liveImagesHTML() {
   const problems = liveImageProblems();
   const field = (key, label, hint, required) => `<label class="small img-field"><span>${label}${required ? ' <span class="muted">· required</span>' : ''}</span>
       <input class="input mono" type="text" data-live-image="${key}" value="${esc(LIVE.images[key])}" placeholder="${esc(hint)}" autocomplete="off" spellcheck="false" ${required && !LIVE.images[key].trim() ? 'aria-invalid="true"' : ''}></label>`;
-  /* The server passes these two on from its own environment, so say when one is set. */
+  /* The server passes this one on from its own environment, so say when it's set. */
   const own = (fromEnv, name, fallback) => (fromEnv ? `${fromEnv} (from ${name})` : fallback);
   return `<details class="disclosure" id="live-images" style="margin-top:12px" ${LIVE.imagesOpen || problems.length ? 'open' : ''}><summary>${icon('chevRight', 'sm chev')}AX images <span id="live-images-sum">${liveImagesSummaryHTML(problems)}</span></summary>
     <div class="disclosure-body"><p class="small sub">Setting up, updating or repairing AX here, and installing it on a cluster, deploy these. They're kept in this browser.</p>
       ${field('serverImage', 'AX server image', own(env.serverImageEnv, 'AX_SERVER_IMAGE', 'registry.example.com/ax/ax-server@sha256:…'), !env.serverImageEnv)}
-      ${field('defaultTaskImage', 'Default task image', own(env.defaultTaskImageEnv, 'AX_DEFAULT_TASK_IMAGE', "Optional. Leave empty for AX's own"))}
-      <p class="xsmall muted" style="margin-top:4px">A task that names no image of its own runs in this one. It must end in its digest (<span class="mono">@sha256:…</span>). The templates on New task bring their own image.</p>
       ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', "Optional. Leave empty to run the runner in each task's image") : ''}
       <div id="live-image-problems">${liveImageProblemsHTML(problems)}</div></div></details>`;
 }
@@ -808,7 +806,7 @@ function liveOpenInstall(context) {
   const p = { error: '' };
   const runner = !!(LIVE.axFlags && LIVE.axFlags.runnerVolumeImage);
   const cmd = () => ['ax', '--context', context].concat(ns !== 'ax-system' ? ['-n', ns] : [], ['install'],
-    LIVE.images.serverImage.trim() ? ['--server-image', LIVE.images.serverImage.trim()] : [], LIVE.images.defaultTaskImage.trim() ? ['--default-task-image', LIVE.images.defaultTaskImage.trim()] : [],
+    LIVE.images.serverImage.trim() ? ['--server-image', LIVE.images.serverImage.trim()] : [],
     runner && LIVE.images.runnerVolumeImage.trim() ? ['--runner-volume-image', LIVE.images.runnerVolumeImage.trim()] : []).join(' ');
   const own = (fromEnv, name, fallback) => (fromEnv ? `${fromEnv} (from ${name})` : fallback);
   const dlg = openDialog(dialogShell('li', `${verb} AX on ${esc(liveShortCtx(context))}?`, '', '<div id="li-body"></div>',
@@ -824,7 +822,6 @@ function liveOpenInstall(context) {
       ${upgrade ? '' : '<div class="callout warn" style="margin-top:10px">' + icon('alert') + '<div>The first time, registering restarts Agent Substrate\'s API server and router, which everyone on the cluster shares.</div></div>'}
       <p class="small" style="margin-top:8px">The cluster must already run Agent Substrate. Nothing is installed on this computer, and your kubeconfig stays as it is.</p>
       ${field('serverImage', `AX server image${env.serverImageEnv ? '' : ' (required)'}`, own(env.serverImageEnv, 'AX_SERVER_IMAGE', 'registry.example.com/ax/ax-server@sha256:…'))}
-      ${field('defaultTaskImage', 'Default task image (optional)', own(env.defaultTaskImageEnv, 'AX_DEFAULT_TASK_IMAGE', "Leave empty for AX's own"))}
       ${runner ? field('runnerVolumeImage', 'Runner volume image (optional)', "Leave empty to run the runner in each task's image") : ''}
       <div class="live-cli-wrap" id="li-cli" style="margin-top:12px">${cliHint(cmd())}</div>
       <p class="xsmall muted" style="margin-top:8px">The output shows in the Output panel on Where agents run as it arrives.</p>
