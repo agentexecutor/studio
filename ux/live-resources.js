@@ -17,9 +17,10 @@
 /* AX Studio, live mode: workspaces and Gateways.
 
    A task starts from a Workspace (its repositories, files and setup) and reaches the network through a Gateway (its
-   network rules). Both outlive the tasks that use them, so they pile up as tasks are deleted. Home lists them under the
-   tasks, says which tasks use each, and deletes the ones no task uses, as `ax get` and `ax delete` do. Deleting a task
-   can take its own workspace and network rules with it. A task's page says when its workspace couldn't be set up. */
+   network rules). Both outlive the tasks that use them, so they pile up as tasks are deleted. Tasks lists them under
+   the tasks, each in its own section, says which tasks use each, and deletes the ones no task uses, as `ax get` and
+   `ax delete` do. Deleting a task can take its own workspace and network rules with it. A task's page says when its
+   workspace couldn't be set up. */
 
 LIVE.res = { ctx: null, at: 0, loading: false, workspaces: [], gateways: [], models: [], error: '' };
 const LIVE_RES_MS = 20000;
@@ -66,7 +67,7 @@ function liveTaskWorkspace(spec) {
 }
 const LIVE_WS_PHASE = { Ready: ['done', 'checkCircle', 'Ready'], Preparing: ['running', 'loader', 'Setting up'], Failed: ['failed', 'xCircle', 'Setup failed'] };
 
-/* ---------- On Home ---------- */
+/* ---------- On Tasks ---------- */
 function liveResRowHTML(kind, doc) {
   const name = liveResName(doc);
   const users = liveResUsers(kind, name);
@@ -97,27 +98,33 @@ function liveModelRowHTML(doc) {
     <div class="rr-main"><div class="rr-name"><span class="mono">${esc(name)}</span>${sp.provider ? `<span class="rr-meta">${esc(sp.provider)}</span>` : ''}</div>
       <div class="rr-used">${sp.model ? `<span class="mono">${esc(sp.model)}</span>` : 'No model named'}${key ? ` · key from <span class="mono">${esc(key)}</span>` : ''}</div></div></li>`;
 }
-/** Home's section under the tasks: what this cluster keeps besides tasks, folded to one line unless something's wrong. */
+/** Under the tasks, what AX keeps besides them, each in its own section: Workspaces (what a task starts from) and
+    Gateways (what a task can reach), with which tasks use each and Delete for the unused ones, then the models, when
+    AX lists any. */
 function liveResHTML() {
   liveResWanted();
   const R = LIVE.res;
   if (!liveResFresh()) return R.error && R.ctx === LIVE.context ? `<p class="xsmall muted live-res-err">Couldn't list workspaces and Gateways: ${esc(R.error)}</p>` : '';
   const ws = R.workspaces, gw = R.gateways, md = R.models || [];
   if (!ws.length && !gw.length && !md.length) return '';
-  const unused = ws.filter((d) => !liveResUsers('workspace', liveResName(d)).length).length + gw.filter((d) => !liveResUsers('gateway', liveResName(d)).length).length;
-  const failed = ws.filter((d) => d.status && d.status.phase === 'Failed').length;
-  const sum = [ws.length ? plural(ws.length, 'workspace') : '', gw.length ? plural(gw.length, 'Gateway') : '', md.length ? plural(md.length, 'model') : ''].filter(Boolean).join(' · ')
-    + (unused ? ` · <span class="fs-warn">${unused} unused</span>` : '') + (failed ? ` · <span class="fs-bad">${failed} failed setup</span>` : '');
-  const list = (kind, docs) => docs.length ? `<ul class="res-list" aria-label="${kind === 'workspace' ? 'Workspaces' : 'Gateways'}">${docs.slice().sort((a, b) => liveResName(a).localeCompare(liveResName(b))).map((d) => liveResRowHTML(kind, d)).join('')}</ul>` : '';
-  const body = `${ws.length ? `<div class="res-h">Workspaces <span class="muted">· what a task starts from</span></div>${list('workspace', ws)}` : ''}
-    ${gw.length ? `<div class="res-h">Gateways <span class="muted">· the network rules: what a task can reach</span></div>${list('gateway', gw)}` : ''}
-    ${md.length ? `<div class="res-h">Models <span class="muted">· what tasks can call by name</span></div><ul class="res-list" aria-label="Models">${md.slice().sort((a, b) => liveResName(a).localeCompare(liveResName(b))).map(liveModelRowHTML).join('')}</ul>` : ''}
-    <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['get', 'workspaces']))}</code> · <code>${esc(liveCmd(['get', 'gateways']))}</code>${md.length ? ` · <code>${esc(liveCmd(['get', 'models']))}</code>` : ''}</p>`;
-  return `<section class="live-res" id="live-res" aria-labelledby="live-res-h">
-      <div class="live-list-head"><h2 class="h-display-sm" id="live-res-h">${md.length ? 'Workspaces, Gateways and models' : 'Workspaces and Gateways'}</h2>
-        ${unused ? `<button type="button" class="btn sm" data-action="live-res-delete-unused">${icon('trash', 'sm')}Delete ${unused} unused…</button>` : ''}</div>
-      <div class="card card-pad res-card">${liveFoldHTML('live-fold-res', '', sum, body, failed > 0)}</div>
+  const byName = (docs) => docs.slice().sort((a, b) => liveResName(a).localeCompare(liveResName(b)));
+  const section = (kind, title, sub, docs, empty) => {
+    const unused = docs.filter((d) => !liveResUsers(kind, liveResName(d)).length).length;
+    const failed = kind === 'workspace' ? docs.filter((d) => d.status && d.status.phase === 'Failed').length : 0;
+    return `<section class="live-res" id="live-res-${kind}s" aria-labelledby="live-res-${kind}s-h">
+      <div class="live-list-head"><h2 class="h-display-sm" id="live-res-${kind}s-h">${title}</h2><span class="llh-scope small muted">${sub}${docs.length ? ` · ${docs.length}` : ''}${unused ? ` · <span class="fs-warn">${unused} unused</span>` : ''}${failed ? ` · <span class="fs-bad">${failed} failed setup</span>` : ''}</span>
+        ${unused ? `<button type="button" class="btn sm" data-action="live-res-delete-unused" data-kind="${kind}">${icon('trash', 'sm')}Delete ${unused} unused…</button>` : ''}</div>
+      <div class="card card-pad res-card">${docs.length ? `<ul class="res-list" aria-label="${title}">${byName(docs).map((d) => liveResRowHTML(kind, d)).join('')}</ul>` : `<p class="small muted">${empty}</p>`}
+        <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['get', `${kind}s`]))}</code></p></div>
     </section>`;
+  };
+  return section('workspace', 'Workspaces', 'What a task starts from', ws, 'None yet. A task that clones a repo or sets up files gets one.')
+    + section('gateway', 'Gateways', 'What a task can reach', gw, "None yet. A task that reaches the network gets one, and a task without one can't reach the network.")
+    + (md.length ? `<section class="live-res" id="live-res-models" aria-labelledby="live-res-models-h">
+      <div class="live-list-head"><h2 class="h-display-sm" id="live-res-models-h">Models</h2><span class="llh-scope small muted">What tasks can call by name · ${md.length}</span></div>
+      <div class="card card-pad res-card"><ul class="res-list" aria-label="Models">${byName(md).map(liveModelRowHTML).join('')}</ul>
+        <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['get', 'models']))}</code></p></div>
+    </section>` : '');
 }
 
 /* ---------- Deleting ---------- */
@@ -152,10 +159,11 @@ function liveOpenDeleteRes(kind, name) {
     render({ keepScroll: true });
   });
 }
-function liveOpenDeleteUnused() {
+/** Deletes the unused workspaces, or the unused Gateways (`kind`), after asking. Without a kind, both. */
+function liveOpenDeleteUnused(kind) {
   const unused = [].concat(
-    LIVE.res.workspaces.map((d) => ['workspace', liveResName(d)]).filter(([k, n]) => !liveResUsers(k, n).length),
-    LIVE.res.gateways.map((d) => ['gateway', liveResName(d)]).filter(([k, n]) => !liveResUsers(k, n).length));
+    kind === 'gateway' ? [] : LIVE.res.workspaces.map((d) => ['workspace', liveResName(d)]).filter(([k, n]) => !liveResUsers(k, n).length),
+    kind === 'workspace' ? [] : LIVE.res.gateways.map((d) => ['gateway', liveResName(d)]).filter(([k, n]) => !liveResUsers(k, n).length));
   if (!unused.length) return;
   const dlg = openDialog(dialogShell('lru', `Delete ${plural(unused.length, 'unused item')}?`, '', `
     <p class="small">No task on <span class="mono">${esc(LIVE.context)}</span> uses these. Deleting them can't be undone.</p>
@@ -183,5 +191,5 @@ function liveTaskLeftovers(name) {
 
 const LIVE_RES_ACTIONS = {
   'live-res-delete': (el) => liveOpenDeleteRes(el.dataset.kind, el.dataset.name),
-  'live-res-delete-unused': () => liveOpenDeleteUnused(),
+  'live-res-delete-unused': (el) => liveOpenDeleteUnused(el && el.dataset ? el.dataset.kind : ''),
 };

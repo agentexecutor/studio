@@ -356,18 +356,7 @@ const LIVE_ACTIONS = {
   'live-suspend': (el) => liveTaskAction(el.dataset.task, 'suspend'),
   'live-resume': (el) => liveTaskAction(el.dataset.task, 'resume'),
   'live-delete': (el) => liveOpenDelete(el.dataset.task),
-  'live-first-idea': (el) => {
-    LIVE.draft = liveNewDraft('');
-    LIVE.draft.goal = el.dataset.goal || '';
-    location.hash = '#/new';
-  },
-  'live-quick-go': () => {
-    const inp = $('#live-quick-goal');
-    const val = (inp && inp.value || '').trim();
-    LIVE.draft = liveNewDraft('');
-    if (val) LIVE.draft.goal = val;
-    location.hash = '#/new';
-  },
+  'live-sample-task': () => liveSampleTask(),
   'live-palette': () => { if (typeof openPalette === 'function') openPalette(); },
   'live-shortcuts': () => { if (typeof openShortcuts === 'function') openShortcuts(); },
   'live-term-open': (el) => liveTermOpen(el.dataset.task),
@@ -641,7 +630,7 @@ function liveKV(rows) {
 
 /* ---------- Pages ---------- */
 function liveViewStarting() {
-  return { title: 'Connecting', crumbs: [{ label: 'Home' }], html: `<div class="page-head"><h1 tabindex="-1">Connecting to AX…</h1><p class="lede">Checking this computer and your clusters.</p></div>` };
+  return { title: 'Connecting', crumbs: [{ label: 'Tasks' }], html: `<div class="page-head"><h1 tabindex="-1">Connecting to AX…</h1><p class="lede">Checking this computer and your clusters.</p></div>` };
 }
 function liveViewOffline() {
   const html = `
@@ -653,113 +642,12 @@ function liveViewOffline() {
       <div class="btn-row" style="margin-top:16px"><button class="btn primary" data-action="live-recheck">${icon('refresh', 'sm')}Check again</button></div>
       <p class="xsmall muted" style="margin-top:12px;overflow-wrap:anywhere">What happened: ${esc(LIVE.offlineError)}</p>
     </div>`;
-  return { title: 'Not connected', crumbs: [{ label: 'Home' }], html };
+  return { title: 'Not connected', crumbs: [{ label: 'Tasks' }], html };
 }
-function liveRowHTML(t) {
-  const d = liveState(t.state);
-  const busy = LIVE.busy[t.name];
-  const age = liveAge(t.created);
-  const turn = t.turns > 1 ? `Turn ${t.turn} of ${t.turns}` : '';
-  return `<a class="task-row" href="#/task/${encodeURIComponent(t.name)}" id="live-row-${esc(t.name)}" aria-label="${esc(t.goal || t.name)}, ${d.label}${turn ? `, ${turn}` : ''}" ${t.turn > 1 ? 'style="padding-left:34px"' : ''}>
-    <div style="min-width:0">
-      <div class="t-title">${esc(t.goal || t.name)}</div>
-      <div class="t-meta">${turn ? `<span>${turn}</span><span class="dot"></span>` : ''}${t.goal ? `<span class="mono">${esc(t.name)}</span><span class="dot"></span>` : ''}<span>${age ? `Created ${esc(age)} ago` : 'Just created'}</span>${t.atespace !== 'default' ? `<span class="dot"></span><span class="mono">${esc(t.atespace)}</span>` : ''}</div>
-    </div>
-    <div class="t-right">${busy ? `<span class="chip stopping">${icon('loader')}${LIVE_VERBS[busy].doing}</span>` : liveChip(t.state)}</div>
-  </a>`;
-}
-/* Home's sections, by how much a task needs you (its session's most urgent turn). The tiles jump to them. */
-const LIVE_HOME_SECTIONS = [
-  { rank: 0, key: 'needs', cls: 'needs', label: 'Needs you', sub: (n) => (n ? 'Stopped or waiting' : 'All caught up') },
-  { rank: 1, key: 'running', cls: 'working', label: 'Running', sub: (n) => (n ? 'In their sandboxes' : 'None running') },
-  { rank: 2, key: 'paused', cls: 'review', label: 'Suspended', sub: (n) => (n ? 'Checkpointed' : 'None suspended') },
-  { rank: 3, key: 'done', cls: 'shipped', label: 'Done', sub: (n) => (n ? 'Finished runs' : 'None finished yet') },
-];
-const LIVE_CALL_ME_KEY = 'ax.live.callMe';
-/** What Home calls you: the name you gave in Settings, else the first word of the name this computer knows (your
-    account, else git), else nothing. Studio never makes a name up from your login. */
-function liveCallMe() {
-  let mine = '';
-  try { mine = (localStorage.getItem(LIVE_CALL_ME_KEY) || '').trim(); } catch (e) { /* ignore */ }
-  if (mine) return mine;
-  const name = ((STUDIO.info && STUDIO.info.user && STUDIO.info.user.name) || '').trim();
-  return name ? name.split(/\s+/)[0] : '';
-}
-function liveViewHome() {
-  /* Nothing to list from: no cluster yet, or AX on this computer isn't running. Start with setup. */
-  if (LIVE.loaded && (!LIVE.context || liveLocalDown())) return liveViewSetup(true);
-  const list = liveSorted();
-  const inSec = (r) => list.filter((t) => t.groupRank === r);
-  const needs = inSec(0).length, active = inSec(1).length, paused = inSec(2).length;
-  /* The tiles carry the counts; the lede only says where to start (as in the prototype). */
-  const lede = !LIVE.loaded ? 'Loading your tasks…'
-    : LIVE.error ? `${LIVE_ERROR_WORDS[liveErrorKind()].summary}${list.length ? ' This is the last list it got.' : ''}`
-      : needs ? 'Start with what needs you below. Agents keep working in their own sandboxes while you decide.'
-        : active ? 'Nothing needs you right now. Tasks are running in their own sandboxes.'
-          : paused ? 'Every sandbox is quiet. Resume a suspended task below, or describe your next outcome.'
-            : list.length ? 'Every sandbox is quiet. Describe your next outcome and an agent will pick it up.'
-              : 'Describe the outcome you want. AX runs the task in its own sandbox.';
-  const where = esc(LIVE.context || 'this cluster');
-  const kind = liveErrorKind();
-  const problem = !LIVE.error ? ''
-    : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Repair it on Local cluster, then try again. What AX Studio got: ${LIVE.error}`, 'ax local start')
-      : kind === 'versions' ? liveProblemHTML(`AX on ${where} and AX Studio are different versions`, `They can't read each other's data. Update the older one so the two match. What AX Studio got: ${LIVE.error}`, '')
-        : liveProblemHTML(`Can't reach AX on ${where}`, LIVE.error, liveCmd(['get', 'tasks']));
-  const heroMood = LIVE.error || needs ? 'wave' : active ? 'working' : 'idle';
-  const heroTone = LIVE.error || needs ? 'needs' : active ? 'working' : 'calm';
-  /* Axel only speaks when he has something the page doesn't already say: what you poked him for, or hello on an empty
-     cluster. */
-  const said = state.axelSpeech && Date.now() - state.axelSpeech.at < 8000 ? state.axelSpeech.text
-    : LIVE.loaded && !LIVE.error && !list.length ? "Hi! I'm Axel. Start a task and AX runs it in its own sandbox on this computer." : '';
-  const callMe = liveCallMe();
-  const tile = (s) => {
-    const n = inSec(s.rank).length;
-    return `<button type="button" class="station st-${s.cls} ${n ? 'has' : ''}" id="live-station-${s.key}" ${n ? `data-action="jump" data-target="live-sec-${s.key}" aria-label="${s.label}: ${n}. Go to the list."` : `disabled aria-label="${s.label}: none"`}>
-      <span class="st-top"><span class="st-num tnum">${n}</span></span><span class="st-label">${s.label}</span><span class="st-sub">${s.sub(n)}</span></button>`;
-  };
-  const flow = list.length ? `<div class="card flow" role="group" aria-label="Where your tasks are right now" style="margin-top:14px">
-    ${LIVE_HOME_SECTIONS.map(tile).join('<span class="flow-link" aria-hidden="true"></span>')}</div>` : '';
-  const sections = LIVE_HOME_SECTIONS.filter((s) => inSec(s.rank).length).map((s) => `<section class="section live-sec" aria-labelledby="live-sec-${s.key}">
-      <div class="section-head"><h3 id="live-sec-${s.key}">${s.label}</h3></div>
-      <div class="card task-card">${inSec(s.rank).map(liveRowHTML).join('')}</div></section>`).join('');
-  /* Whose tasks these are: AX on this computer. New tasks start there too. */
-  const upd = LIVE.refreshedAt ? `<span class="llh-upd" title="Studio asks again every few seconds">Updated <span data-live-updated data-fmt="ago" data-since="${LIVE.refreshedAt}">${fmtAgo(LIVE.refreshedAt)}</span></span><button type="button" class="btn ghost sm icon" data-action="live-refresh" aria-label="Refresh the list">${icon('refresh', 'sm')}</button>` : '';
-  const ates = LIVE.atespace !== 'default' ? `<span class="env" title="Atespace"><span class="muted">atespace</span>&nbsp;<span class="mono">${esc(LIVE.atespace)}</span></span>` : '';
-  const listHead = `<div class="live-list-head"><h2 class="h-display-sm">Your tasks</h2><span class="llh-scope">${liveWhere(LIVE.context)}${ates}${list.length ? '<a class="btn ghost sm" href="#/tasks">All tasks</a>' : ''}</span>${upd}</div>`;
-  const ideas = typeof FIRST_IDEAS !== 'undefined' ? `<div class="first-ideas" role="group" aria-label="Ideas to start with" style="margin-top:12px">
-      <span class="fi-label">Start with an idea</span>
-      ${FIRST_IDEAS.map((x) => `<button type="button" class="pill fi-idea" data-action="live-first-idea" data-goal="${esc(x.goal)}">${icon(x.ic, 'xs')}${esc(x.label)}</button>`).join('')}
-    </div>` : '';
-  const res = typeof liveResHTML === 'function' && !LIVE.error ? liveResHTML() : '';
-  const body = !LIVE.loaded ? ''
-    : list.length ? `${problem}${flow}<div id="live-tasks">${listHead}${sections}</div>${res}`
-      : problem || `${listHead}<div class="card card-pad" id="live-empty" style="margin-top:10px">
-            <div class="live-title">No tasks here yet</div>
-            <p class="small" style="margin-top:4px;max-width:70ch">Start one above, or from the command line. Tasks on this cluster show up as soon as they're created.</p>
-          ${ideas}
-          <div style="margin-top:12px;display:grid;gap:8px">${cliHint(liveCmd(['apply', '-f', 'task.yaml']))}${cliHint(liveCmd(['resume', 'task', '<name>']))}</div></div>${res}`;
-  const html = `
-    <section class="stage" aria-labelledby="live-home-h1">
-      <div class="stage-copy">
-        <h1 id="live-home-h1" tabindex="-1">${callMe ? `${greeting()}, <em>${esc(callMe)}</em>.` : `${greeting()}.`}</h1>
-        <p class="lede" id="live-summary">${lede}</p>
-        <div class="input-group" style="margin-top:14px;max-width:560px">
-          <label class="sr-only" for="live-quick-goal">Describe a goal to start a task</label>
-          <input class="input" id="live-quick-goal" placeholder="What should an agent work on next?" autocomplete="off" value="${esc((LIVE.draft && LIVE.draft.goal) || '')}">
-          <button type="button" class="btn" id="live-quick-go" data-action="live-quick-go">Set up task${icon('arrowRight', 'sm')}</button>
-        </div>
-      </div>
-      <div class="stage-axo">
-        <div class="stage-bubble-col"><div class="speech still" id="axel-speech" aria-live="off" ${said ? '' : 'hidden'}>${said}</div></div>
-        ${springPoolHTML(heroMood, heroTone, 'hero-axo')}
-      </div>
-    </section>
-    ${body}
-    <p class="xsmall muted" style="margin-top:12px">${icon('terminal', 'xs')} The same list from the command line: <code>${esc(liveCmd(['get', 'tasks']))}</code></p>`;
-    return { title: 'Your tasks', crumbs: [{ label: 'Home' }], html, wide: true };
-}
-
-/* ---------- All tasks: one searchable, filterable table (like the prototype's #/tasks) ---------- */
+/* ---------- Tasks: the overview ----------
+   Every task on AX on this computer in one table: its state in AX's words, its image and workspace, Suspend or Resume,
+   a shell and its logs, and Delete. Filters by state and a search narrow it. Under it, the workspaces and Gateways the
+   tasks use, each in its own section (live-resources.js). #/ and #/tasks are this page. */
 const LIVE_TASK_FILTERS = [['all', 'All', -1], ['needs', 'Needs you', 0], ['running', 'Running', 1], ['paused', 'Suspended', 2], ['done', 'Done', 3]];
 function liveTasksFilter() {
   if (!LIVE.tasksFilter) LIVE.tasksFilter = { q: '', status: 'all' };
@@ -775,14 +663,26 @@ function liveTasksMatching(all) {
     const spec = (t.doc && t.doc.spec) || {};
     const tpl = liveTaskTemplate(spec);
     const ws = (spec.workspace && spec.workspace.name) || '';
-    return `${t.goal} ${t.name} ${tpl.name} ${tpl.model || ''} ${ws} ${t.state} ${liveState(t.state).label}`.toLowerCase().includes(q);
+    const img = (spec.profile && spec.profile.image) || '';
+    return `${t.goal} ${t.name} ${tpl.name} ${img} ${ws} ${t.state} ${liveState(t.state).label}`.toLowerCase().includes(q);
   });
+}
+/** What you can do with a task from its row: Suspend or Resume, open a shell, read its logs, delete it. */
+function liveRowActionsHTML(t) {
+  const busy = LIVE.busy[t.name];
+  const enc = encodeURIComponent(t.name);
+  /* ax ssh needs the task Working and started with debug on. */
+  const shell = t.debug && t.state === 'Working'
+    ? `<a class="btn ghost sm icon" href="#/task/${enc}/terminal" aria-label="Open a shell in ${esc(t.name)}" title="Open a shell (${esc(liveCmd(['ssh', t.name]))})">${icon('terminal', 'sm')}</a>` : '';
+  return `<div class="tk-actions">${liveSuspendResumeHTML(t.name, t.state, busy, 'sm')}${shell}
+    <a class="btn ghost sm icon" href="#/task/${enc}/logs" aria-label="Logs of ${esc(t.name)}" title="Logs">${icon('file', 'sm')}</a>
+    <button type="button" class="btn ghost sm icon" data-action="live-delete" data-task="${esc(t.name)}" ${busy ? 'disabled' : ''} aria-label="Delete ${esc(t.name)}" title="Delete (${esc(liveCmd(['delete', 'task', t.name]))})">${icon('trash', 'sm')}</button></div>`;
 }
 function liveTasksTableHTML(all) {
   const list = liveTasksMatching(all || liveSorted());
   if (!list.length) {
     const f = liveTasksFilter();
-    return `<div class="tasks-empty"><b>No tasks match</b><span>${f.q.trim() ? `Nothing matches “${esc(f.q.trim())}” with these filters.` : (all || LIVE.tasks).length ? 'No tasks are in this state right now.' : 'Start a task and it shows up here.'}</span></div>`;
+    return `<div class="tasks-empty"><b>No tasks match</b><span>${f.q.trim() ? `Nothing matches “${esc(f.q.trim())}” with these filters.` : 'No tasks are in this state right now.'}</span></div>`;
   }
   const rows = list.map((t) => {
     const spec = (t.doc && t.doc.spec) || {};
@@ -792,18 +692,44 @@ function liveTasksTableHTML(all) {
     const busy = LIVE.busy[t.name];
     const age = liveAge(t.created);
     const turn = t.turns > 1 ? `Turn ${t.turn} of ${t.turns}` : '';
+    const goal = t.goal ? t.goal.split('\n')[0] : '';
     return `<tr id="live-trow-${esc(t.name)}">
-      <td class="tk-title"><a href="#/task/${encodeURIComponent(t.name)}">${esc(t.goal || t.name)}</a><div class="xsmall muted"><span class="mono">${esc(t.name)}</span>${turn ? ` · ${turn}` : ''}${t.atespace !== 'default' ? ` · ${esc(t.atespace)}` : ''}</div></td>
+      <td class="tk-title"><a href="#/task/${encodeURIComponent(t.name)}" class="mono">${esc(t.name)}</a>${goal || turn || t.atespace !== 'default' ? `<div class="xsmall muted tk-goal">${esc(goal)}${turn ? `${goal ? ' · ' : ''}${turn}` : ''}${t.atespace !== 'default' ? ` · ${esc(t.atespace)}` : ''}</div>` : ''}</td>
       <td>${busy ? `<span class="chip stopping">${icon('loader')}${LIVE_VERBS[busy].doing}</span>` : liveChip(t.state)}</td>
-      <td><span class="tk-agent">${tpl.tile}${esc(tpl.name)}</span></td>
-      <td>${ws ? `<span class="mono">${esc(ws)}</span>` : '<span class="muted">Empty</span>'}</td>
-      <td class="tnum">${lim ? esc(lim) : '<span class="muted">Default</span>'}</td>
-      <td class="muted">${age ? `${esc(age)} ago` : 'Just now'}</td></tr>`;
+      <td class="tk-img"><span class="tk-agent" title="${esc((spec.profile && spec.profile.image) || 'The default task image')}">${tpl.tile}<span class="tk-img-name">${esc(tpl.name)}</span></span></td>
+      <td class="tk-ws">${ws ? `<span class="mono">${esc(ws)}</span>` : '<span class="muted">None</span>'}</td>
+      <td class="tk-res tnum">${lim ? esc(lim) : '<span class="muted">Default</span>'}</td>
+      <td class="tk-created muted">${age ? `${esc(age)} ago` : 'Just now'}</td>
+      <td class="tk-act">${liveRowActionsHTML(t)}</td></tr>`;
   }).join('');
-  return `<table class="table tasks-table"><thead><tr><th>Task</th><th>Status</th><th>Template</th><th>Workspace</th><th>Resources</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="table tasks-table"><thead><tr><th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th><th class="tk-act"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
-function liveViewTasks() {
-  if (LIVE.loaded && (!LIVE.context || liveLocalDown())) return liveViewSetup(false);
+/** A first task that always works: the cluster's default task image, a shell that waits, with debug on so Terminal
+    can open a shell in it. */
+async function liveSampleTask() {
+  if (LIVE.sampleBusy || !LIVE.context) return;
+  const name = `sample-${typeof liveHex === 'function' ? liveHex(3) : Date.now().toString(16).slice(-6)}`;
+  const scope = ['--context', LIVE.context, '-a', LIVE.atespace];
+  const yaml = `apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: "${name}"\nspec:\n  commands: ["sh", "-c", "echo Hello from a sandbox on this computer; sleep infinity"]\n  debug: true\n`;
+  LIVE.sampleBusy = true;
+  render({ keepScroll: true });
+  try {
+    const r = await studioApi.ax(scope.concat(['apply', '-f', '-']), yaml);
+    if (r.status !== 0) throw new Error(liveLastLine(r.stderr || r.stdout) || 'ax apply failed.');
+    const s = await studioApi.ax(scope.concat(['resume', 'task', name]));
+    if (s.status !== 0) toast(`Created <span class="mono">${esc(name)}</span>, but it didn't start: ${esc(liveLastLine(s.stderr || s.stdout))}`, { icon: 'alert', timeout: 9000 });
+    else toast(`Started <span class="mono">${esc(name)}</span>`, { icon: 'play' });
+    location.hash = `#/task/${encodeURIComponent(name)}`;
+  } catch (e) {
+    toast(`Couldn't start a sample task: ${esc(e.message)}`, { icon: 'alert', timeout: 9000 });
+  } finally {
+    LIVE.sampleBusy = false;
+  }
+  await liveRefresh(true);
+}
+function liveViewHome() {
+  /* Nothing to list from: no cluster yet, or AX on this computer isn't running. Start with setup. */
+  if (LIVE.loaded && (!LIVE.context || liveLocalDown())) return liveViewSetup(true);
   const all = liveSorted();
   const f = liveTasksFilter();
   const active = all.filter((t) => liveState(t.state).active).length;
@@ -816,21 +742,34 @@ function liveViewTasks() {
     : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Repair it on Local cluster, then try again. What AX Studio got: ${LIVE.error}`, 'ax local start')
       : kind === 'versions' ? liveProblemHTML(`AX on ${where} and AX Studio are different versions`, `They can't read each other's data. Update the older one so the two match. What AX Studio got: ${LIVE.error}`, '')
         : liveProblemHTML(`Can't reach AX on ${where}`, LIVE.error, liveCmd(['get', 'tasks']));
-  const html = `
-    <div class="page-head">
-      <div class="live-list-head" style="margin-top:0"><h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">All tasks</h1><span class="llh-scope">${liveWhere(LIVE.context)}${ates}</span>${upd}</div>
-      <p class="lede">${!LIVE.loaded ? 'Loading your tasks…' : `${plural(all.length, 'task')} on this computer. ${active ? `${plural(active, 'sandbox', 'sandboxes')} running.` : 'No sandboxes running right now.'}`}</p>
-    </div>
-    ${problem}
+  const lede = !LIVE.loaded ? 'Loading your tasks…'
+    : LIVE.error ? `${LIVE_ERROR_WORDS[kind].summary}${all.length ? ' This is the last list it got.' : ''}`
+      : all.length ? `${plural(all.length, 'task')} on this computer. ${active ? `${plural(active, 'sandbox', 'sandboxes')} running.` : 'No sandboxes running right now.'}`
+        : 'No tasks on this computer yet.';
+  const mood = LIVE.error ? 'alert' : count(0) ? 'wave' : active ? 'working' : 'idle';
+  const sample = `<button type="button" class="btn" data-action="live-sample-task" id="live-sample" ${LIVE.sampleBusy ? 'disabled' : ''} title="A shell in the cluster's default task image, with debug on">${icon(LIVE.sampleBusy ? 'loader' : 'play', 'sm')}${LIVE.sampleBusy ? 'Starting…' : 'Try a sample task'}</button>`;
+  const res = typeof liveResHTML === 'function' && !LIVE.error ? liveResHTML() : '';
+  const table = all.length ? `
     <div class="tasks-tools">
       <label class="sr-only" for="live-tasks-q">Search tasks</label>
-      <span class="tasks-search">${icon('search', 'sm')}<input class="input" id="live-tasks-q" type="search" placeholder="Search by goal, name, template or workspace" autocomplete="off" value="${esc(f.q)}"></span>
+      <span class="tasks-search">${icon('search', 'sm')}<input class="input" id="live-tasks-q" type="search" placeholder="Search by name, goal, image or workspace" autocomplete="off" value="${esc(f.q)}"></span>
       <div class="seg" role="group" aria-label="Filter by state">${LIVE_TASK_FILTERS.map(([k, l, r]) => `<button type="button" data-action="live-tasks-filter" data-v="${k}" aria-pressed="${f.status === k}">${l}<span class="seg-n tnum">${count(r)}</span></button>`).join('')}</div>
     </div>
     <p class="sr-only" id="live-tasks-count" role="status"></p>
-    <div class="card tasks-card" id="live-tasks-table">${liveTasksTableHTML(all)}</div>
-    <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} The same list from the command line: <code>${esc(liveCmd(['get', 'tasks']))}</code></p>`;
-  return { title: 'All tasks', crumbs: [{ label: 'Home', href: '#/' }, { label: 'All tasks' }], html, wide: true };
+    <div class="card tasks-card" id="live-tasks-table">${liveTasksTableHTML(all)}</div>` : '';
+  const empty = LIVE.loaded && !all.length && !LIVE.error ? `<div class="card card-pad" id="live-empty" style="margin-top:14px">
+      <div class="live-title">Start your first task</div>
+      <p class="small" style="margin-top:4px;max-width:70ch">A task runs in its own sandbox on this computer. Try a sample task: a shell in the cluster's default task image, so you can open a terminal in it and read its logs. Or start one from a template, your own image or a task file.</p>
+      <div class="btn-row" style="margin-top:12px">${sample}<a class="btn ghost" href="#/new">${icon('plus', 'sm')}New task</a></div>
+      <div style="margin-top:12px;display:grid;gap:8px">${cliHint(liveCmd(['apply', '-f', 'task.yaml']))}${cliHint(liveCmd(['resume', 'task', '<name>']))}</div></div>` : '';
+  const html = `
+    <div class="head-row tasks-head"><div class="cuj-head">${axo(mood, { decorative: true, id: 'tasks-axo' })}<div class="cuj-head-copy">
+        <div class="live-list-head" style="margin-top:0"><h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">Tasks</h1><span class="llh-scope">${liveWhere(LIVE.context)}${ates}</span>${upd}</div>
+        <p class="lede" id="live-summary">${lede}</p></div></div>
+      <div class="btn-row">${all.length ? sample : ''}<a class="btn primary" href="#/new">${icon('plus', 'sm')}New task</a></div></div>
+    ${problem}${table}${empty}${res}
+    <p class="xsmall muted" style="margin-top:12px">${icon('terminal', 'xs')} The same list from the command line: <code>${esc(liveCmd(['get', 'tasks']))}</code></p>`;
+  return { title: 'Tasks', crumbs: [{ label: 'Tasks' }], html, wide: true };
 }
 /* ---------- A task's page ----------
    The header (title, then status, template, workspace and age, and Suspend or Resume and Delete), then two columns. On
@@ -852,7 +791,7 @@ function liveTaskTemplate(spec) {
   const cfg = spec.config || {};
   const model = cfg.model || (cfg.agent && cfg.agent.model) || '';
   if (k) return { id: k, name: LIVE_AGENTS[k].name, tile: agentTile(k, 'sm'), model: model || LIVE_AGENTS[k].model };
-  return { id: '', name: image ? (typeof liveImageShort === 'function' ? liveImageShort(image) : image) : 'No image', tile: byoTile('sm'), model };
+  return { id: '', name: image ? (typeof liveImageShort === 'function' ? liveImageShort(image) : image) : 'Default image', tile: byoTile('sm'), model };
 }
 function liveLimitsText(spec) {
   const l = (spec.profile && spec.profile.resources && spec.profile.resources.limits) || {};
@@ -1049,11 +988,11 @@ function liveViewTask(name, tab) {
   const row = LIVE.tasks.find((t) => t.name === name);
   const det = LIVE.detail[name];
   const doc = det && det.doc;
-  const crumbs = [{ label: 'Home', href: '#/' }, { label: name }];
+  const crumbs = [{ label: 'Tasks', href: '#/' }, { label: name }];
   if ((!row && !doc) || (det && det.missing && !row)) {
     const html = LIVE.loaded
       ? `<div class="page-head"><h1 tabindex="-1">${esc(name)} isn't on this cluster</h1><p class="lede">It may have been deleted, or it's in another atespace.</p></div>
-         <div class="btn-row"><a class="btn" href="#/">Your tasks</a></div>`
+         <div class="btn-row"><a class="btn" href="#/">Tasks</a></div>`
       : `<div class="page-head"><h1 tabindex="-1">${esc(name)}</h1><p class="lede">Loading…</p></div>`;
     return { title: name, crumbs, html };
   }
@@ -1096,8 +1035,8 @@ function liveViewNotYet(part) {
   const what = LIVE_HIDDEN[part] || 'This page';
   const html = `<div class="page-head"><h1 tabindex="-1">${what} isn't connected to AX yet</h1>
       <p class="lede">It still runs on demo data, so it's hidden here. Your tasks and where they run are real.</p></div>
-    <div class="btn-row"><a class="btn primary" href="#/">Your tasks</a><a class="btn" href="#/places">Local cluster</a></div>`;
-  return { title: what, crumbs: [{ label: 'Home', href: '#/' }, { label: what }], html };
+    <div class="btn-row"><a class="btn primary" href="#/">Tasks</a><a class="btn" href="#/places">Local cluster</a></div>`;
+  return { title: what, crumbs: [{ label: 'Tasks', href: '#/' }, { label: what }], html };
 }
 
 /* ---------- The app frame ---------- */
@@ -1106,13 +1045,13 @@ function liveShellHTML() {
   <div class="app live">
     <aside class="sidebar" aria-label="Primary">
       <a class="brand" href="#/" aria-label="AX Studio home">${BRAND_MARK}<span class="brand-name">AX <span>Studio</span></span></a>
-      <a class="btn primary new-btn" href="#/new" id="live-new">${icon('plus', 'sm')}New task</a>
+      <a class="btn primary new-btn" href="#/new" id="live-new" aria-label="New task">${icon('plus', 'sm')}<span class="label">New task</span></a>
       <nav class="nav" aria-label="Main">
-        <a href="#/" data-nav="home" id="nav-home">${icon('inbox')}<span class="label">Home</span><span class="count attn" id="live-nav-needs" hidden></span></a>
+        <a href="#/" data-nav="home" id="nav-home">${icon('layers')}<span class="label">Tasks</span><span class="count attn" id="live-nav-needs" hidden></span></a>
         <a href="#/places" data-nav="places" id="nav-places">${icon('server')}<span class="label">Local cluster</span></a>
         <a href="#/settings" data-nav="settings" id="nav-settings">${icon('sliders')}<span class="label">Settings</span></a>
       </nav>
-      <div class="nav nav-tasks" role="navigation" aria-label="Tasks"><div class="nav-label">Tasks<a class="nav-all" href="#/tasks" data-nav="tasks">See all</a></div><div id="live-nav-tasks"></div></div>
+      <div class="nav nav-tasks" role="navigation" aria-label="Tasks"><div class="nav-label">Recent</div><div id="live-nav-tasks"></div></div>
       <div class="sidebar-foot" id="live-foot"></div>
     </aside>
     <div class="main">
@@ -1179,9 +1118,10 @@ function liveRender(opts) {
     if (!stale) { liveChrome(''); return; }
     if (isTypingIn('#main')) { liveNewEnvRefresh(d); liveChrome(''); return; }
   }
-  if (opts.background && !moved && r.parts[0] === 'tasks' && LIVE.phase === 'ready' && $('.app.live', root) && isTypingIn('#main')) {
+  /* While you type in the search, a refresh redraws only the table. */
+  if (opts.background && !moved && (!r.parts[0] || r.parts[0] === 'tasks') && LIVE.phase === 'ready' && $('.app.live', root) && isTypingIn('#main')) {
     const tbl = $('#live-tasks-table'); if (tbl) tbl.innerHTML = liveTasksTableHTML();
-    liveChrome('tasks');
+    liveChrome('home');
     return;
   }
   /* While you type in AX images on Setup or Local cluster, don't clobber the input on a background refresh. */
@@ -1196,7 +1136,7 @@ function liveRender(opts) {
   /* Until AX runs on this computer, every page but Local cluster and Settings is setup. */
   else if (LIVE.loaded && (!LIVE.context || liveLocalDown()) && !['places', 'setup', 'settings'].includes(r.parts[0])) v = liveViewSetup(!r.parts[0]);
   else if (!r.parts[0]) v = liveViewHome();
-  else if (r.parts[0] === 'tasks') { v = liveViewTasks(); top = 'tasks'; }
+  else if (r.parts[0] === 'tasks') v = liveViewHome();
   else if (r.parts[0] === 'task') v = liveViewTask(decodeURIComponent(r.parts[1] || ''), r.parts[2]);
   else if (r.parts[0] === 'places') { v = liveViewPlaces(); top = 'places'; }
   else if (r.parts[0] === 'setup') { v = liveViewSetup(false); top = 'places'; }
@@ -1240,8 +1180,7 @@ function livePaletteItems() {
   const go = (h) => () => { location.hash = h; };
   items.push(
     { group: 'Go to', label: 'New task', icon: 'plus', cli: liveCmd(['apply', '-f', 'task.yaml']), run: go('#/new'), keys: 'N' },
-    { group: 'Go to', label: 'Home (Your tasks)', icon: 'inbox', cli: liveCmd(['get', 'tasks']), run: go('#/') },
-    { group: 'Go to', label: 'All tasks', icon: 'layers', cli: liveCmd(['get', 'tasks']), run: go('#/tasks') },
+    { group: 'Go to', label: 'Tasks', icon: 'layers', cli: liveCmd(['get', 'tasks']), run: go('#/') },
     { group: 'Go to', label: 'Local cluster', icon: 'server', cli: 'ax local status', run: go('#/places') },
     { group: 'Go to', label: 'Settings', icon: 'sliders', cli: '', run: go('#/settings') },
   );
@@ -1297,14 +1236,6 @@ if (LIVE.on) {
         if (k === 'l') { e.preventDefault(); liveTermOf(name).out = ''; liveTermPaint(name); const i = $('#live-term-in'); if (i) i.focus({ preventScroll: true }); return; }
       }
       return;
-    }
-    if (e.key === 'Enter' && el && el.id === 'live-quick-goal') {
-      e.preventDefault();
-      LIVE_ACTIONS['live-quick-go']();
-    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && el && el.id === 'live-new-goal') {
-      /* Ctrl/⌘ ↵ in the goal box runs the task, as the hint under it says. */
-      e.preventDefault();
-      liveNewRun();
     }
   });
   document.addEventListener('input', (e) => {

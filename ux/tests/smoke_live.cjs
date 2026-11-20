@@ -374,7 +374,7 @@ function makeContext(B, env) {
   const files = ['core.js', 'mascot.js', 'viz.js', 'failures.js', 'views.js', 'task.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
-  liveCmd, liveViewHome, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
+  liveCmd, liveViewHome, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
   liveTermOpen, liveTermSend, liveTermClose, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
   liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
   viewHome, studioPost };`, ctx);
@@ -452,34 +452,52 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!B.posts.length || B.posts.some((x) => x.token !== 'tok-1')) throw new Error(JSON.stringify(B.posts));
     if (B.calls.some((c) => /\/api\/env\/context/.test(c)) || B.ax.some((c) => /^ctx \S/.test(c) || /use-context/.test(c))) throw new Error('Studio must not change the kubeconfig');
   });
-  await check('Home greets you by name and lists the real tasks in sections: what needs you first, the goal as the title, the turns of a session together', () => {
+  await check('Tasks (#/) is the overview: every task in one table, what needs you first, with Suspend or Resume, a shell, Logs and Delete on each row', () => {
     const v = api.liveViewHome();
-    const order = (v.html.match(/id="live-row-[a-z0-9-]+"/g) || []).map((x) => x.slice(13, -1)).join();
+    const order = (v.html.match(/id="live-trow-[a-z0-9-]+"/g) || []).map((x) => x.slice(14, -1)).join();
     if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,readme-polish,changelog-draft') throw new Error('order: ' + order);
-    /* The name comes from the server (the account's full name); Home uses its first word, as the prototype does. */
-    if (!/<h1 id="live-home-h1" tabindex="-1">Good (morning|afternoon|evening), <em>Ada<\/em>\.<\/h1>/.test(v.html)) throw new Error('greeting: ' + (v.html.match(/<h1[^>]*>.*?<\/h1>/) || [])[0]);
-    need(v.html, ['Start with what needs you below.', '<h2 class="h-display-sm">Your tasks</h2>', '<div class="t-title">Upgrade to Node 22.</div>', '<span class="mono">upgrade-node-22</span>',
-      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', '<span>Turn 1 of 2</span>', '<span>Turn 2 of 2</span>', 'On this computer', 'ax --context ax-local get tasks',
-      /* One section per tile, and each tile with tasks jumps to its section. */
-      'id="live-sec-needs">Needs you</h3>', 'id="live-sec-running">Running</h3>', 'id="live-sec-paused">Suspended</h3>', 'id="live-sec-done">Done</h3>',
-      'data-action="jump" data-target="live-sec-needs"', 'data-action="jump" data-target="live-sec-done"']);
-    if (!/id="live-row-signer-b2c3"[^>]*style="padding-left:34px"/.test(v.html)) throw new Error('a later turn sits under the first');
-    /* Studio works with AX on this computer only: no cluster to change. */
-    never(v.html, ['Change cluster']);
-    /* The tiles carry the counts, so neither the lede nor Axel repeats them. Axel stays quiet until there is news. */
-    never(v.html, ['6 tasks:', 'agents are running', 'needs a look below', 'This week']);
-    if (!/id="axel-speech" aria-live="off" hidden>/.test(v.html)) throw new Error("Axel's bubble is hidden");
-    /* The command palette and Axel's story live in Settings now, not on Home. */
+    need(v.html, ['<h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">Tasks</h1>', '6 tasks on this computer.', 'On this computer', 'ax --context ax-local get tasks',
+      'class="table tasks-table"', '<th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th>', '<a href="#/task/upgrade-node-22" class="mono">upgrade-node-22</a>', 'Upgrade to Node 22.',
+      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', 'Turn 1 of 2', 'Turn 2 of 2',
+      'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"', '>Suspended<span class="seg-n tnum">', 'href="#/new"', 'data-action="live-sample-task"']);
+    /* Each row: Suspend for a running task, Resume for a suspended one, a shell when it has debug access, its logs, and Delete. */
+    const row = (name) => { const a = v.html.indexOf(`id="live-trow-${name}"`); return v.html.slice(a, v.html.indexOf('</tr>', a)); };
+    need(row('fix-flaky-tests'), ['data-action="live-suspend" data-task="fix-flaky-tests"', 'title="ax --context ax-local suspend task fix-flaky-tests"', 'href="#/task/fix-flaky-tests/terminal"', 'href="#/task/fix-flaky-tests/logs"', 'data-action="live-delete" data-task="fix-flaky-tests"']);
+    need(row('readme-polish'), ['data-action="live-resume" data-task="readme-polish"', 'Resume</button>', 'href="#/task/readme-polish/logs"']);
+    never(row('readme-polish'), ['live-suspend', '/terminal"']);
+    /* ax ssh needs the task Working: an idle task, even with debug on, gets no shell link, but can still be suspended. */
+    const ff = L.tasks.find((t) => t.name === 'fix-flaky-tests');
+    ff.state = 'Idle';
+    const idle = api.liveViewHome().html;
+    ff.state = 'Working';
+    const at = idle.indexOf('id="live-trow-fix-flaky-tests"');
+    const idleRow = idle.slice(at, idle.indexOf('</tr>', at));
+    never(idleRow, ['/terminal"']);
+    need(idleRow, ['data-action="live-suspend" data-task="fix-flaky-tests"', 'href="#/task/fix-flaky-tests/logs"']);
+    never(row('upgrade-node-22'), ['live-suspend', 'live-resume']);
+    /* No greeting, prompt box, tiles or sections: one table, filtered by state. */
+    never(v.html, ['live-home-h1', 'Good morning', 'Good evening', 'id="live-quick-goal"', 'What should an agent work on next?', 'data-action="jump"', 'class="station', 'id="live-sec-', 'Change cluster', 'axel-speech']);
     never(v.html, ['data-action="live-palette"', 'data-action="story"', 'Why an axolotl?']);
-    /* A name you give in Settings wins; with no name at all, Home greets you without one (never your login). */
-    p.store['ax.live.callMe'] = 'Ada L.';
-    need(api.liveViewHome().html, ['<em>Ada L.</em>.</h1>']);
-    delete p.store['ax.live.callMe'];
-    const keep = api.STUDIO.info.user;
-    api.STUDIO.info.user = { name: '', source: '' };
-    if (!/<h1 id="live-home-h1" tabindex="-1">Good (morning|afternoon|evening)\.<\/h1>/.test(api.liveViewHome().html)) throw new Error('no name, no comma');
-    api.STUDIO.info.user = keep;
     return v;
+  });
+  await check('Try a sample task applies a Task that prints a line and waits, with debug on, then resumes it and opens it', async () => {
+    const before = B.ax.length;
+    await api.liveSampleTask();
+    await settle();
+    const calls = B.ax.slice(before);
+    const name = (/^--context ax-local -a default resume task (sample-[0-9a-f]{6})$/.exec(calls[1] || '') || [])[1];
+    if (calls[0] !== '--context ax-local -a default apply -f -' || !name) throw new Error(calls.join(' | '));
+    const y = B.applied[B.applied.length - 1];
+    need(y, ['kind: Task', `  name: "${name}"`, '  commands: ["sh", "-c", "echo Hello from a sandbox on this computer; sleep infinity"]', '  debug: true']);
+    /* The cluster's default task image, and nothing it would need to set up or reach. */
+    never(y, ['image:', 'goal:', 'workspace:', 'gateway:']);
+    if (p.ctx.location.hash !== `#/task/${name}`) throw new Error('opens it: ' + p.ctx.location.hash);
+    need(toasts(p), [`Started <span class="mono">${name}</span>`]);
+    if (!L.tasks.some((t) => t.name === name && t.state === 'Working')) throw new Error('listed, and running');
+    /* Back to the list the next checks expect. */
+    B.tasks['ax-local'] = B.tasks['ax-local'].filter((t) => t.metadata.name !== name);
+    await api.liveRefresh(true);
+    await go(p, '#/');
   });
   await check('the app frame has what is real: New task, Home, Where agents run, Settings, search and shortcuts. No Guardrails or bell', () => {
     const sh = api.liveShellHTML();
@@ -660,26 +678,30 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
 
   // ---------- Workspaces and Gateways ----------
-  await check('Home lists the workspaces and Gateways, which tasks use each, and which failed or are unused', async () => {
+  await check('Workspaces and Gateways are two sections under the tasks: which tasks use each, and which failed or are unused', async () => {
     await go(p, '#/');
     await settle();
     api.render();
     const h = main(p);
-    need(h, ['Workspaces and Gateways', '3 workspaces · 3 Gateways', '2 unused', '1 failed setup', 'id="live-fold-res" open',
+    const sec = (id) => { const a = h.indexOf(`id="${id}"`); return h.slice(a, h.indexOf('</section>', a)); };
+    need(sec('live-res-workspaces'), ['id="live-res-workspaces-h">Workspaces</h2>', 'What a task starts from · 3', '1 unused', '1 failed setup', 'data-action="live-res-delete-unused" data-kind="workspace"', 'Delete 1 unused…', 'ax --context ax-local get workspaces']);
+    need(sec('live-res-gateways'), ['id="live-res-gateways-h">Gateways</h2>', 'What a task can reach · 3', '1 unused', 'data-action="live-res-delete-unused" data-kind="gateway"', 'ax --context ax-local get gateways']);
+    never(h, ['Workspaces and Gateways', 'id="live-fold-res"']);
+    need(h, [
       'Used by <a href="#/task/fix-flaky-tests" class="mono">fix-flaky-tests</a>', 'Used by <a href="#/task/changelog-draft" class="mono">changelog-draft</a>',
       'No task uses it', 'Setup failed', 'git clone https://github.com/acme/gone: repository not found', '2 sites',
-      'data-action="live-res-delete-unused"', 'Delete 2 unused…', 'ax --context ax-local get workspaces']);
+      'ax --context ax-local get workspaces']);
     if (!/data-name="itsdangerous" disabled/.test(h)) throw new Error('a workspace in use cannot be deleted');
     if (/data-name="ws-old-task" disabled/.test(h)) throw new Error('an unused one can');
   });
   await check('an AX that lists models shows them too, read-only; one that does not just leaves them out', async () => {
-    never(main(p), ['Models <span class="muted">']);
+    never(main(p), ['id="live-res-models"']);
     B.models = [{ kind: 'Model', metadata: { name: 'gemini-flash', atespace: 'default' }, spec: { provider: 'gemini', model: 'gemini-3.8-flash', secretKey: { name: 'gemini-api-creds', key: 'GEMINI_API_KEY' } } }];
     L.res.at = 1;
     await go(p, '#/');
     await settle();
     api.render();
-    need(main(p), ['Workspaces, Gateways and models', '1 model', 'id="live-res-model-gemini-flash"', 'gemini-3.8-flash', 'key from <span class="mono">gemini-api-creds</span>', 'ax --context ax-local get models']);
+    need(main(p), ['id="live-res-models-h">Models</h2>', 'What tasks can call by name · 1', 'id="live-res-model-gemini-flash"', 'gemini-3.8-flash', 'key from <span class="mono">gemini-api-creds</span>', 'ax --context ax-local get models']);
     never(main(p), ['data-kind="model"']);
     B.models = null;
     L.res.at = 1;
@@ -688,7 +710,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     api.render();
   });
   await check('Delete unused asks first, lists what goes, and deletes each', async () => {
-    api.ACTIONS['live-res-delete-unused']();
+    api.ACTIONS['live-res-delete-unused']({ dataset: {} });
     const d = dialog(p);
     need(p.els['#overlay'].innerHTML, ['Delete 2 unused items?', 'Workspace <span class="mono">ws-old-task</span>', 'Gateway <span class="mono">gw-print-the-date</span>']);
     await fire(d.querySelector('#lru-go'), 'click');
@@ -921,8 +943,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(y, ['kind: Gateway', 'kind: Workspace']);
     await api.liveNewRun();
     await settle();
-    const home = api.liveViewHome().html;
-    if (!new RegExp(`id="live-row-${first.name}"[\\s\\S]*Turn 1 of 2[\\s\\S]*id="live-row-${name}"[\\s\\S]*Turn 2 of 2`).test(home)) throw new Error('the two turns sit together on Home');
+    /* Both turns are rows in the Tasks table, each saying which turn it is. */
+    need(api.liveViewHome().html, [`id="live-trow-${first.name}"`, `id="live-trow-${name}"`, 'Turn 1 of 2', 'Turn 2 of 2']);
   });
 
   // ---------- Local cluster ----------
@@ -1086,12 +1108,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if ((h.match(/<svg [^>]*class="axo\b/g) || []).length !== 1) throw new Error('Axel sits next to his story, once');
     never(h, ['Agents &amp; keys', 'Privacy']);
     need(h, ['href="#/settings/notifications"', 'Compact task lists', 'id="ls-compact"']);
-    /* The name Home greets you by: the one this computer knows, which you can change; empty goes back to it. (The
-       field saves as you type; the browser walk covers that.) */
-    need(h, ['Your name on Home', 'Home greets you as “Ada”, from your account on this computer.', 'id="ls-name"', 'placeholder="Ada"']);
-    p.store['ax.live.callMe'] = 'Lady Ada';
-    need(api.liveViewHome().html, ['<em>Lady Ada</em>.</h1>']);
-    delete p.store['ax.live.callMe'];
+    /* Home is the Tasks page now, with no greeting, so there is no name to set. */
+    never(h, ['Your name on Home', 'id="ls-name"']);
   });
   await check('Settings: Keyboard & commands holds the palette, the shortcuts and the ax commands; accessibility switches', async () => {
     await go(p, '#/settings/keyboard');
@@ -1196,11 +1214,14 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!D.calls.some((c) => c.startsWith('GET /api/tasks?context=ax-local&atespace=team'))) throw new Error('lists there');
     if (D.calls.some((c) => /context=gke-/.test(c))) throw new Error('never another cluster');
   });
-  await check('All tasks (#/tasks) lists every task in a searchable, filterable table; #/settings/command-line redirects to Keyboard & commands', async () => {
-    need(api.liveShellHTML(), ['class="nav-all" href="#/tasks" data-nav="tasks">See all</a>']);
+  await check('#/tasks is the same Tasks page as #/, the sidebar shows recent tasks; #/settings/command-line redirects to Keyboard & commands', async () => {
+    const shell = api.liveShellHTML();
+    need(shell, ['<div class="nav-label">Recent</div>', 'href="#/" data-nav="home"']);
+    never(shell, ['class="nav-all"', 'See all']);
     await go(p, '#/tasks');
-    need(main(p), ['id="live-tasks-title"', 'All tasks', 'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"',
-      'class="table tasks-table"', 'id="live-trow-fix-flaky-tests"', '<th>Template</th>', '<th>Workspace</th>', '<th>Resources</th>']);
+    need(main(p), ['id="live-tasks-title"', '>Tasks</h1>', 'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"',
+      'class="table tasks-table"', 'id="live-trow-fix-flaky-tests"', '>Image</th>', '>Workspace</th>', '>Resources</th>', '>Created</th>']);
+    never(main(p), ['All tasks', '>Template</th>']);
     api.ACTIONS['live-tasks-filter']({ dataset: { v: 'done' } });
     need(main(p), ['data-v="done" aria-pressed="true"']);
     never(main(p), ['id="live-trow-fix-flaky-tests"']);
@@ -1315,7 +1336,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     F.push('envOp', { id, action: 'local-up', target: 'ax-local', status: 'failed', stage: 'substrate', error: 'exit status 1' });
     await settle();
     need(main(f), ['Couldn&#39;t pull a container image', 'Setup stopped.', 'installing Substrate: pulling image: 403 Forbidden', 'Try setup again', 'data-action="live-setup-start"']);
-    never(main(f), ['Your tasks']);
+    never(main(f), ['id="live-home-title"', 'id="live-tasks-title"']);
   });
   await check('when setup finishes, Studio uses AX on this computer and Home becomes the task list', async () => {
     f.api.ACTIONS['live-setup-start']();
@@ -1328,7 +1349,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     if (f.api.LIVE.context !== 'ax-local' || f.api.LIVE.local.state !== 'Running') throw new Error(JSON.stringify([f.api.LIVE.context, f.api.LIVE.local.state]));
     f.api.render();
-    need(main(f), ['Your tasks', 'No tasks here yet', 'Start one above', 'id="live-quick-go"', "Hi! I'm Axel."]);
+    need(main(f), ['id="live-tasks-title"', 'No tasks on this computer yet.', 'Start your first task', 'id="live-sample"', 'href="#/new"']);
+    never(main(f), ['Your tasks', 'id="live-quick-go"']);
     need(toasts(f), ['AX is running on this computer']);
   });
   await check('AX on this computer, stopped: Home says so and offers Start; nothing is listed until it runs', async () => {

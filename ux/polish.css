@@ -1377,15 +1377,32 @@ body:has(#story) #root svg.axo { visibility: hidden; }
 .tasks-search > svg { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
 .tasks-search .input { width: 100%; padding-left: 36px; }
 .seg .seg-n { margin-left: 6px; color: var(--muted); font-weight: 500; }
-.tasks-card { overflow-x: auto; }
-.tasks-table { min-width: 880px; }
-.tasks-table th, .tasks-table td { white-space: nowrap; vertical-align: middle; }
-.tasks-table td.tk-title { white-space: normal; min-width: 220px; max-width: 340px; }
+/* The Tasks table fits its card: as the card narrows, the columns you need least go first (Resources, Workspace,
+   Created, Image), so a task's name, its state and its actions always show. */
+.tasks-card { overflow-x: auto; container-type: inline-size; }
+.tasks-table { width: 100%; min-width: 480px; }
+.tasks-table th, .tasks-table td { white-space: nowrap; vertical-align: middle; padding-left: 10px; padding-right: 10px; }
+.tasks-table td.tk-title { white-space: normal; min-width: 170px; max-width: 240px; }
 #main .tasks-table td.tk-title a:not([class]) { font-weight: 600; color: var(--ink); text-decoration: none; }
 #main .tasks-table td.tk-title a:not([class]):hover { text-decoration: underline; }
 .tasks-table th:first-child, .tasks-table td:first-child { padding-left: 18px; }
 .tasks-table th:last-child, .tasks-table td:last-child { padding-right: 18px; }
-.tk-agent { display: inline-flex; align-items: center; gap: 6px; }
+.tk-agent { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.tasks-table .tk-img-name { overflow: hidden; text-overflow: ellipsis; max-width: 155px; }
+.tasks-table td.tk-ws { max-width: 145px; overflow: hidden; text-overflow: ellipsis; }
+.tasks-table td.tk-title a.mono { font-weight: 600; color: var(--ink); text-decoration: none; }
+.tasks-table td.tk-title a.mono:hover { text-decoration: underline; }
+.tasks-table .tk-goal { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.tasks-table td.tk-act { text-align: right; }
+.tk-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+@container (max-width: 1120px) { .tasks-table .tk-res { display: none; } }
+@container (max-width: 980px) { .tasks-table .tk-ws { display: none; } }
+@container (max-width: 860px) { .tasks-table .tk-created { display: none; } }
+@container (max-width: 660px) { .tasks-table .tk-img { display: none; } }
+.tasks-head { margin-bottom: 0; }
+.tasks-head .cuj-head { margin-top: 0; }
+.tasks-head .btn-row { flex: none; padding-top: 6px; }
+.tasks-head .live-list-head h1 { font-size: clamp(22px, 1.95vw, 28px); }
 .tasks-empty { display: grid; gap: 4px; justify-items: center; text-align: center; padding: 36px 16px; color: var(--muted); }
 .tasks-empty b { color: var(--ink); }
 
