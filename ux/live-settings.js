@@ -169,7 +169,7 @@ function liveViewSettings(slug) {
   /* After switching sections (the hashchange handler in app.js sets settingsFocus), focus moves to the new section's
      heading, so a screen reader announces where you are. */
   const after = () => { if (!state.settingsFocus) return; state.settingsFocus = false; const h = document.getElementById(sec.h); if (h) h.focus({ preventScroll: true }); };
-  return { title: `${sec.label} · Settings`, crumbs: [{ label: 'Tasks', href: '#/' }, { label: 'Settings', href: '#/settings' }, { label: sec.label }], html, after };
+  return { title: `${sec.label} · Settings`, crumbs: [{ label: 'Home', href: '#/' }, { label: 'Settings', href: '#/settings' }, { label: sec.label }], html, after };
 }
 
 /* ---------- Diagnostics ---------- */

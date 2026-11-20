@@ -46,7 +46,7 @@ async function liveLoadResources() {
     R.at = Date.now();
   }
   const part = parseRoute().parts[0];
-  if (part === '' || part === undefined || part === 'task') render({ keepScroll: true, background: true });
+  if (part === '' || part === undefined || part === 'tasks' || part === 'task') render({ keepScroll: true, background: true });
 }
 /** Reads them when a page that shows them opens, and again when they're older than LIVE_RES_MS. */
 function liveResWanted() {
@@ -98,15 +98,23 @@ function liveModelRowHTML(doc) {
     <div class="rr-main"><div class="rr-name"><span class="mono">${esc(name)}</span>${sp.provider ? `<span class="rr-meta">${esc(sp.provider)}</span>` : ''}</div>
       <div class="rr-used">${sp.model ? `<span class="mono">${esc(sp.model)}</span>` : 'No model named'}${key ? ` · key from <span class="mono">${esc(key)}</span>` : ''}</div></div></li>`;
 }
-/** Under the tasks, what AX keeps besides them, each in its own section: Workspaces (what a task starts from) and
-    Gateways (what a task can reach), with which tasks use each and Delete for the unused ones, then the models, when
-    AX lists any. */
-function liveResHTML() {
+function liveResCount() {
+  if (!liveResFresh()) return 0;
+  return LIVE.res.workspaces.length + LIVE.res.gateways.length + (LIVE.res.models || []).length;
+}
+/** Workspaces (what a task starts from) and Gateways (what a task can reach), each in its own section, with which tasks
+    use each and Delete for the unused ones, then Models when AX lists any. Pass { always: true } on the dedicated
+    Workspaces and Gateways tab so both sections render even before any exist. */
+function liveResHTML(opts) {
   liveResWanted();
   const R = LIVE.res;
-  if (!liveResFresh()) return R.error && R.ctx === LIVE.context ? `<p class="xsmall muted live-res-err">Couldn't list workspaces and Gateways: ${esc(R.error)}</p>` : '';
+  const always = !!(opts && opts.always);
+  if (!liveResFresh()) {
+    if (R.error && R.ctx === LIVE.context) return `<div class="setup-alert warn" role="alert" style="margin-top:16px">${icon('alert')}<div class="sa-body"><strong>Couldn't load Workspaces and Gateways</strong><p class="small">${esc(R.error)}</p></div></div>`;
+    return always ? '<div class="card card-pad" style="margin-top:16px"><p class="small muted">Loading Workspaces and Gateways…</p></div>' : '';
+  }
   const ws = R.workspaces, gw = R.gateways, md = R.models || [];
-  if (!ws.length && !gw.length && !md.length) return '';
+  if (!always && !ws.length && !gw.length && !md.length) return '';
   const byName = (docs) => docs.slice().sort((a, b) => liveResName(a).localeCompare(liveResName(b)));
   const section = (kind, title, sub, docs, empty) => {
     const unused = docs.filter((d) => !liveResUsers(kind, liveResName(d)).length).length;

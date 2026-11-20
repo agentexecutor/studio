@@ -374,7 +374,7 @@ function makeContext(B, env) {
   const files = ['core.js', 'mascot.js', 'viz.js', 'failures.js', 'views.js', 'task.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
-  liveCmd, liveViewHome, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
+  liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
   liveTermOpen, liveTermSend, liveTermClose, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
   liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
   viewHome, studioPost };`, ctx);
@@ -452,11 +452,14 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!B.posts.length || B.posts.some((x) => x.token !== 'tok-1')) throw new Error(JSON.stringify(B.posts));
     if (B.calls.some((c) => /\/api\/env\/context/.test(c)) || B.ax.some((c) => /^ctx \S/.test(c) || /use-context/.test(c))) throw new Error('Studio must not change the kubeconfig');
   });
-  await check('Tasks (#/) is the overview: every task in one table, what needs you first, with Suspend or Resume, a shell, Logs and Delete on each row', () => {
-    const v = api.liveViewHome();
+  await check('Home (#/) shows summary stats and recent tasks; Tasks (#/tasks) lists every task in one filterable table with row actions', () => {
+    const home = api.liveViewHome();
+    need(home.html, ['id="live-home-title"', '>Home</h1>', 'class="home-stats"', 'Running', 'Needs you', 'Suspended', 'Workspaces &amp; Gateways', 'id="home-recent-h">Recent tasks</h2>', 'href="#/tasks"']);
+    const v = api.liveViewTasks('tasks');
     const order = (v.html.match(/id="live-trow-[a-z0-9-]+"/g) || []).map((x) => x.slice(14, -1)).join();
     if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,readme-polish,changelog-draft') throw new Error('order: ' + order);
     need(v.html, ['<h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">Tasks</h1>', '6 tasks on this computer.', 'On this computer', 'ax --context ax-local get tasks',
+      'id="tab-tasks" href="#/tasks" aria-selected="true"', 'id="tab-resources" href="#/tasks/resources" aria-selected="false"', 'Workspaces and Gateways',
       'class="table tasks-table"', '<th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th>', '<a href="#/task/upgrade-node-22" class="mono">upgrade-node-22</a>', 'Upgrade to Node 22.',
       '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', 'Turn 1 of 2', 'Turn 2 of 2',
       'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"', '>Suspended<span class="seg-n tnum">', 'href="#/new"', 'data-action="live-sample-task"']);
@@ -468,7 +471,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     /* ax ssh needs the task Working: an idle task, even with debug on, gets no shell link, but can still be suspended. */
     const ff = L.tasks.find((t) => t.name === 'fix-flaky-tests');
     ff.state = 'Idle';
-    const idle = api.liveViewHome().html;
+    const idle = api.liveViewTasks('tasks').html;
     ff.state = 'Working';
     const at = idle.indexOf('id="live-trow-fix-flaky-tests"');
     const idleRow = idle.slice(at, idle.indexOf('</tr>', at));
@@ -677,16 +680,17 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await go(p, '#/task/fix-flaky-tests');
   });
 
-  // ---------- Workspaces and Gateways ----------
-  await check('Workspaces and Gateways are two sections under the tasks: which tasks use each, and which failed or are unused', async () => {
-    await go(p, '#/');
+  // ---------- Workspaces and Gateways (second tab of Tasks) ----------
+  await check('Workspaces and Gateways tab shows two separate sections: which tasks use each, and which failed or are unused', async () => {
+    await go(p, '#/tasks/resources');
     await settle();
     api.render();
     const h = main(p);
+    need(h, ['id="tab-resources" href="#/tasks/resources" aria-selected="true"']);
     const sec = (id) => { const a = h.indexOf(`id="${id}"`); return h.slice(a, h.indexOf('</section>', a)); };
     need(sec('live-res-workspaces'), ['id="live-res-workspaces-h">Workspaces</h2>', 'What a task starts from · 3', '1 unused', '1 failed setup', 'data-action="live-res-delete-unused" data-kind="workspace"', 'Delete 1 unused…', 'ax --context ax-local get workspaces']);
     need(sec('live-res-gateways'), ['id="live-res-gateways-h">Gateways</h2>', 'What a task can reach · 3', '1 unused', 'data-action="live-res-delete-unused" data-kind="gateway"', 'ax --context ax-local get gateways']);
-    never(h, ['Workspaces and Gateways', 'id="live-fold-res"']);
+    never(h, ['id="live-fold-res"']);
     need(h, [
       'Used by <a href="#/task/fix-flaky-tests" class="mono">fix-flaky-tests</a>', 'Used by <a href="#/task/changelog-draft" class="mono">changelog-draft</a>',
       'No task uses it', 'Setup failed', 'git clone https://github.com/acme/gone: repository not found', '2 sites',
@@ -698,14 +702,14 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(main(p), ['id="live-res-models"']);
     B.models = [{ kind: 'Model', metadata: { name: 'gemini-flash', atespace: 'default' }, spec: { provider: 'gemini', model: 'gemini-3.8-flash', secretKey: { name: 'gemini-api-creds', key: 'GEMINI_API_KEY' } } }];
     L.res.at = 1;
-    await go(p, '#/');
+    await go(p, '#/tasks/resources');
     await settle();
     api.render();
     need(main(p), ['id="live-res-models-h">Models</h2>', 'What tasks can call by name · 1', 'id="live-res-model-gemini-flash"', 'gemini-3.8-flash', 'key from <span class="mono">gemini-api-creds</span>', 'ax --context ax-local get models']);
     never(main(p), ['data-kind="model"']);
     B.models = null;
     L.res.at = 1;
-    await go(p, '#/');
+    await go(p, '#/tasks/resources');
     await settle();
     api.render();
   });
@@ -1338,7 +1342,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(main(f), ['Couldn&#39;t pull a container image', 'Setup stopped.', 'installing Substrate: pulling image: 403 Forbidden', 'Try setup again', 'data-action="live-setup-start"']);
     never(main(f), ['id="live-home-title"', 'id="live-tasks-title"']);
   });
-  await check('when setup finishes, Studio uses AX on this computer and Home becomes the task list', async () => {
+  await check('when setup finishes, Studio uses AX on this computer and Home shows the zero state', async () => {
     f.api.ACTIONS['live-setup-start']();
     await settle();
     const id = f.api.LIVE.op.id;
@@ -1349,7 +1353,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     if (f.api.LIVE.context !== 'ax-local' || f.api.LIVE.local.state !== 'Running') throw new Error(JSON.stringify([f.api.LIVE.context, f.api.LIVE.local.state]));
     f.api.render();
-    need(main(f), ['id="live-tasks-title"', 'No tasks on this computer yet.', 'Start your first task', 'id="live-sample"', 'href="#/new"']);
+    need(main(f), ['id="live-home-title"', 'AX is running on this computer', 'Create a new task', 'Try a sample task', 'id="live-sample"', 'href="#/new"']);
     never(main(f), ['Your tasks', 'id="live-quick-go"']);
     need(toasts(f), ['AX is running on this computer']);
   });
