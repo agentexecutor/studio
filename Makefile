@@ -19,20 +19,15 @@ VERSION ?= dev
 BINARY ?= bin/ax-studio
 PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all ui build dist test verify clean
+.PHONY: all build dist test verify clean
 
 all: build
 
-ui:
-	test -d node_modules || npm ci
-	rm -rf internal/studio/dist/assets internal/studio/dist/index.html
-	npm run build
-
-build: ui
+build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BINARY) ./cmd/ax-studio
 
-dist: ui
+dist:
 	rm -rf dist
 	mkdir -p dist
 	@set -e; for platform in $(PLATFORMS); do \
@@ -48,7 +43,6 @@ dist: ui
 	cd dist && sha256sum ax-studio_*.tar.gz > checksums.txt
 
 test:
-	npm run typecheck
 	@set -e; for suite in ux/tests/smoke_*.cjs; do echo "==> node $$suite"; node "$$suite" > /dev/null || { node "$$suite" | tail -n 20; exit 1; }; done
 	go test -race -count=1 ./...
 
@@ -57,4 +51,4 @@ verify: test
 	go vet ./...
 
 clean:
-	rm -rf bin dist internal/studio/dist/assets internal/studio/dist/index.html
+	rm -rf bin dist

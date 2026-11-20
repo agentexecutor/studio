@@ -410,15 +410,11 @@ func TestGatewayEndpointSaysWhatATaskCanReach(t *testing.T) {
 	}
 }
 
-func TestServesWebUIAtRootAndReactPagesUnderClassic(t *testing.T) {
+func TestServesWebUIAtRoot(t *testing.T) {
 	uxFS := fstest.MapFS{
 		"index.html": {Data: []byte("<!doctype html><title>new ux</title>")},
 		"env.js":     {Data: []byte("window.AX_STUDIO = null;\n")},
 		"app.js":     {Data: []byte("// app\n")},
-	}
-	reactFS := fstest.MapFS{
-		"index.html":    {Data: []byte("<!doctype html><title>react pages</title>")},
-		"assets/app.js": {Data: []byte("// react\n")},
 	}
 	serve := func(h http.Handler, path string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -427,7 +423,7 @@ func TestServesWebUIAtRootAndReactPagesUnderClassic(t *testing.T) {
 		return rec
 	}
 
-	srv, err := NewServer(Options{Addr: "127.0.0.1:0", UXFS: uxFS, StaticFS: reactFS})
+	srv, err := NewServer(Options{Addr: "127.0.0.1:0", UXFS: uxFS})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,28 +450,11 @@ func TestServesWebUIAtRootAndReactPagesUnderClassic(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") {
 		t.Fatalf("expected /env.js as a script, got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
-	if body := rec.Body.String(); !strings.HasPrefix(body, "window.AX_STUDIO = {") || !strings.Contains(body, `"server":true`) || !strings.Contains(body, `"classic":"/classic/"`) {
+	if body := rec.Body.String(); !strings.HasPrefix(body, "window.AX_STUDIO = {") || !strings.Contains(body, `"server":true`) {
 		t.Errorf("unexpected /env.js: %s", body)
 	}
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("expected /env.js not to be stored, got Cache-Control %q", got)
-	}
-
-	// The React pages are under /classic/.
-	if rec = serve(h, "/classic/"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "react pages") {
-		t.Errorf("expected the React pages at /classic/, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if rec = serve(h, "/classic/assets/app.js"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "// react") {
-		t.Errorf("expected the React bundle under /classic/assets/, got %d", rec.Code)
-	}
-
-	// A binary built without the React pages says so, and the web UI isn't offered a link to them.
-	srv, err = NewServer(Options{Addr: "127.0.0.1:0", UXFS: uxFS, StaticFS: fstest.MapFS{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body := serve(srv.Handler(), "/env.js").Body.String(); strings.Contains(body, "classic") {
-		t.Errorf("expected no link to the React pages when they aren't built, got %s", body)
 	}
 }
 

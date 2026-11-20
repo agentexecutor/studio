@@ -48,9 +48,7 @@ const (
 	sessionCookieName = "ax_studio_session"
 	csrfHeaderName    = "X-AX-CSRF-Token"
 	sessionTTL        = 12 * time.Hour
-	// classicPrefix is where the React pages are served.
-	classicPrefix    = "/classic"
-	maxJSONBodyBytes = 2 * 1024 * 1024 // 2 MiB cap for YAML manifests / API requests
+	maxJSONBodyBytes  = 2 * 1024 * 1024 // 2 MiB cap for YAML manifests / API requests
 )
 
 // Options configures a local AX Studio server instance.
@@ -60,9 +58,6 @@ type Options struct {
 	AXBinary    string
 	// Version is the ax-studio build version, shown in Settings.
 	Version string
-	// StaticFS holds the built React pages, served under /classic/. It
-	// defaults to the embedded build.
-	StaticFS fs.FS
 	// UXFS holds the web UI served at the root. It defaults to the files
 	// embedded from the ux directory.
 	UXFS          fs.FS
@@ -85,7 +80,6 @@ type Server struct {
 	axNamespace    string
 	axBinary       string
 	version        string
-	staticFS       fs.FS
 	uxFS           fs.FS
 	runner         kube.Runner
 	resolveServer  ServerResolver
@@ -133,15 +127,6 @@ func NewServer(opts Options) (*Server, error) {
 	}
 	if err := ValidateLoopbackAddr(addr); err != nil {
 		return nil, err
-	}
-
-	staticFS := opts.StaticFS
-	if staticFS == nil {
-		var err error
-		staticFS, err = StaticFS()
-		if err != nil {
-			return nil, fmt.Errorf("loading embedded studio assets: %w", err)
-		}
 	}
 
 	uxFS := opts.UXFS
@@ -199,7 +184,6 @@ func NewServer(opts Options) (*Server, error) {
 		axNamespace:    axNS,
 		axBinary:       axBin,
 		version:        version,
-		staticFS:       staticFS,
 		uxFS:           uxFS,
 		runner:         runner,
 		resolveServer:  resolver,
@@ -286,10 +270,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions/interrupt", s.requireMutatingAuth(s.handleSessionInterrupt))
 	mux.HandleFunc("/api/sessions/eof", s.requireMutatingAuth(s.handleSessionEOF))
 	mux.HandleFunc("/api/sessions/close", s.requireMutatingAuth(s.handleSessionClose))
-	// The web UI is served at the root. The React pages it is replacing stay
-	// at /classic/ until it covers what they do.
+	// The web UI is served at the root.
 	mux.HandleFunc("/env.js", s.handleEnvJS)
-	mux.Handle(classicPrefix+"/", http.StripPrefix(classicPrefix, s.serveSPA()))
 	mux.Handle("/", s.serveUX())
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -540,35 +522,6 @@ func (s *Server) requireMutatingAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *Server) serveSPA() http.Handler {
-	fileServer := http.FileServer(http.FS(s.staticFS))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		cleanPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
-		if cleanPath == "" || cleanPath == "." {
-			cleanPath = "index.html"
-		}
-		if f, err := s.staticFS.Open(cleanPath); err == nil {
-			_ = f.Close()
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-		if f, err := s.staticFS.Open("index.html"); err == nil {
-			_ = f.Close()
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/"
-			fileServer.ServeHTTP(w, r2)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "<!doctype html><html><head><title>AX Studio</title></head><body><h1>AX Studio</h1><p>Frontend bundle not built; run <code>make build</code>.</p></body></html>")
-	})
-}
-
 // serveUX serves the web UI at the root. The UI keeps its place in the URL
 // fragment, so every other path is a file or a 404.
 func (s *Server) serveUX() http.Handler {
@@ -585,16 +538,6 @@ func (s *Server) serveUX() http.Handler {
 	})
 }
 
-// hasClassicUI reports whether the React pages were built into this binary.
-func (s *Server) hasClassicUI() bool {
-	f, err := s.staticFS.Open("index.html")
-	if err != nil {
-		return false
-	}
-	_ = f.Close()
-	return true
-}
-
 // handleEnvJS serves /env.js, the script that tells the web UI a Studio
 // server is behind the page. Without it (the copy in the ux directory, sent
 // by a plain web server) the UI runs on demo data.
@@ -603,11 +546,7 @@ func (s *Server) handleEnvJS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	env := map[string]any{"server": true}
-	if s.hasClassicUI() {
-		env["classic"] = classicPrefix + "/"
-	}
-	payload, err := json.Marshal(env)
+	payload, err := json.Marshal(map[string]any{"server": true})
 	if err != nil {
 		http.Error(w, "encoding environment", http.StatusInternalServerError)
 		return

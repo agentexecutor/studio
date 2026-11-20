@@ -27,24 +27,20 @@ AX Studio is the local web app for [AX](https://github.com/google/ax). It's one 
 
 You need `ax`, AX's command-line tool, at the version Studio is built against or later. Studio uses it to set up AX, start tasks and open shells.
 
-**1. Get the code and a matching `ax`** (needs Go 1.27 or later):
+**1. Install Studio and `ax`** (needs Go 1.27 or later):
 
 ```bash
-git clone https://github.com/agentexecutor/studio && cd studio
-ax_version="$(go list -m -f '{{.Version}}' github.com/google/ax)"   # the ax version in go.mod
-GOBIN="$HOME/.ax/bin" go install "github.com/google/ax/cmd/ax@$ax_version"
+go install github.com/agentexecutor/studio/cmd/ax-studio@latest
+go install github.com/google/ax/cmd/ax@main
 ```
 
-This installs the `ax` version pinned in [`go.mod`](go.mod). The latest AX release, v0.3.1, is older than Studio needs: it doesn't have `ax local status -o json`.
+Both land in `$(go env GOPATH)/bin` (usually `~/go/bin`), which needs to be on your `PATH`. `ax` comes from `main` because the latest AX release, v0.3.1, is older than Studio needs: it doesn't have `ax local status -o json`.
 
-**2. Build and start Studio:**
+**2. Start Studio:**
 
 ```bash
-make build        # also needs Node.js 20 or later
-./bin/ax-studio   # opens http://127.0.0.1:8080
+ax-studio   # opens http://127.0.0.1:8080
 ```
-
-No Node.js? `go build -o bin/ax-studio ./cmd/ax-studio` builds the same app without the previous pages at `/classic/`.
 
 **3. Choose where agents run.** On **Where agents run**, either:
 - **Set up AX on this computer.** Studio runs `ax local start`, which creates a Kind cluster with Agent Substrate and AX in Docker or Podman. It asks for an AX server image, unless `AX_SERVER_IMAGE` is set.
@@ -177,7 +173,8 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 | Run Studio | Linux or macOS (amd64 or arm64), a modern browser, and `ax` at the version in [`go.mod`](go.mod) or later |
 | Run agents on this computer | Docker, or Podman in rootful mode, on Linux with kernel 6.8 or later; OrbStack, Docker Desktop or Colima on macOS. At least 8 GiB of free disk (15 GiB recommended), and an AX server image (AX's [installation guide](https://github.com/google/ax/blob/main/docs/installation.md#2-build-the-cli-and-images) shows how to build one) |
 | Run agents on a remote cluster | Kubernetes 1.36 or later (GKE 1.37 or later) with `ClusterTrustBundle` and `PodCertificateRequest`, Agent Substrate with a ready gVisor WorkerPool, a default StorageClass, and credentials that can manage `ax-system`. See AX's [remote cluster prerequisites](https://github.com/google/ax/blob/main/docs/local_installer.md#remote-cluster-prerequisites-for-step-5) |
-| Build from source | Go 1.27 or later. Node.js 20 or later for the previous pages at `/classic/` |
+| Install with `go install` | Go 1.27 or later |
+| Build from source | Go 1.27 or later. Node.js to run the UI smoke tests (`make test`) |
 
 ### Security
 
@@ -196,7 +193,7 @@ Studio and the cluster's ax-server were built from different versions of AX's AP
 <details>
 <summary><strong>Studio can't tell whether AX runs on this computer</strong></summary>
 
-Your `ax` is older than Studio needs: it has no `ax local status -o json`. Install the version in `go.mod`, as in [Quick start](#quick-start), then click **Check again**.
+Your `ax` is older than Studio needs: it has no `ax local status -o json`. Install a newer one, as in [Quick start](#quick-start), then click **Check again**.
 </details>
 
 <details>
@@ -215,7 +212,7 @@ If the pull times out, containers can't reach the registry. On Linux, check that
 <details>
 <summary><strong>Port 8080 is in use</strong></summary>
 
-Start Studio on another port: `./bin/ax-studio --port 8081` (or `ax studio --port 8081`).
+Start Studio on another port: `ax-studio --port 8081` (or `ax studio --port 8081`).
 </details>
 
 <details>
@@ -247,13 +244,13 @@ ssh -N -L 8080:127.0.0.1:8080 <host-running-studio>
 | [`internal/studio`](internal/studio) | The local server: API, session, operations and checks |
 | [`internal/kube`](internal/kube) | Finding and running `ax`, `kubectl` and `kind` |
 | [`ux`](ux) | The web UI: plain HTML, CSS and JavaScript with no build step. See [`ux/README.md`](ux/README.md) |
-| [`src`](src) | The previous pages (React), served at `/classic/` for what the new UI doesn't cover yet: Guardrails |
 | [`docs/screenshots`](docs/screenshots) | The screenshots in this README |
 | [`docs/assets`](docs/assets) | The animated hero at the top, and `readme-hero.py`, which makes it from five screenshots |
 
 ```bash
-make build                             # bin/ax-studio, with the previous pages
-make test                              # TypeScript check, UI smoke tests, Go tests with -race
+git clone https://github.com/agentexecutor/studio && cd studio
+make build                             # bin/ax-studio
+make test                              # UI smoke tests (needs Node.js), Go tests with -race
 make verify                            # make test, then gofmt and go vet (what CI runs)
 ./bin/ax-studio --ux-dir ux            # serve ux/ from disk, so a reload shows your edit
 cd ux && python3 -m http.server 8789   # the whole design on demo data, no AX needed

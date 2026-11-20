@@ -134,7 +134,6 @@ function liveSetAboutHTML() {
       <div class="set-row" style="margin-top:14px"><div class="sr-main"><div class="sr-title">Diagnostics</div>
         <div class="sr-desc">A report of this computer${LIVE.context ? ` and ${esc(LIVE.context)}` : ''}: the checks, AX's pods and the latest <span class="mono">ax-server</span> log lines. Secrets are removed before you see it, so it's safe to share.</div></div>
         <button type="button" class="btn sm" data-action="live-diagnostics" id="ls-diagnostics">${icon('doctor', 'sm')}Diagnostics…</button></div>
-      ${STUDIO.classic ? `<div class="set-row"><div class="sr-main"><div class="sr-title">Previous pages</div><div class="sr-desc">The pages this UI replaces. Guardrails is still there until it's connected here.</div></div><a class="btn ghost sm" href="${esc(STUDIO.classic)}">${icon('arrowUpRight', 'sm')}Open</a></div>` : ''}
     </div>`;
 }
 function liveSetCliHTML() {

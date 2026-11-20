@@ -1129,8 +1129,8 @@ const LIVE_HIDDEN = { guardrails: 'Guardrails', welcome: 'Setup', cuj: 'This pag
 function liveViewNotYet(part) {
   const what = LIVE_HIDDEN[part] || 'This page';
   const html = `<div class="page-head"><h1 tabindex="-1">${what} isn't connected to AX yet</h1>
-      <p class="lede">It still runs on demo data, so it's hidden here. Your tasks and where they run are real.${STUDIO.classic ? ' Until it is connected, the previous pages do this job.' : ''}</p></div>
-    <div class="btn-row"><a class="btn primary" href="#/">Your tasks</a><a class="btn" href="#/places">Where agents run</a>${STUDIO.classic ? `<a class="btn ghost" href="${esc(STUDIO.classic)}">${icon('arrowUpRight', 'sm')}Open the previous pages</a>` : ''}</div>`;
+      <p class="lede">It still runs on demo data, so it's hidden here. Your tasks and where they run are real.</p></div>
+    <div class="btn-row"><a class="btn primary" href="#/">Your tasks</a><a class="btn" href="#/places">Where agents run</a></div>`;
   return { title: what, crumbs: [{ label: 'Home', href: '#/' }, { label: what }], html };
 }
 
@@ -1153,8 +1153,7 @@ function liveShellHTML() {
       <div class="sanctuary-atmo" aria-hidden="true"></div>
       <header class="topbar">
         <div class="tb-left"><nav class="crumbs" aria-label="Breadcrumb" id="crumbs"></nav></div>
-        <div class="topbar-actions">${STUDIO.classic ? `<a class="btn ghost sm" id="live-classic" href="${esc(STUDIO.classic)}" title="The terminal and Guardrails are still in the previous pages">Previous pages</a>` : ''}
-          <button class="search-trigger" data-action="palette" id="search-trigger" aria-label="Search or run a command (${MOD}K)">${icon('search', 'sm')}<span class="st-label">Search or run a command</span><span class="kbds" aria-hidden="true"><kbd>${MOD}</kbd><kbd>K</kbd></span></button>
+        <div class="topbar-actions"><button class="search-trigger" data-action="palette" id="search-trigger" aria-label="Search or run a command (${MOD}K)">${icon('search', 'sm')}<span class="st-label">Search or run a command</span><span class="kbds" aria-hidden="true"><kbd>${MOD}</kbd><kbd>K</kbd></span></button>
           <button class="round-btn" id="theme-toggle" data-action="theme-toggle"></button>
           <button class="round-btn" id="shortcuts-btn" data-action="shortcuts" aria-label="Keyboard shortcuts">${icon('keyboard')}</button></div>
       </header>
