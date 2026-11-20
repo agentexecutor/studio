@@ -1879,3 +1879,58 @@ button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
 .live-terminal .term-body .a-c { color: #7CC8FF; }
 .live-terminal .term-body .a-w { color: #EEF4F9; }
 .term-keys kbd { color: #C9D6E3; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+
+/* ---------- Polished Setup & Accordion cards ---------- */
+.setup-hero { margin-bottom: 18px; }
+.setup-card { padding: 24px 26px; border-radius: 18px; background: var(--glass-2); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(11, 18, 25, .05), var(--hl); }
+html[data-theme="dark"] .setup-card { box-shadow: 0 12px 32px rgba(0, 0, 0, .35), var(--hl); }
+.setup-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.setup-sec-head .setup-sec-label { margin-bottom: 0; }
+#live-op + .setup-sec-head { margin-top: 22px; }
+.setup-sec-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+#live-op + .setup-sec-label { margin-top: 22px; }
+.setup-out-wrap .manifest { white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-card .live-checks { margin-top: 0; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); box-shadow: none; }
+html[data-theme="dark"] .setup-card .live-checks { background: rgba(255, 255, 255, .025); }
+
+/* Friendly setup & form alerts */
+.setup-alert { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-subtle); }
+.setup-alert > svg { flex: none; margin-top: 2px; }
+.setup-alert.warn { border-color: color-mix(in srgb, var(--wait) 35%, var(--line)); background: color-mix(in srgb, var(--wait) 8%, var(--bg)); }
+.setup-alert.warn > svg { color: var(--wait); }
+.setup-alert.info { border-color: color-mix(in srgb, var(--key) 30%, var(--line)); background: color-mix(in srgb, var(--key) 7%, var(--bg)); }
+.setup-alert.info > svg { color: var(--key-ink); }
+.setup-alert .sa-body { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.setup-alert .sa-body strong { font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.setup-alert .sa-body p { margin: 0; color: var(--muted); }
+.setup-alert .sa-detail { margin-top: 4px !important; padding: 6px 10px; border-radius: 8px; background: var(--surface); color: var(--ink) !important; overflow-wrap: anywhere; }
+
+/* Modern accordion cards for "What gets installed?" and "AX images" */
+.setup-accs { display: grid; gap: 10px; margin-top: 16px; }
+.setup-acc { border: 1px solid var(--line); border-radius: 14px; background: var(--bg); transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease); overflow: hidden; }
+html[data-theme="dark"] .setup-acc { background: rgba(255, 255, 255, .025); }
+.setup-acc:hover { border-color: var(--line-strong); }
+.setup-acc[open] { border-color: color-mix(in srgb, var(--key) 32%, var(--line)); box-shadow: 0 4px 16px rgba(2, 132, 199, .06); }
+.setup-acc-head { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 13px 16px; user-select: none; }
+.setup-acc-head::-webkit-details-marker { display: none; }
+.setup-acc-head:focus-visible { outline: none; box-shadow: inset var(--ring); border-radius: 13px; }
+.acc-ic { display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 10px; background: var(--key-soft); color: var(--key-ink); }
+.acc-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.acc-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.acc-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
+.acc-pill { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--surface); color: var(--muted); }
+.acc-pill.custom { background: var(--key-soft); color: var(--key-ink); }
+.acc-meta { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.acc-chev { flex: none; color: var(--faint); transition: transform var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+.setup-acc[open] .acc-chev { transform: rotate(90deg); color: var(--key-ink); }
+.setup-acc-body { padding: 4px 16px 16px; border-top: 1px solid var(--line); padding-top: 14px; animation: rise var(--dur-2) var(--ease); }
+.setup-stack-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .setup-stack-grid { grid-template-columns: 1fr; } }
+.setup-stack-item { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--bg-subtle); }
+.ssi-ic { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 8px; background: var(--surface); color: var(--ink); }
+.ssi-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.ssi-desc { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.setup-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 16px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.setup-actions { margin-top: 0; gap: 10px; }
+.setup-cli { margin: 0; }
+.place-card .setup-acc { margin-top: 14px; }

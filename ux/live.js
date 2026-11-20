@@ -1184,6 +1184,12 @@ function liveRender(opts) {
     liveChrome('tasks');
     return;
   }
+  /* While you type in AX images on Setup or Local cluster, don't clobber the input on a background refresh. */
+  const onEnv = r.parts[0] === 'places' || r.parts[0] === 'setup' || (!r.parts[0] && (!LIVE.context || liveLocalDown()));
+  if (opts.background && !moved && onEnv && LIVE.phase === 'ready' && $('.app.live', root) && isTypingIn('#main')) {
+    liveChrome(r.parts[0] === 'places' || r.parts[0] === 'setup' ? 'places' : 'home');
+    return;
+  }
   let v, top = 'home';
   if (LIVE.phase === 'starting') v = liveViewStarting();
   else if (LIVE.phase === 'offline') v = liveViewOffline();

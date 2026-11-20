@@ -938,7 +938,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if ((h.match(/<\/svg>Running<\/span>/g) || []).length !== 3) throw new Error('each of the three layers says it is running');
     /* Studio names its own images, so Update needs nothing from you. */
     if (/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update is on: Studio has images of its own');
-    need(h, ['AX images <span id="live-images-sum"><span class="muted small mono">· ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.', 'Default task image', "For tasks that don't name an image."]);
+    need(h, ['<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="acc-pill">Studio default</span><span class="acc-meta mono">ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.', 'Default task image', "For tasks that don't name an image."]);
     /* No remote clusters, no install on one, no cluster switch. This ax has no --runner-volume-image, so that field isn't offered. */
     never(h, ['Remote clusters', 'gke-team-dev', 'gke-broken', 'data-action="live-use-context"', 'data-action="live-cluster-check"', 'Install AX…', 'id="live-cl-needs"', 'ax promote', 'gVisor',
       '<span class="chip waiting">Needed</span>', '127.0.0.1', 'Runner volume image', 'data-action="live-uninstall"']);
@@ -949,7 +949,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const keep = L.env.setupImages;
     delete L.env.setupImages;
     const h = api.liveViewPlaces().html;
-    need(h, ['AX images <span id="live-images-sum"><span class="chip waiting">Needed</span>', 'Give the AX server image: AX has none of its own yet.']);
+    need(h, ['<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="chip waiting">Needed</span>', 'Give the AX server image: AX has none of its own yet.']);
     if (!/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update waits for a server image');
     L.env.setupImages = keep;
   });
@@ -989,7 +989,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await go(p, '#/places');
     if (/id="live-local-update"[^>]*disabled/.test(main(p))) throw new Error('Update is on once the image is good');
     never(main(p), ['<span class="chip waiting">Needed</span>']);
-    need(main(p), ['AX images <span id="live-images-sum"><span class="muted small mono">· ']);
+    need(main(p), ['<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="acc-pill custom">Custom</span><span class="acc-meta mono">']);
     await api.ACTIONS['live-setup-start']({ dataset: { verb: 'update' } });
     await settle();
     const sent = B.posts.filter((x) => x.path === '/api/env/local/up').pop();
@@ -1004,7 +1004,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     B.push('envOp', { id, action: 'local-up', target: 'ax-local', status: 'failed', stage: 'kind', error: 'Canceled', canceled: true, purpose: 'update', started: 1, finished: 4000 });
     await settle();
     /* Local cluster says so on the operation's own line, as a note: canceling isn't a failure. */
-    need(main(p), ['Updating AX on this computer: canceled', 'What it already did stays done. Running it again picks up from there.', 'data-action="live-op-dismiss"']);
+    need(main(p), ['Updating AX on this computer: canceled', 'What it already set up is kept. Running setup again picks up from there.', 'data-action="live-op-dismiss"']);
     never(main(p), ['role="alert"']);
     never(toasts(p), ['canceled']);
     api.ACTIONS['live-op-dismiss']();
@@ -1252,9 +1252,17 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     let h = main(f);
     if (f.api.LIVE.context !== '' || f.api.LIVE.local.state !== 'NotFound') throw new Error(JSON.stringify([f.api.LIVE.context, f.api.LIVE.local]));
     need(h, ['Set up AX on this computer', 'A container runtime that is running', 'docker 27.3 is running', 'Free disk space', '212 GiB free', 'What gets installed?', 'It runs each task in its own sandbox',
-      'AX images <span id="live-images-sum"><span class="muted small mono">· ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.',
-      'data-action="live-setup-start"', 'ax local start', 'aria-label="After setup"', 'Start a task', 'Open a shell in its sandbox, and read its logs']);
-    never(h, ['microVM', 'administrator', 'Or run on a remote cluster', 'gVisor', 'Give the AX server image', '<span class="chip waiting">Needed</span>']);
+      '<div class="setup-sec-head"><div class="setup-sec-label">System checks</div><button type="button" class="btn sm" data-action="live-env-refresh">',
+      'id="live-setup-whats-in"', '4 components', '<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="acc-pill">Studio default</span><span class="acc-meta mono">ax-server:v1@',
+      'Empty uses the image Studio pins for the AX it was built with.', 'data-action="live-setup-start"', 'ax local start']);
+    never(h, ['microVM', 'administrator', 'Or run on a remote cluster', 'gVisor', 'Give the AX server image', '<span class="chip waiting">Needed</span>', 'aria-label="After setup"', 'Not set up']);
+    /* Expanding "What gets installed?" or "AX images" stays open across redraws. */
+    f.api.LIVE.folds['live-setup-whats-in'] = true;
+    f.api.LIVE.imagesOpen = true;
+    f.api.render({ keepScroll: true });
+    need(main(f), ['id="live-setup-whats-in" open', 'id="live-images" open']);
+    f.api.LIVE.folds['live-setup-whats-in'] = false;
+    f.api.LIVE.imagesOpen = false;
     if (/id="live-setup-start"[^>]*disabled/.test(h)) throw new Error("setup needs nothing typed: Studio has images of its own");
     if (F.calls.some((c) => /\/api\/tasks/.test(c))) throw new Error('with no cluster there is nothing to list');
     /* Every page is setup until AX runs here; Local cluster and Settings stay open. */
@@ -1280,7 +1288,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     F.env.preflight[1] = { id: 'container_engine', label: 'Container engine', status: 'fail', detail: 'No container runtime is running', command: 'open -a Docker' };
     await f.api.ACTIONS['live-env-refresh']();
     await settle();
-    need(main(f), ['No container runtime is running', 'open -a Docker', 'Fix what the checks found, then check again.']);
+    need(main(f), ['No container runtime is running', 'open -a Docker', 'One requirement needs attention before setup', 'Resolve the blocked check above, then click Check again.']);
     if (!/id="live-setup-start"[^>]*disabled/.test(main(f))) throw new Error('setup waits for the checks');
     F.env.canStartLocal = true;
     F.env.preflight[1] = Object.assign({}, CHECKS_OK[1]);
@@ -1306,7 +1314,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     F.push('streamLine', { id, line: 'Error: installing Substrate: pulling image: 403 Forbidden' });
     F.push('envOp', { id, action: 'local-up', target: 'ax-local', status: 'failed', stage: 'substrate', error: 'exit status 1' });
     await settle();
-    need(main(f), ['Setup stopped.', 'installing Substrate: pulling image: 403 Forbidden', 'data-action="live-setup-start"']);
+    need(main(f), ['Couldn&#39;t pull a container image', 'Setup stopped.', 'installing Substrate: pulling image: 403 Forbidden', 'Try setup again', 'data-action="live-setup-start"']);
     never(main(f), ['Your tasks']);
   });
   await check('when setup finishes, Studio uses AX on this computer and Home becomes the task list', async () => {
@@ -1336,7 +1344,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const N = makeBackend({ env: envFresh(), tasks: {}, noAx: true });
     const q = makeContext(N);
     await settle();
-    need(main(q), ["Studio couldn't run the <span class=\"mono\">ax</span> command, and setup needs it.", 'executable file not found']);
+    need(main(q), ["Studio couldn't find the <span class=\"mono\">ax</span> command", 'executable file not found']);
     if (!/id="live-setup-start"[^>]*disabled/.test(main(q))) throw new Error('setup waits for ax');
   });
 

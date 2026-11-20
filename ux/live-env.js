@@ -204,6 +204,17 @@ function liveOpPaint() {
   const log2 = $('#live-op-log');
   if (log2) log2.scrollTop = stuck ? log2.scrollHeight : at;
 }
+/** Turns raw setup error lines into a short, helpful headline when we recognize what went wrong. */
+function liveSetupErrorAdvice(why, stage) {
+  const s = String(why || '');
+  if (/403|401|unauthorized|denied|forbidden/i.test(s)) return { title: "Couldn't pull a container image", hint: 'The registry rejected the image pull. Check your image name under AX images or sign in to the registry, then try again.' };
+  if (/pull|manifest|not found.*image|image.*not found|ErrImagePull|ImagePullBackOff/i.test(s)) return { title: "Couldn't download a required image", hint: 'Check your network connection and the image addresses under AX images, then try again.' };
+  if (/docker|podman|orbstack|container runtime|cannot connect to the docker daemon/i.test(s)) return { title: "Couldn't reach your container runtime", hint: 'Make sure Docker, OrbStack, or Podman is running on this computer, then click Check again.' };
+  if (/no space left|disk/i.test(s)) return { title: 'Not enough free disk space', hint: 'Free up disk space on this computer and run setup again.' };
+  if (/timeout|timed out|deadline exceeded/i.test(s)) return { title: 'Setup timed out waiting for AX to become ready', hint: 'What already finished is kept. Try setup again to pick up from where it stopped.' };
+  const step = LIVE_SETUP_STEPS.find((x) => x.key === stage);
+  return { title: step ? `Setup stopped during ${step.short}` : 'Setup stopped', hint: 'What already finished is kept. Review the output below and try again.' };
+}
 /** Setup's progress, or why an operation stopped. With { log: false } the output is left to the Output panel. */
 function liveOpInnerHTML(opts) {
   const op = LIVE.op;
@@ -229,11 +240,12 @@ function liveOpInnerHTML(opts) {
   }
   const lines = op.logs.slice(-LIVE_LOG_LINES);
   const why = failed && !op.canceled ? (liveLastLine(lines.join('\n')) || op.error || 'It stopped without saying why.') : '';
+  const adv = why ? liveSetupErrorAdvice(why, op.stage) : null;
   return `${head}
-    ${op.canceled ? '<p class="small sub op-note">What it already did stays done. Running it again picks up from there.</p>' : ''}
-    ${why ? `<div class="callout warn" role="alert" style="margin-top:14px">${icon('alert')}<div><strong>${esc(words.fail + '.')}</strong> <span style="overflow-wrap:anywhere">${esc(why)}</span></div></div>` : ''}
-    ${withLog && lines.length ? `<div class="live-title" style="margin-top:14px">Output</div>
-      <pre class="manifest" id="live-op-log" style="margin-top:8px;max-height:260px;overflow:auto" tabindex="0" aria-label="Output">${esc(lines.join('\n'))}</pre>` : ''}`;
+    ${op.canceled ? '<div class="setup-alert info" role="status" style="margin-top:12px">' + icon('alert') + '<div><strong>Setup was canceled.</strong><p class="small">What it already set up is kept. Running setup again picks up from there.</p></div></div>' : ''}
+    ${why ? `<div class="setup-alert warn" role="alert" style="margin-top:14px">${icon('alert')}<div class="sa-body"><strong>${esc(adv.title)}</strong><p class="small">${esc(adv.hint)}</p><p class="xsmall mono sa-detail">${esc(words.fail + '.')} ${esc(why)}</p></div></div>` : ''}
+    ${withLog && lines.length ? `<div class="setup-out-wrap"><div class="live-title" style="margin-top:14px">Output</div>
+      <pre class="manifest" id="live-op-log" style="margin-top:8px;max-height:260px;overflow:auto" tabindex="0" aria-label="Output">${esc(lines.join('\n'))}</pre></div>` : ''}`;
 }
 /** Progress, or the result until you dismiss it. Installing or removing AX on a cluster shows on that cluster's card. */
 function liveOpHTML(opts) {
@@ -279,7 +291,7 @@ function liveOutputHTML() {
    is kept while the page redraws. */
 LIVE.folds = {};
 function liveFoldHTML(id, title, sum, body, attention) {
-  const open = attention || !!LIVE.folds[id];
+  const open = LIVE.folds[id] !== undefined ? LIVE.folds[id] : !!attention;
   return `<details class="pl-fold" id="${id}" ${open ? 'open' : ''}><summary>${icon('chevRight', 'sm chev')}${title ? `<span class="pl-sub">${title}</span>` : ''}<span class="fold-sum">${sum}</span></summary><div class="fold-body">${body}</div></details>`;
 }
 /** "3 of 3 pass", or how many need a look, with the look of the worst. */
@@ -303,21 +315,29 @@ function liveImageProblemsHTML(problems) {
 }
 /** The images in a word, next to their heading: Needed, or the AX server image setup uses. */
 function liveImagesSummaryHTML(problems) {
+  const custom = !!LIVE.images.serverImage.trim() || !!LIVE.images.defaultTaskImage.trim() || !!LIVE.images.runnerVolumeImage.trim();
   const using = LIVE.images.serverImage.trim() || (LIVE.env || {}).serverImageEnv || liveSetupImages().serverImage || '';
-  return problems.length ? '<span class="chip waiting">Needed</span>'
-    : using ? `<span class="muted small mono">· ${esc(typeof liveImageShort === 'function' ? liveImageShort(using) : using)}</span>` : '';
+  if (problems.length) return '<span class="chip waiting">Needed</span>';
+  const tag = custom ? '<span class="acc-pill custom">Custom</span>' : '<span class="acc-pill">Studio default</span>';
+  return using ? `${tag}<span class="acc-meta mono">${esc(typeof liveImageShort === 'function' ? liveImageShort(using) : using)}</span>` : '';
 }
 function liveImagesHTML() {
   const env = LIVE.env || {};
   const problems = liveImageProblems();
   const def = liveSetupImages();
+  const open = LIVE.imagesOpen !== undefined ? LIVE.imagesOpen : problems.length > 0;
   const field = (key, label, hint, required, note) => `<label class="small img-field"><span>${label}${required ? ' <span class="muted">· required</span>' : ''}</span>
       <input class="input mono" type="text" data-live-image="${key}" value="${esc(LIVE.images[key] || '')}" placeholder="${esc(hint)}" autocomplete="off" spellcheck="false" ${required && !String(LIVE.images[key] || '').trim() ? 'aria-invalid="true"' : ''}>${note ? `<span class="xsmall muted">${note}</span>` : ''}</label>`;
   /* Where the image setup uses comes from when the field is empty: Studio's environment, or Studio itself. */
   const from = (img, where) => (!img ? '' : where === 'env' ? 'Empty uses the image from Studio\'s environment.' : 'Empty uses the image Studio pins for the AX it was built with.');
   const short = (img) => (typeof liveImageShort === 'function' ? liveImageShort(img) : img);
-  return `<details class="disclosure" id="live-images" style="margin-top:12px" ${LIVE.imagesOpen || problems.length ? 'open' : ''}><summary>${icon('chevRight', 'sm chev')}AX images <span id="live-images-sum">${liveImagesSummaryHTML(problems)}</span></summary>
-    <div class="disclosure-body"><p class="small sub">Setting up, updating or repairing AX here deploys these. Leave them empty to use the ones shown. What you type is kept in this browser.</p>
+  return `<details class="setup-acc" id="live-images" ${open ? 'open' : ''}>
+    <summary class="setup-acc-head">
+      <span class="acc-ic" aria-hidden="true">${icon('layers', 'sm')}</span>
+      <span class="acc-copy"><span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum">${liveImagesSummaryHTML(problems)}</span></span>
+      ${icon('chevRight', 'sm acc-chev')}
+    </summary>
+    <div class="setup-acc-body"><p class="small sub">Setting up, updating or repairing AX here deploys these. Leave them empty to use the defaults shown. Custom values are saved in this browser.</p>
       ${field('serverImage', 'AX server image', def.serverImage ? short(def.serverImage) : env.serverImageEnv || 'registry.example.com/ax/ax-server@sha256:…', !def.serverImage && !env.serverImageEnv, from(def.serverImage, def.serverImageFrom))}
       ${LIVE.axFlags && LIVE.axFlags.defaultTaskImage ? field('defaultTaskImage', 'Default task image', def.taskImage ? short(def.taskImage) : 'Optional', false, def.taskImage ? `For tasks that don't name an image. ${from(def.taskImage, def.taskImageFrom)}` : "For tasks that don't name an image.") : ''}
       ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', "Optional. Leave empty to run the runner in each task's image") : ''}
@@ -366,37 +386,58 @@ function liveRefreshImageProblems() {
 }
 function liveLocalHTML() {
   const L = LIVE.local;
-  if (LIVE.envError && !L) return `<div class="health-line attn" style="margin-top:4px"><span class="hd"></span>Couldn't check</div><p class="small" style="margin-top:8px;overflow-wrap:anywhere">${esc(LIVE.envError)}</p><div class="btn-row" style="margin-top:10px"><button class="btn sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>`;
+  if (LIVE.envError && !L) {
+    return `<div class="setup-alert warn" role="alert">${icon('alert')}<div class="sa-body"><strong>Couldn't check this computer</strong><p class="small">Studio couldn't inspect your local environment. Check that the server is running and try again.</p><p class="xsmall mono sa-detail">${esc(LIVE.envError)}</p></div></div>
+      <div class="btn-row setup-actions"><button type="button" class="btn" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>`;
+  }
   if (!L) return '<p class="small muted" style="margin-top:8px">Checking…</p>';
   const busy = liveOpRunning();
   const running = L.state === 'Running', stopped = L.state === 'Stopped';
-  const line = busy ? '' : running ? `<div class="health-line" style="margin-top:4px" id="live-local-state"><span class="hd"></span>Running</div>`
-    : `<div class="health-line attn" style="margin-top:4px" id="live-local-state"><span class="hd"></span>${stopped ? 'Stopped' : 'Not set up'}</div>`;
-  const noAx = LIVE.axError ? `<div class="callout warn" style="margin-top:12px">${icon('alert')}<div><strong>Studio couldn't run the <span class="mono">ax</span> command, and setup needs it.</strong> Install AX (see github.com/google/ax), then check again. <span class="muted" style="overflow-wrap:anywhere">${esc(LIVE.axError)}</span></div></div>` : '';
+  const failedOp = !busy && LIVE.op && LIVE.op.action === 'local-up' && LIVE.op.status === 'failed' && LIVE.opDismissed !== LIVE.op.id;
+  const line = busy || (!running && !stopped) ? ''
+    : running ? `<div class="health-line" style="margin-bottom:12px" id="live-local-state"><span class="hd"></span>Running</div>`
+      : `<div class="health-line attn" style="margin-bottom:12px" id="live-local-state"><span class="hd"></span>Stopped</div>`;
+  const noAx = LIVE.axError ? `<div class="setup-alert warn" role="alert" style="margin-top:14px">${icon('alert')}<div class="sa-body"><strong>Studio couldn't find the <span class="mono">ax</span> command</strong><p class="small">Install AX (see github.com/google/ax) so it is on your PATH, then click Check again.</p><p class="xsmall mono sa-detail">${esc(LIVE.axError)}</p></div></div>` : '';
   let body;
   if (busy) {
     body = '';
   } else if (running) {
     body = `<div style="margin-top:12px">${liveKV([['Cluster', esc(L.name)], ['Kube context', `<span class="mono">${esc(L.context)}</span>`], ['Agent Substrate', esc(L.substrate)], ['AX server', esc(L.server)]])}</div>
-      <div class="btn-row" style="margin-top:14px"><button class="btn sm" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}">${icon('pause', 'sm')}Stop</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
-      <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>ax local status</code></p>`;
+      <div class="btn-row setup-actions"><button type="button" class="btn" data-action="live-local-stop" title="${esc(LIVE_LOCAL_TIPS.stop)}">${icon('pause', 'sm')}Stop</button><button type="button" class="btn ghost" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
+      <p class="xsmall muted setup-cli">${icon('terminal', 'xs')} <code>ax local status</code></p>`;
   } else if (stopped) {
     const blockers = liveLocalBlockers(false);
-    body = `<p class="small" style="margin-top:10px">Start it again. Your tasks and their files are kept.</p>${noAx}
-      ${liveImagesHTML()}
-      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="start" title="${esc(LIVE_LOCAL_TIPS.start)}" id="live-setup-start" data-needs-images data-blocked-other="${LIVE.axError ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>${icon('play', 'sm')}Start</button><button class="btn ghost sm" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
-      <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>ax local start</code></p>`;
+    body = `<p class="small sub">Your tasks and their files are kept. Start AX again to pick up where you left off.</p>${noAx}
+      <div class="setup-accs">${liveImagesHTML()}</div>
+      <div class="btn-row setup-actions"><button type="button" class="btn primary" data-action="live-setup-start" data-verb="start" title="${esc(LIVE_LOCAL_TIPS.start)}" id="live-setup-start" data-needs-images data-blocked-other="${LIVE.axError ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>${icon('play', 'sm')}Start</button><button type="button" class="btn" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button><button type="button" class="btn ghost" data-action="live-local-delete" title="${esc(LIVE_LOCAL_TIPS.remove)}">${icon('trash', 'sm')}Remove…</button></div>
+      <p class="xsmall muted setup-cli">${icon('terminal', 'xs')} <code>ax local start</code></p>`;
   } else {
     const blockers = liveLocalBlockers(true);
     const otherBlock = !LIVE.canStartLocal || !!LIVE.axError;
-    body = `${liveChecksHTML()}${noAx}
-      <details class="disclosure" style="margin-top:12px"><summary>${icon('chevRight', 'sm chev')}What gets installed?</summary><div class="disclosure-body small sub">
-        ${LIVE_SETUP_STEPS.map((s) => `<div style="padding:3px 0"><strong style="color:var(--ink)">${esc(s.short)}</strong> <span class="muted">${esc(s.desc)}</span></div>`).join('')}
-        <p style="margin-top:8px">It all runs inside your container runtime. Setup may download <span class="mono">kind</span> and <span class="mono">kubectl</span> into <span class="mono">~/.ax/bin</span>, and it adds a context named <span class="mono">ax-local</span> to your kubeconfig. It doesn't ask for your password.</p></div></details>
-      ${liveImagesHTML()}
-      <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="live-setup-start" data-verb="setup" title="${esc(LIVE_LOCAL_TIPS.setup)}" id="live-setup-start" data-needs-images data-blocked-other="${otherBlock ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>Set up AX on this computer${icon('arrowRight', 'sm')}</button><button class="btn ghost sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>
-      ${!LIVE.canStartLocal ? '<p class="small" style="margin-top:8px">Fix what the checks found, then check again.</p>' : ''}
-      <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} The same from the command line: <code>ax local start</code></p>`;
+    const failedChecks = LIVE.checks.filter((c) => c.status === 'fail');
+    const blockerBanner = !LIVE.axError && failedChecks.length ? `<div class="setup-alert warn" role="alert" style="margin-top:14px">${icon('alert')}<div class="sa-body"><strong>${failedChecks.length === 1 ? 'One requirement needs attention before setup' : `${failedChecks.length} requirements need attention before setup`}</strong><p class="small">Resolve the blocked check${failedChecks.length === 1 ? '' : 's'} above, then click Check again.</p></div></div>` : '';
+    const whatsOpen = !!LIVE.folds['live-setup-whats-in'];
+    const stepIcons = ['box', 'shield', 'layers', 'server'];
+    const whatsIn = `<details class="setup-acc" id="live-setup-whats-in" ${whatsOpen ? 'open' : ''}>
+      <summary class="setup-acc-head">
+        <span class="acc-ic" aria-hidden="true">${icon('box', 'sm')}</span>
+        <span class="acc-copy"><span class="acc-title">What gets installed?</span><span class="acc-sub"><span class="acc-pill">4 components</span><span class="acc-meta">Kind, Agent Substrate, Workers, AX server</span></span></span>
+        ${icon('chevRight', 'sm acc-chev')}
+      </summary>
+      <div class="setup-acc-body">
+        <div class="setup-stack-grid">${LIVE_SETUP_STEPS.map((s, i) => `<div class="setup-stack-item"><span class="ssi-ic" aria-hidden="true">${icon(stepIcons[i] || 'box', 'sm')}</span><div><div class="ssi-name">${esc(s.short)}</div><div class="ssi-desc">${esc(s.desc)}</div></div></div>`).join('')}</div>
+        <p class="xsmall muted" style="margin-top:10px">Runs inside your container runtime without asking for your password. May download <span class="mono">kind</span> and <span class="mono">kubectl</span> into <span class="mono">~/.ax/bin</span> and adds context <span class="mono">ax-local</span> to your kubeconfig.</p>
+      </div></details>`;
+    const primaryLabel = failedOp ? `${icon('refresh', 'sm')}Try setup again` : `Set up AX on this computer${icon('arrowRight', 'sm')}`;
+    body = `<div class="setup-sec-head"><div class="setup-sec-label">System checks</div><button type="button" class="btn sm" data-action="live-env-refresh">${icon('refresh', 'sm')}Check again</button></div>
+      ${liveChecksHTML()}${noAx}${blockerBanner}
+      <div class="setup-accs">${whatsIn}${liveImagesHTML()}</div>
+      <div class="setup-foot">
+        <div class="btn-row setup-actions">
+          <button type="button" class="btn primary" data-action="live-setup-start" data-verb="setup" title="${esc(LIVE_LOCAL_TIPS.setup)}" id="live-setup-start" data-needs-images data-blocked-other="${otherBlock ? 1 : 0}" ${blockers.length ? 'disabled' : ''}>${primaryLabel}</button>
+        </div>
+        <p class="xsmall muted setup-cli">${icon('terminal', 'xs')} Command line: <code>ax local start</code></p>
+      </div>`;
   }
   return line + liveOpHTML() + body;
 }
@@ -544,16 +585,14 @@ function liveViewSetup(asHome) {
   if (settingUp) { title = 'Setting up AX on this computer'; lede = 'This takes a few minutes. You can leave this page: setup keeps going.'; }
   else if (L.state === 'Running') { title = 'AX is running on this computer'; lede = 'Your tasks run here, each in its own sandbox.'; }
   else if (L.state === 'Stopped') { title = 'AX on this computer is stopped'; lede = 'Start it to see your tasks and run new ones.'; }
-  else { title = 'Set up AX on this computer'; lede = 'AX runs your tasks on this computer, each in its own sandbox. Setup takes a few minutes.'; }
+  else { title = 'Set up AX on this computer'; lede = 'Run AX tasks locally, each in its own isolated sandbox. Setup takes a few minutes.'; }
   const html = `
-    <div class="cuj-head" style="margin-bottom:14px">${axo(mood, { decorative: true, id: 'setup-axo' })}<div class="cuj-head-copy"><h1 tabindex="-1">${title}</h1><p class="lede">${lede}</p></div></div>
-    <section class="card card-pad" style="margin-top:14px" aria-label="AX on this computer" id="live-setup">
+    <div class="setup-hero cuj-head">${axo(mood, { decorative: true, id: 'setup-axo' })}<div class="cuj-head-copy"><h1 tabindex="-1">${title}</h1><p class="lede">${lede}</p></div></div>
+    <section class="card setup-card" aria-label="AX on this computer" id="live-setup">
       ${liveLocalHTML()}
-      ${L.state === 'Running' && !liveOpRunning() && !asHome ? `<div class="btn-row" style="margin-top:14px"><a class="btn primary" href="#/">Your tasks${icon('arrowRight', 'sm')}</a></div>` : ''}
-    </section>
-    ${!settingUp && L.state !== 'Running' ? `<ol class="setup-next small sub" aria-label="After setup">
-      <li><b>Set up AX on this computer</b></li><li>Start a task</li><li>Open a shell in its sandbox, and read its logs</li></ol>` : ''}`;
-  const crumbs = asHome ? [{ label: 'Home' }] : [{ label: 'Home', href: '#/' }, { label: 'Local cluster', href: '#/places' }, { label: 'Setup' }];
+      ${L.state === 'Running' && !liveOpRunning() && !asHome ? `<div class="btn-row setup-actions"><a class="btn primary" href="#/">Go to Home${icon('arrowRight', 'sm')}</a></div>` : ''}
+    </section>`;
+  const crumbs = asHome ? [{ label: 'Setup' }] : [{ label: 'Home', href: '#/' }, { label: 'Local cluster', href: '#/places' }, { label: 'Setup' }];
   return { title, crumbs, html };
 }
 
@@ -681,6 +720,6 @@ if (LIVE.on) {
     const t = e.target;
     if (!t || !t.id) return;
     if (t.id === 'live-images') LIVE.imagesOpen = t.open;
-    else if (t.classList && t.classList.contains('pl-fold')) LIVE.folds[t.id] = t.open;
+    else if (t.id === 'live-setup-whats-in' || (t.classList && (t.classList.contains('pl-fold') || t.classList.contains('setup-acc')))) LIVE.folds[t.id] = t.open;
   }, true);
 }
