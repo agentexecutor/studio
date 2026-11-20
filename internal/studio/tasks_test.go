@@ -15,16 +15,11 @@
 package studio
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -479,97 +474,5 @@ func TestEmbeddedWebUIHasNoInlineScripts(t *testing.T) {
 		if !strings.Contains(page, src) {
 			t.Errorf("expected the page to load %s", src)
 		}
-	}
-}
-
-// A file the agent added in a new directory is a change like any other: it is
-// listed with its patch, and the full patch creates it.
-func TestTaskChangesListNewFilesInNewDirectories(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v (%s)", args, err, string(out))
-		}
-	}
-	runGit("init", "-b", "main")
-	runGit("config", "user.name", "Test")
-	runGit("config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Demo\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit("add", "README.md")
-	runGit("commit", "-m", "initial")
-	if err := os.MkdirAll(filepath.Join(repoDir, "notes", "deep"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repoDir, "notes", "deep", "why.md"), []byte("The clock was read twice.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcSrv := grpc.NewServer()
-	v1alpha1.RegisterAXServer(grpcSrv, &stubAXServer{
-		task: &v1alpha1.Task{
-			Metadata: &v1alpha1.ObjectMeta{Name: "demo-task", Atespace: "default"},
-			Spec:     &v1alpha1.TaskSpec{Debug: true},
-			Status:   &v1alpha1.TaskStatus{State: v1alpha1.TaskState_TASK_STATE_WORKING, Actor: "actor-1"},
-		},
-	})
-	go func() { _ = grpcSrv.Serve(ln) }()
-	t.Cleanup(grpcSrv.Stop)
-
-	srv, err := NewServer(Options{
-		Addr: "127.0.0.1:0",
-		ResolveServer: func(context.Context, axclient.Options) (string, error) {
-			return "http://" + ln.Addr().String(), nil
-		},
-		// The sandbox is the repository above: git runs for real.
-		GuestExec: func(ctx context.Context, _, _, _, _ string, cmd []string, _ string) (string, string, int, error) {
-			c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
-			c.Dir = repoDir
-			var stdout, stderr bytes.Buffer
-			c.Stdout, c.Stderr = &stdout, &stderr
-			err := c.Run()
-			var exit *exec.ExitError
-			if errors.As(err, &exit) {
-				return stdout.String(), stderr.String(), exit.ExitCode(), nil
-			}
-			return stdout.String(), stderr.String(), 0, err
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := srv.Handler()
-	cookie, _ := bootstrapTestSession(t, h)
-
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/tasks/changes?task=demo-task", nil)
-	req.AddCookie(cookie)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("changes returned %d: %s", rec.Code, rec.Body.String())
-	}
-	var changes TaskChangesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &changes); err != nil {
-		t.Fatal(err)
-	}
-	if !changes.Available || len(changes.Files) != 1 {
-		t.Fatalf("want the one new file, got %+v", changes)
-	}
-	f := changes.Files[0]
-	if f.Path != "notes/deep/why.md" || f.Status != "?" || f.Additions != 1 {
-		t.Errorf("new file = %+v, want notes/deep/why.md, status ?, 1 addition", f)
-	}
-	if !strings.Contains(f.Patch, "+++ b/notes/deep/why.md") || !strings.Contains(changes.FullPatch, "+The clock was read twice.") {
-		t.Errorf("the patch should create the file:\n%s", changes.FullPatch)
 	}
 }

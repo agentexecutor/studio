@@ -17,10 +17,10 @@
 /* AX Studio, live mode: what a task's sandbox printed.
 
    Agent Substrate's worker logs every line a sandbox prints, labelled with the task. The Studio server reads the
-   workers' logs with kubectl and keeps this task's lines (GET /api/tasks/logs), as the desktop app does. Unlike Changes
-   and Terminal, this works for every task, with or without debug access.
+   workers' logs with kubectl and keeps this task's lines (GET /api/tasks/logs), as the desktop app does. Unlike the
+   Terminal, this works for every task, with or without debug access.
 
-   The task page reads the logs when it opens, so the Logs tab and the Next card can say when the agent logged an
+   The task page reads the logs when it opens, so the Logs tab and the State card can say when the task logged an
    error. While the Logs tab is open on a task that runs, it asks every few seconds for what's new. */
 
 LIVE.logs = {};               // task name -> see liveLogsOf
@@ -211,7 +211,7 @@ function liveLogsNextHTML(name) {
   const e = liveLogsError(name);
   if (!e) return '<span id="live-ns-logerr" hidden></span>';
   /* When the card already says the agent stopped (and when), the error is enough. */
-  const lead = liveLogsAgentExit(name) ? 'Its error:' : `The agent logged an error${e.time ? ` at ${esc(e.time)}` : ''}:`;
+  const lead = liveLogsAgentExit(name) ? 'Its error:' : `It logged an error${e.time ? ` at ${esc(e.time)}` : ''}:`;
   return `<span class="ns-detail ns-logerr" id="live-ns-logerr">${icon('alert', 'xs')} ${lead} <span class="mono">${esc(liveLogErrorWords(e.text))}</span> <a href="#/task/${encodeURIComponent(name)}/logs">Logs</a></span>`;
 }
 
@@ -248,7 +248,7 @@ function liveLogsInnerHTML(name, stateName) {
       ${L.error ? `<p class="xsmall" style="margin-top:6px;color:var(--wait)">${icon('alert', 'xs')} Couldn't read new lines: ${esc(L.error)}</p>` : ''}`;
   }
   return `<h2 id="live-logs-h" class="sr-only">Logs</h2>
-    <div class="log-bar"><span class="lb-text">${running ? 'What the agent and its sandbox print, as it happens.' : 'What the agent and its sandbox printed.'}</span>
+    <div class="log-bar"><span class="lb-text">${running ? 'What the task and its sandbox print, as it happens.' : 'What the task and its sandbox printed.'}</span>
       <span class="lb-actions">
         <label class="ll-toggle"><input type="checkbox" data-action="live-logs-sandbox" ${withSandbox ? 'checked' : ''}> Sandbox start-up${hidden || withSandbox ? ` (${lines.filter((l) => l.src === 'sandbox').length})` : ''}</label>
         <button class="btn ghost sm" data-action="copy" data-text="${esc(copyText)}" ${shown.length ? '' : 'disabled'}>${icon('copy', 'sm')}Copy</button>

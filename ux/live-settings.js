@@ -21,12 +21,12 @@
    - Keyboard & commands: the command palette and the shortcuts that work here
    - Accessibility: single-key shortcuts and reduced motion
    - Notifications: a browser notification when something needs you (live-nav.js)
-   - AX & this computer: what this Studio is and runs against (its version, the ax command, the cluster in use, the
+   - AX & this computer: what this Studio is and runs against (its version, the ax command, the local cluster, the
      kubeconfig, the images setup uses), and a diagnostics report from the server with secrets removed. This
-     computer's checks are on Where agents run, so they aren't repeated here.
+     computer's checks are on Local cluster, so they aren't repeated here.
    - Command line: the ax commands that do what Studio does
 
-   The first three are kept in this browser. Nothing here changes AX or your clusters. */
+   The first three are kept in this browser. Nothing here changes AX or your kubeconfig. */
 
 const LIVE_SETTINGS = [
   { slug: 'about', h: 'ls-h-about', label: 'AX & this computer' },
@@ -42,7 +42,7 @@ function liveShortcutRows() {
     [`${MOD} K`, 'Open the command palette'],
     ['N', 'New task'],
     ['G then H', 'Go home'],
-    ['G then P', 'Go to Where agents run'],
+    ['G then P', 'Go to Local cluster'],
     ['G then S', 'Go to Settings'],
     ['T', 'Switch light / dark theme'],
     ['/', 'Open the command palette'],
@@ -89,7 +89,7 @@ function liveSetAppearanceHTML() {
 function liveSetKeyboardHTML() {
   return `<div class="card">
       <div class="set-row"><div class="sr-main"><div class="sr-title">Command palette</div>
-        <div class="sr-desc">Jump to a task, a cluster or a page, or act on the task you have open. Each entry shows the <span class="mono">ax</span> command that does the same. It opens from any page with ${liveKeysHTML(`${MOD} K`)}</div></div>
+        <div class="sr-desc">Jump to a task or a page, or act on the task you have open. Each entry shows the <span class="mono">ax</span> command that does the same. It opens from any page with ${liveKeysHTML(`${MOD} K`)}</div></div>
         <button type="button" class="btn sm" data-action="live-palette" id="ls-palette">${icon('search', 'sm')}Open command palette</button></div>
       <div class="set-row ls-keys-row"><div class="sr-main"><div class="sr-title">Keyboard shortcuts</div>
         <div class="sr-desc">${state.singleKeys ? 'Single-key shortcuts are on.' : `Single-key shortcuts are off, so only ${MOD} K and Esc work.`} Turn them on or off in <a href="#/settings/accessibility">Accessibility</a>.</div>
@@ -113,9 +113,12 @@ function liveSetAboutHTML() {
     ? `<span class="ls-bad">${esc(LIVE.axError)}</span>`
     : `${info.axBinary ? `${mono(info.axBinary)}<br>` : ''}${muted('ax version')} ${LIVE.axVersion ? esc(LIVE.axVersion) : 'Checking…'}`;
   const kept = (k) => (LIVE.images && LIVE.images[k] ? String(LIVE.images[k]).trim() : '');
-  const images = `AX server: ${env.serverImageEnv ? `${mono(env.serverImageEnv)} ${muted('(from AX_SERVER_IMAGE)')}` : kept('serverImage') ? `${mono(kept('serverImage'))} ${muted('(kept in this browser)')}` : 'None yet'}<br>
-    ${muted('Change them under AX images on')} <a href="#/places">Where agents run</a>`;
-  /* The atespace Studio lists and starts tasks in. Like the cluster, it's Studio's own choice. */
+  const def = (env.setupImages || {});
+  const imgLine = (label, typed, img, from) => `${label}: ${typed ? `${mono(typed)} ${muted('(kept in this browser)')}` : img ? `${mono(img)} ${muted(from === 'env' ? '(from Studio\'s environment)' : '(Studio\'s default)')}` : 'None yet'}`;
+  const images = `${imgLine('AX server', kept('serverImage'), def.serverImage || env.serverImageEnv, def.serverImageFrom || 'env')}<br>
+    ${def.taskImageAllowed ? `${imgLine('Default task image', kept('defaultTaskImage'), def.taskImage, def.taskImageFrom)}<br>` : ''}
+    ${muted('Change them under AX images on')} <a href="#/places">Local cluster</a>`;
+  /* The atespace Studio lists and starts tasks in. It's Studio's own choice. */
   const ates = `<span class="ls-ates"><input class="input mono" id="ls-atespace" value="${esc(LIVE.atespace)}" aria-label="Atespace" autocomplete="off" spellcheck="false" maxlength="63">
       <button type="button" class="btn sm" data-action="live-atespace-use">Use</button>${LIVE.atespace !== 'default' ? '<button type="button" class="pill" data-action="live-atespace-use" data-value="default">default</button>' : ''}</span>
       <span class="ls-ates-why muted" id="ls-atespace-why">Where your tasks are listed and started. AX's own is <span class="mono">default</span>.</span>`;
@@ -123,11 +126,11 @@ function liveSetAboutHTML() {
     ['AX Studio', `${esc(info.studioVersion || 'dev')} ${muted(`· AX API ${esc(info.version || 'v1alpha1')}`)}`],
     ['Address', `${mono(location.origin)} ${muted('· only this computer can connect')}`],
     ['The ax command', ax],
-    ['Cluster in use', LIVE.context ? `${liveWhere(LIVE.context)} <a href="#/places">Change</a>` : 'None yet. <a href="#/places">Where agents run</a>'],
+    ['Cluster', LIVE.context ? `${liveWhere(LIVE.context)} ${mono(LIVE.context)}` : 'None yet. <a href="#/places">Set up AX on this computer</a>'],
     ['Kubeconfig', `${mono(info.kubeconfig || '~/.kube/config')}${env.currentContext ? ` ${muted('· current context')} ${mono(env.currentContext)}` : ''}<br>${muted('Studio reads it and never changes it.')}`],
     ['AX namespace', mono(info.axNamespace || 'ax-system')],
     ['Atespace', ates],
-    ['Images for setup and install', images],
+    ['Images for setup', images],
   ]);
   return `<div class="card card-pad">
       ${rows}
@@ -143,13 +146,11 @@ function liveSetCliHTML() {
     ['See how AX on this computer is doing', 'ax local status'],
     ['Stop it, keeping your tasks', 'ax local stop'],
     ['Remove it', 'ax local delete'],
-    ['Install or upgrade AX on a cluster', 'ax --context <cluster> install'],
     ['List your tasks', c(['get', 'tasks'])],
     ['Read a task and its task file', c(['get', 'task', '<name>'])],
     ['Start a task from its files', `${c(['apply', '-f', 'task.yaml'])} · ${c(['resume', 'task', '<name>'])}`],
-    ['Pause or resume a task', `${c(['suspend', 'task', '<name>'])} · ${c(['resume', 'task', '<name>'])}`],
+    ['Suspend or resume a task', `${c(['suspend', 'task', '<name>'])} · ${c(['resume', 'task', '<name>'])}`],
     ['Open a shell in its sandbox', c(['ssh', '<name>'])],
-    ['Run it on another cluster', c(['promote', 'task', '<name>', '--to', '<cluster>'])],
     ['Delete a task', c(['delete', 'task', '<name>'])],
   ];
   return `<div class="card card-pad" style="margin-top:14px">
@@ -172,7 +173,7 @@ function liveViewSettings(slug) {
   }[sec.slug]();
   const html = `
     <h1 tabindex="-1">Settings</h1>
-    <p class="sub" style="margin-top:6px;max-width:66ch">How AX Studio looks and works on this computer, and what it runs against. Nothing here changes AX or your clusters.</p>
+    <p class="sub" style="margin-top:6px;max-width:66ch">How AX Studio looks and works on this computer, and what it runs against. Nothing here changes AX or your kubeconfig.</p>
     <div class="settings">
       <nav class="settings-nav" id="settings-nav" aria-label="Settings sections">${LIVE_SETTINGS.map((x) => `<a href="#/settings/${x.slug}"${x === sec ? ' aria-current="page"' : ''}>${esc(x.label)}</a>`).join('')}</nav>
       <section class="set-section" id="ls-${sec.slug}" aria-labelledby="${sec.h}"><h2 id="${sec.h}" tabindex="-1">${esc(sec.label)}</h2>

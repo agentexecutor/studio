@@ -2,26 +2,21 @@
 
 # AX Studio
 
-**Run coding agents in secure sandboxes, on your computer or your team's cluster,<br>and review every change before it reaches your code.**
+**Set up AX on your computer, start tasks in their own sandboxes,<br>and see what they do: their state, their logs, and a shell inside.**
 
 [![CI](https://github.com/agentexecutor/studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/agentexecutor/studio/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 [Quick start](#quick-start) · [Tour](#a-quick-tour) · [How it works](#how-it-works) · [For agents](#for-agents-and-scripts) · [Reference](#reference) · [Troubleshooting](#troubleshooting) · [Development](#development)
 
-<a href="#quick-start">
-  <img src="docs/assets/readme-hero.svg" alt="AX Studio in 15 seconds: type a goal on Home and set up the task, pick a template and run it, watch it work in a gVisor sandbox that can reach only the sites you allow, review its changes, and send it to a team cluster with ax promote." width="900">
-</a>
-
 </div>
 
 ## What is AX Studio?
 
-AX Studio is the local web app for [AX](https://github.com/google/ax). It's one small binary that opens in your browser and works with AX wherever it runs: on a Kubernetes cluster that AX sets up on your computer, or on any cluster in your kubeconfig that runs Agent Substrate.
+AX Studio is the local web app for [AX](https://github.com/google/ax), a task orchestrator. It's one small binary that opens in your browser and works with AX on your computer: a Kubernetes cluster in your container runtime that AX sets up for you.
 
-- **Start a task in a minute.** Pick a template (the agent and its model), where it runs, the code it starts with, and describe the goal.
-- **Watch it work, safely.** Each agent runs in its own gVisor sandbox and can only reach the sites you allow. Its API key is added outside the sandbox, so the agent never holds it.
-- **Review before anything lands.** See the diff, open a shell in the sandbox, push a branch, or apply the changes to a folder on your computer.
-- **Move work where it belongs.** Start on your laptop, then run the same task on a team cluster with `ax promote`.
+- **Set up AX in one click.** Studio checks this computer, then runs `ax local start` and shows each step as it happens.
+- **Start tasks.** From a template, your own image, or a task file. Each task runs in its own sandbox and can only reach the sites you allow. An API key is added outside the sandbox, so the task never holds it.
+- **See what they do.** Every task's state, what AX recorded, its logs, and a shell inside its sandbox. Suspend, resume or delete it.
 
 ## Quick start
 
@@ -42,9 +37,7 @@ Both land in `$(go env GOPATH)/bin` (usually `~/go/bin`), which needs to be on y
 ax-studio   # opens http://127.0.0.1:8080
 ```
 
-**3. Choose where agents run.** On **Where agents run**, either:
-- **Set up AX on this computer.** Studio runs `ax local start`, which creates a Kind cluster with Agent Substrate and AX in Docker or Podman. It asks for an AX server image, unless `AX_SERVER_IMAGE` is set.
-- **Use a remote cluster** from your kubeconfig. Check it, then install AX on it (`ax install`).
+**3. Set up AX on this computer.** Studio opens on setup until AX runs here. Click **Set up AX on this computer**: Studio runs `ax local start`, which creates a Kind cluster with Agent Substrate and AX in Docker or Podman. AX doesn't publish release images yet, so Studio deploys images built from the same AX commit as its [`go.mod`](go.mod). To use others, set `AX_SERVER_IMAGE`, or enter them under **AX images**.
 
 **4. Start a task.** Click **New task**, describe the goal, and press **Run task**.
 
@@ -55,35 +48,31 @@ ax-studio   # opens http://127.0.0.1:8080
 > ax studio
 > ```
 
-Stopping Studio (`Ctrl-C`) only stops the web app. Your clusters and their tasks keep running.
+Stopping Studio (`Ctrl-C`) only stops the web app. AX on this computer and its tasks keep running.
 
 ## A quick tour
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
-    <img alt="AX Studio's Home: tasks sorted into Needs you, Running, Paused and Done, each running in its own sandbox." src="docs/screenshots/home.png">
+    <img alt="AX Studio's Home: tasks sorted into Needs you, Running, Suspended and Done, each running in its own sandbox." src="docs/screenshots/home.png">
   </picture>
 </p>
 
-<p align="center"><b>Home.</b> Your tasks, sorted by what needs you: waiting for you, running, paused and done.</p>
+<p align="center"><b>Home.</b> Your tasks, sorted by what needs you: waiting for you, running, suspended and done.</p>
 
 <table>
   <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: templates, where it runs, the workspace and the goal, with a plan card that holds Run task."><br><b>New task.</b> Pick a template, where it runs, the code it starts with, and the goal. The plan on the right says what's left.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/task.png" alt="A task's page: its activity, where it runs, and the sites it can reach."><br><b>A task.</b> What AX recorded, what to do next, where it runs, and the sites it can reach.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: templates, where it runs, the workspace and the goal, with a plan card that holds Run task."><br><b>New task.</b> Pick a template, the code it starts with, and the goal. The plan on the right says what's left.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/task.png" alt="A task's page: its activity, where it runs, and the sites it can reach."><br><b>A task.</b> What AX recorded, its state, where it runs, and the sites it can reach.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/changes.png" alt="Changes: a diff per file with Discard, Push to a branch, and Apply to a folder on this computer."><br><b>Changes.</b> Review what the agent changed and hasn't pushed. Discard a file, push a branch, or apply it to a folder on your computer.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/terminal.png" alt="Terminal: a shell in the task's gVisor sandbox."><br><b>Terminal.</b> A shell in the task's sandbox, through <code>ax ssh</code>. Open more shells as tabs.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/logs.png" alt="Logs: what the task and its sandbox print, live."><br><b>Logs.</b> What the task and its sandbox print, as it happens.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/terminal.png" alt="Terminal: a shell in the task's sandbox."><br><b>Terminal.</b> A shell in the task's sandbox, through <code>ax ssh</code>. Open more shells as tabs.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/logs.png" alt="Logs: what the agent and its sandbox print, live."><br><b>Logs.</b> What the agent and its sandbox print, as it happens.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/all-tasks.png" alt="All tasks: a searchable table with status, template, workspace and resources."><br><b>All tasks.</b> Search and filter every task on the cluster.</td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/where-agents-run.png" alt="Where agents run: this computer's checks and layers, and remote clusters with their checks."><br><b>Where agents run.</b> Set up AX on this computer, or check a cluster and install AX there.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/promote.png" alt="Run on another cluster: the check passed, and what sending the task does."><br><b>Run on another cluster.</b> Studio checks the target first (<code>ax promote --preflight-only</code>), then sends the task.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/all-tasks.png" alt="All tasks: a searchable table with status, template, workspace and resources."><br><b>All tasks.</b> Search and filter every task on this computer.</td>
+    <td width="50%" valign="top"></td>
   </tr>
 </table>
 
@@ -92,20 +81,20 @@ Stopping Studio (`Ctrl-C`) only stops the web app. Your clusters and their tasks
 ```mermaid
 flowchart LR
   you["You, in a browser"] -- "127.0.0.1:8080" --> studio["ax-studio"]
-  studio -- "ax CLI and AX API, naming the cluster" --> server
-  subgraph cluster["Each cluster: Kind on this computer, or GKE and other Kubernetes"]
+  studio -- "ax CLI and AX API, naming ax-local" --> server
+  subgraph cluster["AX on this computer: a Kind cluster in Docker or Podman"]
     server["ax-server"] --> substrate["Agent Substrate"]
-    substrate --> a["gVisor sandbox: task A"]
-    substrate --> b["gVisor sandbox: task B"]
+    substrate --> a["Sandbox: task A"]
+    substrate --> b["Sandbox: task B"]
     a -.-> gateway["Gateway: allowed sites only, keys added here"]
     b -.-> gateway
   end
 ```
 
 - **Local only.** Studio listens on `127.0.0.1` and nowhere else. Nothing is exposed to your network.
-- **Your kubeconfig stays yours.** Studio names the cluster on every request (`--context`). It never switches or edits your contexts.
-- **Sandboxed agents.** Each task runs in its own gVisor sandbox on Agent Substrate. Its outbound traffic goes through a Gateway that allows only the sites the task needs.
-- **Keys stay outside.** An API key you give Studio is stored on the cluster as a Secret. The Gateway adds it to the agent's requests, so it never enters the sandbox.
+- **Your kubeconfig stays yours.** Studio works with AX on this computer only, and names its cluster on every request (`--context ax-local`), whatever your current context is. It never switches or edits your contexts.
+- **Sandboxed tasks.** Each task runs in its own sandbox on Agent Substrate. Its outbound traffic goes through a Gateway that allows only the sites the task needs.
+- **Keys stay outside.** An API key you give Studio is stored on the cluster as a Secret. The Gateway adds it to the task's requests, so it never enters the sandbox.
 - **No lock-in.** Every action shows the `ax` command that does the same, ready to copy.
 
 ## For agents and scripts
@@ -114,15 +103,13 @@ Everything Studio does has an `ax` equivalent, so an agent should drive AX direc
 
 | In Studio | The same with `ax` |
 |:---|:---|
-| Your tasks | `ax --context <cluster> get tasks` |
-| A task's details | `ax --context <cluster> get task <name>` |
-| New task | `ax --context <cluster> apply -f task.yaml`, then `ax --context <cluster> resume task <name>` |
-| Pause, resume, delete | `ax --context <cluster> suspend task <name>` (or `resume`, `delete`) |
-| Terminal | `ax --context <cluster> ssh <name>` |
-| Run on another cluster | `ax --context <from> promote task <name> --to <cluster>` (check first with `--preflight-only`) |
+| Your tasks | `ax --context ax-local get tasks` |
+| A task's details | `ax --context ax-local get task <name>` |
+| New task | `ax --context ax-local apply -f task.yaml`, then `ax --context ax-local resume task <name>` |
+| Suspend, resume, delete | `ax --context ax-local suspend task <name>` (or `resume`, `delete`) |
+| Terminal | `ax --context ax-local ssh <name>` |
 | AX on this computer | `ax local start`, `ax local stop`, `ax local delete`, `ax local status -o json` |
-| AX on a remote cluster | `ax --context <cluster> install`, `ax --context <cluster> uninstall` |
-| Workspaces, Gateways, models | `ax --context <cluster> get workspaces` (or `gateways`, `models`) |
+| Workspaces, Gateways, models | `ax --context ax-local get workspaces` (or `gateways`, `models`) |
 
 <details>
 <summary><strong>Reading what Studio sees</strong> (its local API)</summary>
@@ -131,8 +118,8 @@ Studio's API serves its web page and can change between releases, so treat it as
 
 ```bash
 curl -s -c /tmp/ax-studio.jar http://127.0.0.1:8080/api/bootstrap > /dev/null
-curl -s -b /tmp/ax-studio.jar http://127.0.0.1:8080/api/env/status                  # this computer, clusters, checks, tools
-curl -s -b /tmp/ax-studio.jar "http://127.0.0.1:8080/api/tasks?context=ax-local"    # tasks on a cluster
+curl -s -b /tmp/ax-studio.jar http://127.0.0.1:8080/api/env/status                  # this computer, AX on it, checks, tools
+curl -s -b /tmp/ax-studio.jar "http://127.0.0.1:8080/api/tasks?context=ax-local"    # its tasks
 ```
 
 Requests that change something also need the `X-AX-CSRF-Token` header from the bootstrap response. Use `ax` for those instead.
@@ -147,7 +134,7 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 |:---|:---|:---|
 | `--port` | `8080` | Port to listen on, on `127.0.0.1` |
 | `--addr` | | Full loopback address, such as `127.0.0.1:9090` (overrides `--port`) |
-| `--namespace` | `ax-system` | Namespace AX runs in on your clusters. Short form: `-n` |
+| `--namespace` | `ax-system` | Namespace AX runs in. Short form: `-n` |
 | `--ax-bin` | `~/.ax/bin/ax`, then `PATH` | The `ax` to run |
 | `--no-open` | | Don't open a browser, for SSH sessions and scripts |
 | `--ux-dir` | | Serve the web UI from this folder instead of the built-in copy, for working on `ux/` |
@@ -159,8 +146,9 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 
 | Variable | What it does |
 |:---|:---|
-| `AX_SERVER_IMAGE` | The AX server image that setup on this computer and installs on clusters deploy. You can also enter one in Studio. |
-| `KUBECONFIG` | The kubeconfig files Studio reads clusters from (default `~/.kube/config`). Studio never writes to them. |
+| `AX_SERVER_IMAGE` | The AX server image setup deploys, instead of Studio's own. You can also enter one in Studio. |
+| `AX_DEFAULT_TASK_IMAGE` | The image of a task that doesn't name one, instead of Studio's own |
+| `KUBECONFIG` | The kubeconfig files Studio reads (default `~/.kube/config`). Studio never writes to them. |
 | `AX_HOME` | Where AX keeps its files (default `~/.ax`). Studio looks for its tools in `$AX_HOME/bin`. |
 | `AX_BIN_DIR` | Where to look for `ax`, `kubectl` and `kind`, instead of `~/.ax/bin` |
 | `AX_BIN` | The `ax` to run, when `--ax-bin` isn't given |
@@ -171,8 +159,7 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 | To | You need |
 |:---|:---|
 | Run Studio | Linux or macOS (amd64 or arm64), a modern browser, and `ax` at the version in [`go.mod`](go.mod) or later |
-| Run agents on this computer | Docker, or Podman in rootful mode, on Linux with kernel 6.8 or later; OrbStack, Docker Desktop or Colima on macOS. At least 8 GiB of free disk (15 GiB recommended), and an AX server image (AX's [installation guide](https://github.com/google/ax/blob/main/docs/installation.md#2-build-the-cli-and-images) shows how to build one) |
-| Run agents on a remote cluster | Kubernetes 1.36 or later (GKE 1.37 or later) with `ClusterTrustBundle` and `PodCertificateRequest`, Agent Substrate with a ready gVisor WorkerPool, a default StorageClass, and credentials that can manage `ax-system`. See AX's [remote cluster prerequisites](https://github.com/google/ax/blob/main/docs/local_installer.md#remote-cluster-prerequisites-for-step-5) |
+| Run tasks on this computer | Docker, or Podman in rootful mode, on Linux with kernel 6.8 or later; OrbStack, Docker Desktop or Colima on macOS. At least 8 GiB of free disk (15 GiB recommended) |
 | Install with `go install` | Go 1.27 or later |
 | Build from source | Go 1.27 or later. Node.js to run the UI smoke tests (`make test`) |
 
@@ -185,9 +172,9 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 ## Troubleshooting
 
 <details>
-<summary><strong>"AX on this cluster and AX Studio are different versions"</strong></summary>
+<summary><strong>"AX on ax-local and AX Studio are different versions"</strong></summary>
 
-Studio and the cluster's ax-server were built from different versions of AX's API and can't read each other's data (`invalid wire-format data`). Update the older one. Both `ax` and ax-server should be at the version in [`go.mod`](go.mod) or later.
+Studio and the ax-server on this computer were built from different versions of AX's API and can't read each other's data (`invalid wire-format data`). Update the older one: **Update** on **Local cluster** redeploys ax-server with Studio's images. Both `ax` and ax-server should be at the version in [`go.mod`](go.mod) or later.
 </details>
 
 <details>
@@ -199,7 +186,7 @@ Your `ax` is older than Studio needs: it has no `ax local status -o json`. Insta
 <details>
 <summary><strong>Setting up AX on this computer times out</strong></summary>
 
-This usually means a pod can't pull its image. See which one, and why:
+This usually means a pod can't pull its image. The Output panel on **Local cluster** has what `ax local start` said, including the pod that's stuck and why. To look yourself:
 
 ```bash
 kubectl --context ax-local get pods -A
@@ -228,9 +215,8 @@ ssh -N -L 8080:127.0.0.1:8080 <host-running-studio>
 ## Uninstall
 
 1. **Stop Studio:** press `Ctrl-C` where it runs.
-2. **Remove AX from this computer:** click **Remove** on **Where agents run**, or run `ax local delete`.
-3. **Remove AX from a cluster** (optional): `ax --context <cluster> uninstall`.
-4. **Remove the binaries and caches:** everything `install.sh` and `ax` put on your computer is in `~/.ax`. That includes `ax`, `ax-studio`, tunnel state, short-lived `ax ssh` certificates, and any `kind` or `kubectl` that `ax` downloaded.
+2. **Remove AX from this computer:** click **Remove** on **Local cluster**, or run `ax local delete`.
+3. **Remove the binaries and caches:** everything `install.sh` and `ax` put on your computer is in `~/.ax`. That includes `ax`, `ax-studio`, tunnel state, short-lived `ax ssh` certificates, and any `kind` or `kubectl` that `ax` downloaded.
    ```bash
    rm -rf ~/.ax
    ```
@@ -245,7 +231,6 @@ ssh -N -L 8080:127.0.0.1:8080 <host-running-studio>
 | [`internal/kube`](internal/kube) | Finding and running `ax`, `kubectl` and `kind` |
 | [`ux`](ux) | The web UI: plain HTML, CSS and JavaScript with no build step. See [`ux/README.md`](ux/README.md) |
 | [`docs/screenshots`](docs/screenshots) | The screenshots in this README |
-| [`docs/assets`](docs/assets) | The animated hero at the top, and `readme-hero.py`, which makes it from five screenshots |
 
 ```bash
 git clone https://github.com/agentexecutor/studio && cd studio

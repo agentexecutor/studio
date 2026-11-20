@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -176,47 +175,4 @@ func KubeconfigPaths() []string {
 		return []string{filepath.Join(home, ".kube", "config")}
 	}
 	return nil
-}
-
-// ExecInTaskSandbox executes a non-interactive command inside a debug-enabled
-// task sandbox by invoking `ax ssh <task> -- ...` with positional arguments only
-// (zero shell string interpolation).
-func ExecInTaskSandbox(ctx context.Context, r Runner, axBinary, atespace, taskName, kubeContext, axNamespace string, command []string, cwd string) (string, string, int, error) {
-	if r == nil {
-		r = OSRunner{}
-	}
-	if err := ValidateName(taskName); err != nil {
-		return "", "", 1, fmt.Errorf("invalid task name: %w", err)
-	}
-	if len(command) == 0 {
-		return "", "", 1, errors.New("empty sandbox command")
-	}
-	if strings.HasPrefix(kubeContext, "-") || strings.HasPrefix(atespace, "-") || strings.HasPrefix(axNamespace, "-") {
-		return "", "", 1, errors.New("invalid context or namespace flag")
-	}
-	if axBinary == "" {
-		axBinary = ResolveAXBinary(r)
-	}
-
-	var args []string
-	if kubeContext != "" {
-		args = append(args, "--context", kubeContext)
-	}
-	if axNamespace != "" {
-		args = append(args, "-n", axNamespace)
-	}
-	if atespace != "" {
-		args = append(args, "-a", atespace)
-	}
-	args = append(args, "ssh", taskName, "--")
-	if strings.TrimSpace(cwd) != "" {
-		args = append(args, "/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "sh", cwd)
-	}
-	args = append(args, command...)
-
-	res, err := r.Run(ctx, Spec{
-		Name: axBinary,
-		Args: args,
-	})
-	return res.Stdout, res.Stderr, res.ExitCode, err
 }

@@ -140,22 +140,16 @@ function studioOn(type, cb) {
 
 /* ---------- The calls ---------- */
 const studioApi = {
-  /** This computer and the clusters in your kubeconfig: checks, AX on this computer, contexts, and any setup in progress. */
-  /** This computer, its tools and your kubeconfig. fresh asks for the tools' versions again. */
+  /** This computer: its checks and tools, AX on it, the images setup uses, and any setup in progress. fresh asks for
+      the tools' versions again. */
   env: (fresh) => studioGet('/api/env/status' + (fresh ? '?fresh=1' : '')),
-  /** A read-only look at a cluster: what it offers, and whether Agent Substrate and AX are on it. */
-  envCheck: (context) => studioGet('/api/env/check' + studioQuery({ context })),
-  /** Removes AX from a cluster (ax uninstall). The database's volume is kept. Progress comes as events. */
-  remoteUninstall: (context) => studioPost('/api/env/uninstall', { context }),
-  /** Interrupts the setup, stop, remove, install or uninstall that runs. */
+  /** Interrupts the setup, start, update, stop or remove that runs. */
   envCancel: () => studioPost('/api/env/cancel', {}),
   /** Sets up or starts AX on this computer (ax local start). Progress comes as "envOp" and "streamLine" events. */
   localUp: (images, purpose) => studioPost('/api/env/local/up', Object.assign({ name: 'ax-local', workers: 1, purpose: purpose || '' }, images)),
   localStop: () => studioPost('/api/env/local/stop', { name: 'ax-local' }),
   localDelete: () => studioPost('/api/env/local/delete', { name: 'ax-local' }),
-  /** Installs or upgrades AX on a cluster that already runs Agent Substrate (ax install). Progress comes as events too. */
-  remoteInstall: (context, images) => studioPost('/api/env/install', Object.assign({ context }, images)),
-  /** A plain-text report of this computer and a cluster (its AX pods and recent ax-server logs), secrets removed. */
+  /** A plain-text report of this computer and its cluster (its AX pods and recent ax-server logs), secrets removed. */
   diagnostics: (context) => studioGet('/api/env/diagnostics' + studioQuery({ context })),
 
   /** Tasks, read from the AX server as data. */
@@ -164,7 +158,6 @@ const studioApi = {
   gateway: (context, atespace, name) => studioGet('/api/gateways/get' + studioQuery({ context, atespace, name })),
   /** verb is suspend, resume or delete. */
   taskAction: (verb, context, atespace, name) => studioPost(`/api/tasks/${verb}`, { context, atespace, name }),
-  discardFile: (context, atespace, task, path) => studioPost('/api/tasks/discard-file', { context, atespace, task, path }),
 
   /** Interactive ax ssh terminal sessions. Output arrives as "sessionData" and "sessionExit" events. */
   sessionStart: (id, args) => studioPost('/api/sessions/start', { id, args }),

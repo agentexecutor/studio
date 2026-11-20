@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-// Smoke test · live mode (api.js, live.js, live-env.js, live-new.js, live-changes.js).
+// Smoke test · live mode (api.js, live.js, live-env.js, live-new.js).
 //
 // Loads AX Studio in a stubbed DOM with a stand-in for the Studio server: fetch answers the way ax-studio's /api
 // does, and a stand-in EventSource delivers the events it pushes. Checks that the pages show what the server
-// returned, that every request names the cluster instead of changing the kubeconfig, that what Studio sends to AX
-// (task files, ax promote arguments) is what AX reads, and that pages with no real source stay hidden.
+// returned, that every request names the local cluster instead of changing the kubeconfig, that what Studio sends to
+// AX (task files) is what AX reads, and that pages with no real source stay hidden.
 //
 // Usage: node ux/tests/smoke_live.cjs [app folder]
 const fs = require('fs');
@@ -49,14 +49,16 @@ const TOOLS = () => [
   { name: 'kubectl', version: 'v1.36.0', status: 'ok', detail: '/opt/homebrew/bin/kubectl' },
   { name: 'kind', version: 'v0.31.0', status: 'warn', detail: 'The kind at /opt/homebrew/bin/kind is older than v0.32.0. ax downloads a newer one into ~/.ax/bin when you set up AX on this computer.' },
 ];
+/* The images setup uses unless you choose others: Studio's own, pinned to the AX in its go.mod. */
+const SETUP_IMAGES = () => ({ serverImage: 'ghcr.io/acme/ax/ax-server:v1@sha256:' + 'b438'.repeat(16), serverImageFrom: 'studio', taskImage: 'ghcr.io/acme/ax/ax-task-runner:v1@sha256:' + '0ec6'.repeat(16), taskImageFrom: 'studio', taskImageAllowed: true });
 const envRunning = () => ({
   os: 'darwin', arch: 'arm64', canStartLocal: true, preflight: CHECKS_OK.map((c) => Object.assign({}, c)),
   local: { name: 'ax-local', state: 'Running', kubeContext: 'ax-local', substrateStatus: 'ate-api-server (1/1 available)', axStatus: 'ax-server (1/1 available in ax-system)', access: 'ok' },
-  contexts: CONTEXTS.map((c) => Object.assign({}, c)), currentContext: 'ax-local', tools: TOOLS(), axFlags: { runnerVolumeImage: false },
+  contexts: CONTEXTS.map((c) => Object.assign({}, c)), currentContext: 'ax-local', tools: TOOLS(), axFlags: { runnerVolumeImage: false, defaultTaskImage: true }, setupImages: SETUP_IMAGES(),
 });
 const envFresh = () => ({
   os: 'darwin', arch: 'arm64', canStartLocal: true, preflight: CHECKS_OK.map((c) => Object.assign({}, c)),
-  local: { name: 'ax-local', state: 'NotFound', kubeContext: 'N/A', substrateStatus: '', axStatus: '' }, contexts: [], currentContext: '', tools: TOOLS(), axFlags: { runnerVolumeImage: false },
+  local: { name: 'ax-local', state: 'NotFound', kubeContext: 'N/A', substrateStatus: '', axStatus: '' }, contexts: [], currentContext: '', tools: TOOLS(), axFlags: { runnerVolumeImage: false, defaultTaskImage: true }, setupImages: SETUP_IMAGES(),
 });
 const DIGEST = 'sha256:' + 'f00d'.repeat(16);
 /* What a read-only check of a cluster finds: gke-team-dev runs Agent Substrate (AX once it's installed there), and
@@ -369,13 +371,12 @@ function makeContext(B, env) {
     ctx.window.AX_STUDIO = null;                        // what the env.js in this folder sets
   }
   vm.createContext(ctx);
-  const files = ['core.js', 'mascot.js', 'viz.js', 'failures.js', 'views.js', 'task.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-changes.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
+  const files = ['core.js', 'mascot.js', 'viz.js', 'failures.js', 'views.js', 'task.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
   liveCmd, liveViewHome, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
-  livePromoteArgs, livePromoteLine, livePromoteNote, liveOpenPromote, liveChangesInnerHTML, liveLoadChanges, liveOpenPush, liveOpenApply, liveOpenDiscard, livePatchLines, liveChangesWhy,
   liveTermOpen, liveTermSend, liveTermClose, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
-  liveViewSettings, liveShortcutRows, liveOpenInstall, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveCtxSwitchHTML, liveLinkHere,
+  liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
   viewHome, studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
 }
@@ -417,7 +418,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   const { api } = p;
   const L = api.LIVE;
   await check("AX's states read in the UI's words, and an unknown state says so", () => {
-    const want = { Working: 'Running', Queued: 'Starting', Suspending: 'Pausing', Suspended: 'Paused', Failed: 'Failed', RequiresAction: 'Waiting for you', Completed: 'Done', Cancelled: 'Stopped' };
+    const want = { Working: 'Running', Queued: 'Starting', Suspending: 'Suspending', Suspended: 'Suspended', Failed: 'Failed', RequiresAction: 'Waiting for you', Completed: 'Done', Cancelled: 'Stopped' };
     for (const k of Object.keys(want)) if (api.liveState(k).label !== want[k]) throw new Error(`${k} should read ${want[k]}, got ${api.liveState(k).label}`);
     if (api.liveState('Hibernating').label !== 'Unknown') throw new Error('an unknown state');
     if (api.liveStateName('TASK_STATE_REQUIRES_ACTION') !== 'RequiresAction' || api.liveStateName('TASK_STATE_WORKING') !== 'Working' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
@@ -458,11 +459,13 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     /* The name comes from the server (the account's full name); Home uses its first word, as the prototype does. */
     if (!/<h1 id="live-home-h1" tabindex="-1">Good (morning|afternoon|evening), <em>Ada<\/em>\.<\/h1>/.test(v.html)) throw new Error('greeting: ' + (v.html.match(/<h1[^>]*>.*?<\/h1>/) || [])[0]);
     need(v.html, ['Start with what needs you below.', '<h2 class="h-display-sm">Your tasks</h2>', '<div class="t-title">Upgrade to Node 22.</div>', '<span class="mono">upgrade-node-22</span>',
-      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Paused</span>', '</svg>Done</span>', '<span>Turn 1 of 2</span>', '<span>Turn 2 of 2</span>', 'On this computer', 'Change cluster', 'ax --context ax-local get tasks',
+      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', '<span>Turn 1 of 2</span>', '<span>Turn 2 of 2</span>', 'On this computer', 'ax --context ax-local get tasks',
       /* One section per tile, and each tile with tasks jumps to its section. */
-      'id="live-sec-needs">Needs you</h3>', 'id="live-sec-running">Running</h3>', 'id="live-sec-paused">Paused</h3>', 'id="live-sec-done">Done</h3>',
+      'id="live-sec-needs">Needs you</h3>', 'id="live-sec-running">Running</h3>', 'id="live-sec-paused">Suspended</h3>', 'id="live-sec-done">Done</h3>',
       'data-action="jump" data-target="live-sec-needs"', 'data-action="jump" data-target="live-sec-done"']);
     if (!/id="live-row-signer-b2c3"[^>]*style="padding-left:34px"/.test(v.html)) throw new Error('a later turn sits under the first');
+    /* Studio works with AX on this computer only: no cluster to change. */
+    never(v.html, ['Change cluster']);
     /* The tiles carry the counts, so neither the lede nor Axel repeats them. Axel stays quiet until there is news. */
     never(v.html, ['6 tasks:', 'agents are running', 'needs a look below', 'This week']);
     if (!/id="axel-speech" aria-live="off" hidden>/.test(v.html)) throw new Error("Axel's bubble is hidden");
@@ -489,13 +492,14 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   await go(p, '#/task/fix-flaky-tests');
   await check('a task page shows what AX has: goal, state, image, workspace, network, limits, debug, session, labels and the task file', async () => {
     const h = main(p);
-    need(h, ['fix-flaky-tests', 'Fix the flaky tests.\nExplain the cause.', '</svg>Running</span>', 'started the agent in its sandbox', 'Task is running and its workspace is ready', 'title="gcr.io/p/claude-code@sha256:abc"', 'itsdangerous',
-      'Gateway <span class="mono">review-bot-gw</span>', '2 CPU · 4Gi memory', 's-fix', 'team=platform', 'On: while it runs, Changes and Terminal can look inside its sandbox',
+    need(h, ['fix-flaky-tests', 'Fix the flaky tests.\nExplain the cause.', '</svg>Running</span>', 'started the task in its sandbox', 'Task is running and its workspace is ready', 'title="gcr.io/p/claude-code@sha256:abc"', 'itsdangerous',
+      'Gateway <span class="mono">review-bot-gw</span>', '2 CPU · 4Gi memory', 's-fix', 'team=platform', 'On: while it runs, Terminal can open a shell in its sandbox',
       'data-action="copy" data-text="fix-flaky-tests" aria-label="Copy the task name"',
-      'data-action="live-suspend"', 'href="#/new?from=fix-flaky-tests"', 'data-action="live-promote"', 'data-action="live-delete"', 'These are the steps AX records. What the agent printed is in <a href="#/task/fix-flaky-tests/logs">Logs</a>.',
-      /* The Next card is where the page says what to do: look in Changes, or open the Terminal. */
-      '<a href="#/task/fix-flaky-tests/changes">Changes</a>', '<a href="#/task/fix-flaky-tests/terminal">Terminal</a>']);
-    never(h, ['data-action="live-resume"']);
+      'data-action="live-suspend"', 'data-action="live-delete"', 'These are the steps AX records. What the task printed is in <a href="#/task/fix-flaky-tests/logs">Logs</a>.',
+      /* The State card says where to look: the Terminal, or Logs. */
+      '<a href="#/task/fix-flaky-tests/terminal">Terminal</a>']);
+    /* No follow-ups, no other clusters, and no Changes: AX runs tasks, it doesn't review what they changed. */
+    never(h, ['data-action="live-resume"', 'href="#/new?from=fix-flaky-tests"', 'data-action="live-promote"', 'Run on another cluster', 'Send a follow-up', '/changes"', 'gVisor']);
     /* Said once: the state is the header's chip, each check is a step in the timeline, and the name is in the breadcrumb
        and Details (not in the header too). */
     never(h, ['(AX: Working)', 'Ready: True (TaskRunning)', 'title="Task name"', 'so look in']);
@@ -511,22 +515,18 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
   await check('a task page has the prototype frame: tabs for what is real, one panel, and the inspector with the only Pause', async () => {
     const h = main(p);
-    need(h, ['role="tablist" aria-label="Task views"', 'id="tab-activity" href="#/task/fix-flaky-tests" aria-selected="true"', 'id="tab-changes" href="#/task/fix-flaky-tests/changes" aria-selected="false"',
-      'id="tab-terminal" href="#/task/fix-flaky-tests/terminal"', 'id="tab-file" href="#/task/fix-flaky-tests/file"', 'role="tabpanel" class="task-panel" id="panel-activity"',
-      '<h1 tabindex="-1" id="task-title">Fix the flaky tests.</h1>', 'Where it runs', 'What it can reach', 'id="next-step"', 'Run on another cluster…']);
-    never(h, ['id="tab-log"', 'Export trajectory']);
-    /* Pause lives only in the Next step card; the header keeps the task-level actions. */
-    if ((h.match(/data-action="live-suspend"/g) || []).length !== 1) throw new Error('one Pause');
+    need(h, ['role="tablist" aria-label="Task views"', 'id="tab-activity" href="#/task/fix-flaky-tests" aria-selected="true"', 'id="tab-logs" href="#/task/fix-flaky-tests/logs"',
+      'id="tab-terminal" href="#/task/fix-flaky-tests/terminal"', 'id="tab-file" href="#/task/fix-flaky-tests/file" aria-selected="false" tabindex="-1">YAML</a>', 'role="tabpanel" class="task-panel" id="panel-activity"',
+      '<h1 tabindex="-1" id="task-title">Fix the flaky tests.</h1>', 'Where it runs', 'What it can reach', 'id="next-step"', '>State</h2>', 'Running in its sandbox']);
+    never(h, ['id="tab-log"', 'Export trajectory', 'id="tab-changes"', 'Task file</a>']);
+    /* Suspend and Resume are in the header, once, with Delete. */
+    if ((h.match(/data-action="live-suspend"/g) || []).length !== 1) throw new Error('one Suspend');
     const head = h.slice(h.indexOf('id="task-head"'), h.indexOf('class="task-grid"'));
-    never(head, ['live-suspend', 'live-promote']);
-    need(head, ['Send a follow-up', 'Delete…']);
-    /* Activity: the goal you set, then what AX recorded, then the agent at work. */
-    need(h, ['<span class="who">You</span><span class="what">set the goal</span>', 'started the agent in its sandbox', 'Task is running and its workspace is ready', 'is working']);
-    /* Once Studio has read the sandbox, the Changes tab says how many files changed. */
-    await settle();
-    api.render();
-    need(main(p), ['id="count-changes" >2</span>']);
-    /* A task without debug access has no Changes or Terminal tab. */
+    need(head, ['data-action="live-suspend"', 'Suspend</button>', 'title="ax --context ax-local suspend task fix-flaky-tests"', 'Delete…']);
+    never(head, ['live-promote', 'Send a follow-up']);
+    /* Activity: the goal you set, then what AX recorded, then that it runs. */
+    need(h, ['<span class="who">You</span><span class="what">set the goal</span>', 'started the task in its sandbox', 'Task is running and its workspace is ready', 'Running ·']);
+    /* A task without debug access has no Terminal tab. */
     await go(p, '#/task/readme-polish');
     need(main(p), ['id="tab-activity"', 'id="tab-file"']);
     never(main(p), ['id="tab-changes"', 'id="tab-terminal"']);
@@ -538,9 +538,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const sent = B.posts.find((x) => x.path === '/api/tasks/suspend');
     if (!sent || JSON.stringify(sent.body) !== '{"context":"ax-local","atespace":"default","name":"fix-flaky-tests"}') throw new Error(JSON.stringify(sent));
     if (L.tasks.find((t) => t.name === 'fix-flaky-tests').state !== 'Suspended') throw new Error('state should be Suspended');
-    need(main(p), ['</svg>Paused</span>', 'data-action="live-resume"']);
+    need(main(p), ['</svg>Suspended</span>', 'data-action="live-resume"', 'Resume</button>']);
     never(main(p), ['data-action="live-suspend"']);
-    need(toasts(p), ['Paused <span class="mono">fix-flaky-tests</span>']);
+    need(toasts(p), ['Suspended <span class="mono">fix-flaky-tests</span>']);
   });
   await check('resume asks the server to resume it', async () => {
     api.ACTIONS['live-resume']({ dataset: { task: 'fix-flaky-tests' } });
@@ -553,23 +553,16 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(toasts(p), ["Couldn't resume <span class=\"mono\">upgrade-node-22</span>: no free workers available"]);
     if (L.tasks.find((t) => t.name === 'upgrade-node-22').state !== 'Failed') throw new Error('state unchanged');
   });
-  await check('a failed task says why, offers no pause or resume, and Try again starts a new turn from the same goal', async () => {
+  await check('a failed task says why, and offers no suspend, resume or follow-up', async () => {
     await go(p, '#/task/upgrade-node-22');
     const h = main(p);
-    need(h, ['Upgrade to Node 22.', 'sandbox exited: out of memory (limit 512Mi)', '</svg>Failed</span>', 'data-action="live-delete"',
-      'id="live-try-again" href="#/new?from=upgrade-node-22&amp;again=1"', 'Pick a larger size under More options when you try again.']);
-    never(h, ['data-action="live-suspend"', 'data-action="live-resume"']);
+    need(h, ['Upgrade to Node 22.', 'sandbox exited: out of memory (limit 512Mi)', '</svg>Failed</span>', 'data-action="live-delete"', 'Stopped with an error',
+      'Give it more memory when you start it again.']);
+    never(h, ['data-action="live-suspend"', 'data-action="live-resume"', 'live-try-again', 'again=1']);
     /* AX's default image is named in the header, so Where it runs doesn't name it again. */
     never(h.slice(h.indexOf('id="live-where-card"')), ['<dt>Image</dt>']);
     /* The browser tab says how many tasks need you. */
     if (!/^\(1\) /.test(p.ctx.document.title)) throw new Error('tab title: ' + p.ctx.document.title);
-    await go(p, '#/new?from=upgrade-node-22&again=1');
-    const n = main(p);
-    need(n, ['<h1 tabindex="-1">Try again</h1>', 'Change what made it fail first', 'Upgrade to Node 22.</textarea>', '>Try again<span class="kbd-hint">']);
-    /* The failed turn had no workspace, so the new one starts in an empty /workspace too. */
-    if (L.draft.source !== 'empty' || L.draft.goal !== 'Upgrade to Node 22.' || !L.draft.again) throw new Error(JSON.stringify([L.draft.source, L.draft.goal, L.draft.again]));
-    L.draft = null;
-    await go(p, '#/task/upgrade-node-22');
     return { html: h };
   });
   await check('a finished task shows its result, exit code and output', async () => {
@@ -578,17 +571,16 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(h, ['id="live-result"', '<dt>Result</dt><dd>Succeeded</dd>', '<dt>Exit code</dt><dd><span class="mono">0</span></dd>', 'Wrote CHANGES.rst for 2.3.\nPushed branch ax/changelog-draft.']);
     return { html: h };
   });
-  await check('a task with no gateway and no debug access says so, and has no Changes section', async () => {
+  await check('a task with no gateway and no debug access says so', async () => {
     await go(p, '#/task/readme-polish');
     const h = main(p);
-    need(h, ["It has no Gateway, so it can't reach the network.", 'What it can reach · Nothing', 'Off, so there is no shell into the sandbox', 'This task was started without debug access, so its sandbox stays closed. What it printed is in <a href="#/task/readme-polish/logs">Logs</a>',
-      /* Pausing is a step in its own words, not AX's ("Actor is suspended"). */
-      'paused the task']);
+    need(h, ["It has no Gateway, so it can't reach the network.", 'What it can reach · Nothing', 'Off, so there is no shell into the sandbox', 'It was started without debug access, so it has no shell.',
+      /* Suspending is a step in its own words, not AX's ("Actor is suspended"). */
+      'suspended the task']);
     /* The timeline says it in its own words; AX's raw conditions are only in the table under Details. */
     never(h.slice(h.indexOf('id="live-timeline"'), h.indexOf('class="live-details"')), ['Actor is suspended', "says it isn't ready"]);
     need(h, ["AX's conditions, as recorded (1)", '<td class="mono">Suspended</td><td>Actor is suspended</td>']);
-    never(h, ['id="live-changes"']);
-    if (B.calls.some((c) => /\/api\/tasks\/changes.*readme-polish/.test(c))) throw new Error('a closed sandbox is not asked for its changes');
+    if (B.calls.some((c) => /\/api\/tasks\/changes/.test(c))) throw new Error('Studio never asks for what a task changed');
   });
   await check('delete asks first, with the command that does the same, then asks the server', async () => {
     api.ACTIONS['live-delete']({ dataset: { task: 'readme-polish' } });
@@ -600,7 +592,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
   await check("a task that isn't on this cluster says so instead of an empty page", async () => {
     await go(p, '#/task/long-gone');
-    need(main(p), ["long-gone isn't on this cluster", 'href="#/places"']);
+    need(main(p), ["long-gone isn't on this cluster", "it's in another atespace", 'href="#/"']);
+    never(main(p), ['Change cluster']);
   });
 
   // ---------- Logs, for every task ----------
@@ -609,24 +602,24 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     api.render();
     if (!B.calls.includes('GET /api/tasks/logs?context=ax-local&atespace=default&name=fix-flaky-tests')) throw new Error('logs are read for that task');
-    need(main(p), ['id="tab-logs" href="#/task/fix-flaky-tests/logs"', 'id="dot-logs" hidden', 'Working in its sandbox', 'is working']);
-    never(main(p), ['The agent logged an error', 'stopped with an error']);
+    need(main(p), ['id="tab-logs" href="#/task/fix-flaky-tests/logs"', 'id="dot-logs" hidden', 'Running in its sandbox', 'Running ·']);
+    never(main(p), ['It logged an error', 'stopped with an error']);
   });
   await check("when the agent's command exits with an error while AX still says running, Activity and the Next card say so", async () => {
     await go(p, '#/task/signer-b2c3');
     await settle();
     api.render();
     const h = main(p);
-    need(h, ['id="dot-logs" >', ', has an error', 'Your next step', 'The agent stopped with an error', 'Its command exited at', 'though AX still shows the task as running',
+    need(h, ['id="dot-logs" >', ', has an error', 'class="ns-dot"', 'Its command stopped with an error', 'Its command exited at', 'though AX still shows the task as running',
       /* The runner only says the command exited; the agent's own line says why, and its end (the cause) is what shows. */
       'Its error: <span class="mono">…tls: failed to verify certificate: x509: certificate signed by unknown authority</span>', '<a href="#/task/signer-b2c3/logs">Logs</a>',
-      'stopped with an error (exit code 1)', 'See what it printed in Logs', 'id="live-try-again" href="#/new?from=signer-b2c3&amp;again=1"', 'data-action="live-suspend"']);
-    never(h, ['err=&quot;turn 1', 'is working ·']);
+      'stopped with an error (exit code 1)', 'See what it printed in Logs', 'data-action="live-suspend"']);
+    never(h, ['err=&quot;turn 1', '<div class="working"', 'live-try-again']);
   });
   await check('Logs shows what the sandbox printed: the agent plainly, AX and the worker quieter, errors marked, sandbox start-up off', async () => {
     await go(p, '#/task/signer-b2c3/logs');
     let h = main(p);
-    need(h, ['role="tabpanel" class="task-panel" id="panel-logs"', 'What the agent and its sandbox print, as it happens.', 'Live</span>', '4 lines', 'From the Agent Substrate worker',
+    need(h, ['role="tabpanel" class="task-panel" id="panel-logs"', 'What the task and its sandbox print, as it happens.', 'Live</span>', '4 lines', 'From the Agent Substrate worker',
       'Sandbox started', '<span class="ll ll-runner"><span class="ll-t">', 'started task command pid=9',
       '<span class="ll ll-agent ll-err">', 'ERROR agent failed err=', 'class="ll ll-runner ll-err"', 'task command exited with error',
       'kubectl --context ax-local -n ate-workers logs -l ate.dev/worker-pool']);
@@ -656,7 +649,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
   await check("a task with nothing logged says so, and logs that can't be read say why", async () => {
     await go(p, '#/task/changelog-draft/logs');
-    need(main(p), ['What the agent and its sandbox printed.', 'Nothing from this task in the last 24 hours.']);
+    need(main(p), ['What the task and its sandbox printed.', 'Nothing from this task in the last 24 hours.']);
     never(main(p), ['Live</span>']);
     B.logsError = 'kubectl isn\'t installed, so Studio can\'t read the logs.';
     await api.liveLoadLogs('changelog-draft', true);
@@ -732,86 +725,17 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(main(p), ["couldn't set up the workspace", 'setup step 2 exited 1: pip install: no matching distribution', 'ax --context ax-local describe workspace ws-broken', 'env-bad', 'title="Workspace setup failed"']);
   });
 
-  // ---------- Changes, for a task with debug access ----------
-  await go(p, '#/task/fix-flaky-tests/changes');
-  await check('Changes lists what the agent changed in its sandbox, each file with its diff', async () => {
-    if (!B.calls.includes('GET /api/tasks/changes?context=ax-local&atespace=default&task=fix-flaky-tests')) throw new Error('changes are read for that task: ' + B.calls.slice(-4).join(' | '));
-    api.render();
-    let h = main(p);
-    need(h, ['id="live-changes"', '2 files changed on <span class="mono">main</span>', '<span class="lf-status">Changed</span><span class="lf-path">src/signer.py</span>', '<span class="lf-status">New</span><span class="lf-path">notes/why.md</span>',
-      '<span class="a">+4</span><span class="d">−1</span>', 'data-action="live-changes-push"', 'data-action="live-changes-apply"']);
-    never(h, ['class="diff"']); // a diff is drawn when its file is opened
-    L.changes['fix-flaky-tests'].open['src/signer.py'] = true;
-    h = api.liveChangesInnerHTML('fix-flaky-tests');
-    need(h, ['<table class="diff"', '<tr class="hunk">', '<tr class="del">', '<tr class="add">', 'clock = self.clock']);
-    never(h, ['diff --git', 'index 1111111']);
-    return { html: h };
-  });
-  await check('a patch becomes diff lines: no file header, no "No newline" marker', () => {
-    const lines = api.livePatchLines(PATCH_NOTE);
-    if (lines.join('|') !== '@@ -0,0 +1,2 @@|+# Why it was flaky|+The clock was read twice.') throw new Error(lines.join('|'));
-    if (api.livePatchLines('').length || api.livePatchLines(null).length) throw new Error('no patch, no lines');
-  });
-  await check("when the sandbox can't be read, Changes says why in plain words", () => {
-    const why = api.liveChangesWhy;
-    if (!/paused/.test(why('Task sandbox is currently Suspended. Resume the task to inspect or apply working tree changes.'))) throw new Error('paused');
-    if (!/no Git repo/.test(why('No Git repository found inside /workspace.'))) throw new Error('no repo');
-    if (!/hasn't started/.test(why('Task has no active sandbox actor yet.'))) throw new Error('not started');
-    if (why('Something new went wrong.') !== 'Something new went wrong.') throw new Error("the server's own words are the fallback");
-  });
-  await check('Push to a branch sends the branch and the message, says where it went, and the list empties', async () => {
-    api.ACTIONS['live-changes-push']({ dataset: { task: 'fix-flaky-tests' } });
-    const d = dialog(p);
-    const body = d.querySelector('#lpb-body');
-    need(body.innerHTML, ['value="ax/fix-flaky-tests"', 'value="Fix the flaky tests."', 'Nothing on this computer changes']);
-    await fire(body.querySelector('#lpb-branch'), 'input', { target: { value: 'bad..name' } });
-    await fire(d.querySelector('#lpb-go'), 'click');
-    need(dialog(p).querySelector('#lpb-body').innerHTML, ['invalid git branch name']);
-    await fire(dialog(p).querySelector('#lpb-body').querySelector('#lpb-branch'), 'input', { target: { value: 'ax/fix-flaky-tests' } });
-    await fire(dialog(p).querySelector('#lpb-go'), 'click');
-    const sent = B.posts.filter((x) => x.path === '/api/tasks/push-branch').pop();
-    if (JSON.stringify(sent.body) !== '{"context":"ax-local","atespace":"default","task":"fix-flaky-tests","branch":"ax/fix-flaky-tests","commitMessage":"Fix the flaky tests."}') throw new Error(JSON.stringify(sent.body));
-    const h = api.liveChangesInnerHTML('fix-flaky-tests');
-    need(h, ['Pushed to <span class="mono">ax/fix-flaky-tests</span> at <span class="mono">abc1234</span>', 'Nothing to push: the files match the last commit on <span class="mono">ax/fix-flaky-tests</span>']);
-    never(h, ['data-action="live-changes-push"']);
-    need(toasts(p), ['Pushed <span class="mono">ax/fix-flaky-tests</span>']);
-  });
-  await check("Apply to a folder: when the changes don't fit, nothing is changed and the dialog says so", async () => {
-    B.applyConflict = true;
-    api.ACTIONS['live-changes-apply']({ dataset: { task: 'fix-flaky-tests' } });
-    await fire(dialog(p).querySelector('#lap-go'), 'click');
-    need(dialog(p).querySelector('#lap-body').innerHTML, ['Give the folder']);
-    await fire(dialog(p).querySelector('#lap-body').querySelector('#lap-path'), 'input', { target: { value: '~/code/project' } });
-    await fire(dialog(p).querySelector('#lap-go'), 'click');
-    need(dialog(p).querySelector('#lap-body').innerHTML, ['fit that folder as it is now, so nothing was changed. Push them to a branch instead.', 'patch does not apply']);
-    B.applyConflict = false;
-    await fire(dialog(p).querySelector('#lap-go'), 'click');
-    const sent = B.posts.filter((x) => x.path === '/api/tasks/apply-local').pop();
-    if (sent.body.localRepoPath !== '~/code/project' || sent.body.task !== 'fix-flaky-tests') throw new Error(JSON.stringify(sent.body));
-    need(api.liveChangesInnerHTML('fix-flaky-tests'), ['Applied 2 files to <span class="mono">/Users/me/code/project</span>. Nothing was committed.']);
-    if (p.store['ax.live.applyPath'] !== '~/code/project') throw new Error('the folder is remembered for next time');
-  });
-  await check('a paused task says its sandbox is closed, and the changes are read again once it runs', async () => {
-    await api.liveTaskAction('fix-flaky-tests', 'suspend');
-    await settle();
-    need(api.liveChangesInnerHTML('fix-flaky-tests'), ['The task is paused, so its sandbox is closed. Resume it to see its changes.']);
-    await api.liveTaskAction('fix-flaky-tests', 'resume');
-    await settle();
-    need(api.liveChangesInnerHTML('fix-flaky-tests'), ['Nothing to push']);
-  });
-
   // ---------- New task ----------
-  await check('New task opened before Studio knows the clusters picks this computer as soon as they arrive, then stays put', async () => {
-    const keep = { local: L.local, contexts: L.contexts };
-    L.local = null; L.contexts = []; L.draft = null;
+  await check('New task runs on AX on this computer: while it is stopped, New task is setup; once it runs, the form', async () => {
+    const keep = L.local;
+    L.local = Object.assign({}, keep, { state: 'Stopped' }); L.draft = null;
     await go(p, '#/new');
-    need(main(p), ['Set up AX on this computer']);
-    if (L.draft.where) throw new Error('nothing to pick yet: ' + L.draft.where);
-    Object.assign(L, keep);
-    api.render({ keepScroll: true, background: true });
-    await settle();
+    need(main(p), ['AX on this computer is stopped', 'data-verb="start"']);
+    never(main(p), ['id="live-new-run"']);
+    L.local = keep;
+    await go(p, '#/new');
     if (L.draft.where !== 'ax-local' || !L.draft.debug) throw new Error(JSON.stringify([L.draft.where, L.draft.debug]));
-    need(main(p), ['Best to start', '2 of 4 done · next: add a Git repo, or choose Empty workspace']);
+    need(main(p), ['id="live-new-run"', '1 of 3 done · next: add a Git repo, or choose Empty workspace']);
     /* Nothing changed on the cluster side: a background refresh leaves the form alone. */
     p.els['#main'].innerHTML = main(p) + '<!--kept-->';
     api.render({ keepScroll: true, background: true });
@@ -820,33 +744,28 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     L.draft = null;
   });
   await go(p, '#/new');
-  await check('New task: the four steps of the prototype, with the best defaults (Antigravity, this computer, Balanced, debug access on here)', () => {
+  await check('New task: three steps, with the best defaults (Antigravity, Balanced, debug access on), and it runs on this computer', () => {
     const h = main(p);
     need(h, ['Start a task', 'id="live-agent-antigravity"', 'id="live-agent-claude"', 'id="live-agent-image"', 'Your own image', 'Gemini API key', 'Git repo', 'Debug access', 'id="live-new-run"',
-      'Pick a template', 'Where should it run?', 'Set up the workspace', 'Customize workspace', 'Describe the goal', 'More options: network, resources, command, environment, task file',
-      'id="live-where-local"', 'Best to start', 'id="live-where-remote"', '2 clusters', 'aria-checked="true" data-action="live-new-source" data-source="git"', 'data-action="live-new-branch-pick" data-branch="main"',
-      'class="card plan-card"', 'Almost ready', 'On by default on this computer.', 'aria-checked="true" data-action="live-new-network" data-network="balanced"', 'aria-checked="true" data-action="live-new-size" data-size="medium"']);
+      'Pick a template', 'Set up the workspace', 'Customize workspace', 'Describe the goal', 'More options: network, resources, command, environment, task file',
+      'aria-checked="true" data-action="live-new-source" data-source="git"', 'data-action="live-new-branch-pick" data-branch="main"',
+      'class="card plan-card"', 'Almost ready', 'On by default.', 'aria-checked="true" data-action="live-new-network" data-network="balanced"', 'aria-checked="true" data-action="live-new-size" data-size="medium"',
+      'AX runs the task on this computer, in its own sandbox.']);
+    never(h, ['Where should it run?', 'id="live-where-remote"', 'remote cluster', 'gVisor', 'review what it changed']);
     if (!/aria-checked="true"[^>]*id="live-agent-antigravity"/.test(h)) throw new Error('Antigravity is the default');
-    if (!/role="radio" aria-checked="true"[^>]*data-where="local"/.test(h)) throw new Error('this computer is picked');
-    if (!/id="live-new-debug"[^>]*checked/.test(h) || !L.draft.debug) throw new Error('debug access is on by default on this computer');
+    if (!/id="live-new-debug"[^>]*checked/.test(h) || !L.draft.debug) throw new Error('debug access is on by default');
     /* Nothing runs before there is code (or an empty workspace) and a goal, and the plan says what's next. */
     if (api.liveNewIssues(L.draft)[0] !== 'Add a Git repo, or choose Empty workspace.') throw new Error(api.liveNewIssues(L.draft).join(' | '));
-    need(h, ['2 of 4 done · next: add a Git repo, or choose Empty workspace']);
+    need(h, ['1 of 3 done · next: add a Git repo, or choose Empty workspace']);
     api.ACTIONS['live-new-source']({ dataset: { source: 'empty' } });
     if (api.liveNewIssues(L.draft)[0] !== 'Describe the goal.') throw new Error(api.liveNewIssues(L.draft).join(' | '));
     need(main(p), ['starts in an empty <span class="mono">/workspace</span>', 'next: describe the goal']);
     api.ACTIONS['live-new-source']({ dataset: { source: 'git' } });
     return { html: h };
   });
-  await check('New task: a remote cluster is one click away, its pills pick which one, and debug access follows where it runs', () => {
-    api.ACTIONS['live-new-where']({ dataset: { where: 'remote' } });
-    if (L.draft.where !== 'gke-broken' && L.draft.where !== 'gke-team-dev') throw new Error(L.draft.where);
-    need(main(p), ['data-action="live-new-cluster" data-context="gke-team-dev"', 'data-action="live-new-cluster" data-context="gke-broken"', 'Off by default on a shared cluster.']);
-    api.ACTIONS['live-new-cluster']({ dataset: { context: 'gke-team-dev' } });
-    if (L.draft.where !== 'gke-team-dev' || L.draft.debug) throw new Error(JSON.stringify([L.draft.where, L.draft.debug]));
-    need(main(p), ['aria-pressed="true" data-action="live-new-cluster" data-context="gke-team-dev"', 'ax --context gke-team-dev apply -f task.yaml']);
-    api.ACTIONS['live-new-where']({ dataset: { where: 'local' } });
-    if (L.draft.where !== 'ax-local' || !L.draft.debug) throw new Error(JSON.stringify([L.draft.where, L.draft.debug]));
+  await check('New task: branch pills fill the branch, and resources set the limits in the Task', () => {
+    need(main(p), ['ax --context ax-local apply -f task.yaml']);
+    if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-cluster']) throw new Error('there is no other cluster to pick');
     /* Branch pills fill the branch; pressing the same one again goes back to the repo's default branch. */
     api.ACTIONS['live-new-branch-pick']({ dataset: { branch: 'develop' } });
     if (L.draft.branch !== 'develop') throw new Error(L.draft.branch);
@@ -1006,90 +925,33 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!new RegExp(`id="live-row-${first.name}"[\\s\\S]*Turn 1 of 2[\\s\\S]*id="live-row-${name}"[\\s\\S]*Turn 2 of 2`).test(home)) throw new Error('the two turns sit together on Home');
   });
 
-  // ---------- Running on another cluster ----------
-  await check('ax promote gets the task, the cluster and the options you chose', () => {
-    const a = (o, pre) => api.livePromoteArgs(Object.assign({ name: 'fix-flaky-tests', to: 'gke-team-dev', toAtespace: 'default', replace: false, original: 'keep', start: true }, o), pre).join(' ');
-    if (a({}, true) !== 'promote task fix-flaky-tests --to gke-team-dev --to-namespace ax-system --preflight-only') throw new Error(a({}, true));
-    if (a({ replace: true, original: 'suspend' }, false) !== 'promote task fix-flaky-tests --to gke-team-dev --to-namespace ax-system --replace --suspend-source') throw new Error(a({ replace: true, original: 'suspend' }, false));
-    /* Another atespace there, and created paused. Deleting the original is Studio's job after it's sent. */
-    if (a({ toAtespace: 'team', start: false, original: 'delete' }, false) !== 'promote task fix-flaky-tests --to gke-team-dev --to-namespace ax-system --to-atespace team --no-resume') throw new Error(a({ toAtespace: 'team', start: false }, false));
-  });
-  await check("what ax promote prints reads in the UI's words, and a line it doesn't know stays as it is", () => {
-    const line = api.livePromoteLine;
-    const got = [line('gateway.ax.io/gw-1 created (preflight only)'), line('gateway.ax.io/gw-1 reused'), line('workspace.ax.io/ws-1 unchanged (preflight only)'), line('task.ax.io/t-1 replaced'),
-      line('task.ax.io/t-1 suspended on the source (preflight only)'), line('task.ax.io/t-1 resumed'), line('something <new>')].join(' | ');
-    const want = ['Creates the Gateway <span class="mono">gw-1</span> there', 'Uses the Gateway <span class="mono">gw-1</span> that is already there', 'Uses the workspace <span class="mono">ws-1</span> that is already there',
-      'Deletes the task <span class="mono">t-1</span> that is already there, then creates it again', 'Pauses <span class="mono">t-1</span> on this cluster', 'Starts <span class="mono">t-1</span> there', 'something &lt;new&gt;'].join(' | ');
-    if (got !== want) throw new Error(got);
-    const note = api.livePromoteNote('Note: the target must provide the credentials that gateway gw-1 injects: ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY');
-    if (note !== "That cluster needs its own copy of the key <span class=\"mono\">gemini-api-creds</span>. Keys aren't copied.") throw new Error(note);
-  });
-  await check("Run on another cluster checks first: a cluster it can't reach keeps Send off", async () => {
-    await go(p, '#/task/fix-flaky-tests');
-    api.liveOpenPromote('fix-flaky-tests');
-    await settle();
-    const d = dialog(p);
-    need(d.querySelector('#lp-body').innerHTML, ['<option value="gke-broken" selected>', 'It pulls from the Git branch that was pushed', "that cluster's own Gateway credentials", 'The check found a problem:', 'i/o timeout',
-      'id="lp-ates" value="default"', 'aria-checked="true" data-lp-pick="original" data-value="keep"', 'id="lp-start" data-lp-toggle="start" checked',
-      'ax --context ax-local promote task fix-flaky-tests --to gke-broken --to-namespace ax-system']);
-    if (!d.querySelector('#lp-go').disabled) throw new Error('Send stays off');
-    if (!B.ax[B.ax.length - 1].endsWith('--to gke-broken --to-namespace ax-system --preflight-only')) throw new Error(B.ax[B.ax.length - 1]);
-    if (B.tasks['gke-team-dev'].length !== 1) throw new Error('a check changes nothing');
-  });
-  await check('a cluster that passes shows what will happen, and Send runs the task there and switches to it', async () => {
-    let d = dialog(p);
-    await fire(d, 'change', { target: { id: 'lp-to', value: 'gke-team-dev', dataset: {} } });
-    await fire(d, 'click', { target: { closest: () => ({ dataset: { lpPick: 'original', value: 'suspend' } }) } });
-    d = dialog(p);
-    need(d.querySelector('#lp-body').innerHTML, ['The check passed. This is what sending it does:', 'Creates the Gateway <span class="mono">review-bot-gw</span> there', 'Uses the workspace <span class="mono">itsdangerous</span> that is already there',
-      'Creates the task <span class="mono">fix-flaky-tests</span> there', 'Pauses <span class="mono">fix-flaky-tests</span> on this cluster', 'Starts <span class="mono">fix-flaky-tests</span> there', 'That cluster needs its own copy of the key',
-      '--to gke-team-dev --to-namespace ax-system --suspend-source']);
-    if (d.querySelector('#lp-go').disabled) throw new Error('Send is on once the check passes');
-    await fire(d.querySelector('#lp-go'), 'click');
-    if (B.ax[B.ax.length - 1] !== '--context ax-local -a default promote task fix-flaky-tests --to gke-team-dev --to-namespace ax-system --suspend-source') throw new Error(B.ax[B.ax.length - 1]);
-    if (L.context !== 'gke-team-dev' || p.store['ax.live.context'] !== 'gke-team-dev') throw new Error('Studio switches to that cluster: ' + L.context);
-    if (L.tasks.map((t) => t.name).sort().join() !== 'fix-flaky-tests,nightly-triage') throw new Error(L.tasks.map((t) => t.name).join());
-    if (B.tasks['ax-local'].find((t) => t.metadata.name === 'fix-flaky-tests').status.state !== 'TASK_STATE_SUSPENDED') throw new Error('paused where it came from');
-    need(toasts(p), ['<span class="mono">fix-flaky-tests</span> is on gke-team-dev']);
-    if (p.ctx.location.hash !== '#/task/fix-flaky-tests') throw new Error('opens it there: ' + p.ctx.location.hash);
-  });
-  await check('a task that is already there needs Replace, and the dialog says so', async () => {
-    api.ACTIONS['live-use-context']({ dataset: { context: 'ax-local' } });
-    await settle();
-    await go(p, '#/task/fix-flaky-tests');
-    api.liveOpenPromote('fix-flaky-tests');
-    await settle();
-    await fire(dialog(p), 'change', { target: { id: 'lp-to', value: 'gke-team-dev', dataset: {} } });
-    need(dialog(p).querySelector('#lp-body').innerHTML, ['already exists on target', 'To send it anyway, turn on <b>Replace the task that is there</b>.']);
-    if (!dialog(p).querySelector('#lp-go').disabled) throw new Error('Send stays off');
-    await fire(dialog(p), 'change', { target: { dataset: { lpToggle: 'replace' }, checked: true } });
-    need(dialog(p).querySelector('#lp-body').innerHTML, ['Deletes the task <span class="mono">fix-flaky-tests</span> that is already there, then creates it again']);
-    never(dialog(p).querySelector('#lp-body').innerHTML, ['id="lp-fix"']);
-    if (dialog(p).querySelector('#lp-go').disabled) throw new Error('Send is on');
-  });
-
-  // ---------- Where agents run ----------
-  await check('Where agents run shows AX on this computer (its checks, the tools AX uses, the layers it runs) and the remote clusters in the kubeconfig', async () => {
+  // ---------- Local cluster ----------
+  await check('Local cluster shows AX on this computer: its checks, the tools AX uses, the layers it runs, and what you can do. No other clusters', async () => {
     await go(p, '#/places');
     const h = main(p);
-    need(h, ['On this computer', '<span class="hd"></span>Running', 'Context <span class="mono">ax-local</span> · Current in your kubeconfig',
+    need(h, ['<h1 tabindex="-1">Local cluster</h1>', 'AX on this computer', '<span class="hd"></span>Running', 'Kind cluster <span class="mono">ax-local</span> · context <span class="mono">ax-local</span>',
       'A container runtime that is running', 'docker 27.3 is running', 'Free disk space', '212 GiB free',
       'Tools AX uses', '<span class="mono">kubectl</span> <span class="tool-v mono">v1.36.0</span>', '/opt/homebrew/bin/kubectl', 'is older than v0.32.0. ax downloads a newer one into ~/.ax/bin',
-      'Kubernetes (Kind)', 'kind · ax-local', 'Agent Substrate + gVisor workers', 'ate-api-server (1/1 available)', 'AX control plane (ax-server + Postgres)', 'ax-server (1/1 available in ax-system)',
+      'Kubernetes (Kind)', 'kind · ax-local', 'Agent Substrate + sandbox workers', 'ate-api-server (1/1 available)', 'AX control plane (ax-server + Postgres)', 'ax-server (1/1 available in ax-system)',
       'id="live-local-update"', 'data-action="live-local-stop"', 'Update runs <span class="mono">ax local start</span> again',
-      'id="live-env-recheck"', 'Remote clusters', 'gke-team-dev', 'gke_acme_us-central1_team-dev', 'gke-broken',
-      'data-action="live-use-context" data-context="gke-team-dev"', 'data-action="live-cluster-check" data-context="gke-team-dev"', 'Install AX…',
-      'id="live-cl-needs"', 'A cluster for AX needs', 'id="live-cl-setup"', 'To set one up', 'ClusterTrustBundle', 'operator install guide',
-      "doesn't change your kubeconfig", 'id="live-output"', 'Set up AX on this computer, or install AX on a remote cluster, to see its output here']);
+      'id="live-env-recheck"', 'never changes your kubeconfig', 'id="live-output"', 'Set up, start, update, stop or remove AX on this computer to see its output here']);
     if ((h.match(/<\/svg>Running<\/span>/g) || []).length !== 3) throw new Error('each of the three layers says it is running');
-    /* Install waits for a check of the cluster; Update waits for an AX server image, which ax has none of yet. */
-    if (!/data-action="live-install" data-context="gke-team-dev"[^>]*disabled/.test(h)) throw new Error('install waits for a check');
-    if (!/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update waits for a server image');
-    need(h, ['AX images <span id="live-images-sum"><span class="chip waiting">Needed</span>', 'Give the AX server image: AX has none of its own yet.']);
-    /* ax-local is in use, so it isn't offered again, and it isn't listed among the remote clusters. This ax has no
-       --runner-volume-image, so that field isn't offered. */
-    never(h, ['data-action="live-use-context" data-context="ax-local"', 'id="live-cl-ax-local"', '127.0.0.1', 'Runner volume image', 'data-action="live-uninstall"']);
+    /* Studio names its own images, so Update needs nothing from you. */
+    if (/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update is on: Studio has images of its own');
+    need(h, ['AX images <span id="live-images-sum"><span class="muted small mono">· ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.', 'Default task image', "For tasks that don't name an image."]);
+    /* No remote clusters, no install on one, no cluster switch. This ax has no --runner-volume-image, so that field isn't offered. */
+    never(h, ['Remote clusters', 'gke-team-dev', 'gke-broken', 'data-action="live-use-context"', 'data-action="live-cluster-check"', 'Install AX…', 'id="live-cl-needs"', 'ax promote', 'gVisor',
+      '<span class="chip waiting">Needed</span>', '127.0.0.1', 'Runner volume image', 'data-action="live-uninstall"']);
+    if (api.ACTIONS['live-install'] || api.ACTIONS['live-uninstall'] || api.ACTIONS['live-cluster-check'] || api.ACTIONS['live-use-context']) throw new Error('no remote cluster actions');
     return { html: h };
+  });
+  await check('an older Studio server names no images of its own, so setup asks for the AX server image first', () => {
+    const keep = L.env.setupImages;
+    delete L.env.setupImages;
+    const h = api.liveViewPlaces().html;
+    need(h, ['AX images <span id="live-images-sum"><span class="chip waiting">Needed</span>', 'Give the AX server image: AX has none of its own yet.']);
+    if (!/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update waits for a server image');
+    L.env.setupImages = keep;
   });
   await check('AX on this computer that kubectl can\'t see, or that doesn\'t answer, says so, offers Repair, and calls its layers unknown', async () => {
     L.local.access = 'no-context';
@@ -1141,7 +1003,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const id = L.op.id;
     B.push('envOp', { id, action: 'local-up', target: 'ax-local', status: 'failed', stage: 'kind', error: 'Canceled', canceled: true, purpose: 'update', started: 1, finished: 4000 });
     await settle();
-    /* Where agents run says so on the operation's own line, as a note: canceling isn't a failure. */
+    /* Local cluster says so on the operation's own line, as a note: canceling isn't a failure. */
     need(main(p), ['Updating AX on this computer: canceled', 'What it already did stays done. Running it again picks up from there.', 'data-action="live-op-dismiss"']);
     never(main(p), ['role="alert"']);
     never(toasts(p), ['canceled']);
@@ -1149,82 +1011,13 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(main(p), ['data-action="live-op-dismiss"', 'Updating AX on this computer: canceled']);
     B.running = null;
   });
-  await check('Check looks at a cluster read-only: what it offers, Agent Substrate and AX on it, and the next step', async () => {
-    await api.ACTIONS['live-cluster-check']({ dataset: { context: 'gke-team-dev' } });
-    await settle();
-    if (!B.calls.includes('GET /api/env/check?context=gke-team-dev')) throw new Error('the check names the cluster');
-    const h = main(p);
-    need(h, ['id="live-cl-check-gke-team-dev"', 'Kubernetes version', 'v1.36.1', '3/3 Ready · kernel 6.8.0-1015-gke · amd64', 'ClusterTrustBundle and PodCertificateRequest are served', 'standard-rwo',
-      'ate-api-server 1/1 · router 2/2 · 1/1 WorkerPools ready', 'Not installed', 'Next: install AX.',
-      /* The details fold to one line that says what the check found; nothing here needs a look, so it starts folded. */
-      'Meets what AX needs · Agent Substrate ready · AX not installed', 'id="live-fold-cl-gke-team-dev" >']);
-    /* The check found Agent Substrate, and the image is good: Install is on. */
-    if (/data-action="live-install" data-context="gke-team-dev"[^>]*disabled/.test(h)) throw new Error('install is on after a good check');
-    never(h, ['data-action="live-uninstall" data-context="gke-team-dev"']);
-  });
-  await check("a cluster that doesn't answer says so, with how to get credentials again, and Install stays off", async () => {
-    await api.ACTIONS['live-cluster-check']({ dataset: { context: 'gke-broken' } });
-    await settle();
-    const h = main(p);
-    need(h, ["Couldn't reach the cluster: Unable to connect to the server: dial tcp 34.118.12.7:443: i/o timeout", 'If your credentials have expired, get them again:', 'gcloud container clusters get-credentials old --region europe-west4 --project acme']);
-    if (!/data-action="live-install" data-context="gke-broken"[^>]*disabled/.test(h)) throw new Error('install waits for a check that worked');
-  });
-  await check('Install AX asks first, says what it does, keeps the images, runs ax install on that cluster, and its output streams into Output', async () => {
-    L.images.serverImage = '';
-    api.ACTIONS['live-install']({ dataset: { context: 'gke-team-dev' } });
-    need(p.els['#overlay'].innerHTML, ['Install AX on gke-team-dev?', 'id="li-go"']);
-    const d = dialog(p);
-    need(d.querySelector('#li-body').innerHTML, ['ax-server</span> and its Postgres database', "registering restarts Agent Substrate's API server and router", 'The cluster must already run Agent Substrate', 'ax --context gke-team-dev install']);
-    if (B.posts.some((x) => x.path === '/api/env/install')) throw new Error('nothing is installed before you confirm');
-    /* No ax-server image anywhere: it says so instead of starting an install that fails. */
-    await fire(d.querySelector('#li-go'), 'click');
-    need(d.querySelector('#li-body').innerHTML, ['Give the AX server image: AX has none of its own yet.']);
-    await fire(d, 'input', { target: { dataset: { li: 'serverImage' }, value: 'ghcr.io/acme/ax-server@' + DIGEST } });
-    need(d.querySelector('#li-cli').innerHTML, ['ax --context gke-team-dev install --server-image ghcr.io/acme/ax-server@' + DIGEST]);
-    if (!String(p.store['ax.live.images']).includes('ghcr.io/acme/ax-server@' + DIGEST)) throw new Error('the image is kept in this browser');
-    await fire(d.querySelector('#li-go'), 'click');
-    const sent = B.posts.find((x) => x.path === '/api/env/install');
-    if (!sent || JSON.stringify(sent.body) !== JSON.stringify({ context: 'gke-team-dev', serverImage: 'ghcr.io/acme/ax-server@' + DIGEST })) throw new Error(JSON.stringify(sent));
-    const id = L.op.id;
-    B.push('streamLine', { id, line: '==> Deploying ax-postgres and ax-server to ax-system...', step: 'Deploying ax-postgres and ax-server to ax-system...' });
-    api.render();
-    need(main(p), ['Installing AX · <span data-fmt="elapsed" data-since=', 'id="live-cl-cancel"', 'ax --context gke-team-dev install', '==&gt; Deploying ax-postgres and ax-server to ax-system...', '1 line']);
-    if (!/data-action="live-install" data-context="gke-broken"[^>]*disabled/.test(main(p))) throw new Error('one operation at a time');
-    if (!/id="live-env-recheck" disabled/.test(main(p))) throw new Error('Check again waits for the operation');
-    B.push('envOp', { id, action: 'remote-install', target: 'gke-team-dev', status: 'ok', stage: 'ax' });
-    await settle();
-    need(toasts(p), ['AX is installed on gke-team-dev']);
-    need(main(p), ['</svg>Done</span>']);
-    B.running = null;
-  });
-  await check('after the install, the check runs again and offers Upgrade and Uninstall; Uninstall asks first and runs ax uninstall', async () => {
-    const h = main(p);
-    need(h, ['AX is installed and ready. Connect to use it.', 'ax-server 1/1', 'Upgrade AX…', 'data-action="live-uninstall" data-context="gke-team-dev"']);
-    api.ACTIONS['live-install']({ dataset: { context: 'gke-team-dev' } });
-    need(p.els['#overlay'].innerHTML, ['Upgrade AX on gke-team-dev?']);
-    need(dialog(p).querySelector('#li-body').innerHTML, ['This redeploys <span class="mono">ax-server</span>']);
-    never(dialog(p).querySelector('#li-body').innerHTML, ["registering restarts Agent Substrate's API server"]);
-    api.ACTIONS['close-dialog'] && api.ACTIONS['close-dialog']();
-    api.ACTIONS['live-uninstall']({ dataset: { context: 'gke-team-dev' } });
-    need(p.els['#overlay'].innerHTML, ['Uninstall AX from gke-team-dev?', "The database's volume, Agent Substrate itself, and your kubeconfig", "restarts Substrate's API server and router", 'ax --context gke-team-dev uninstall']);
-    if (B.posts.some((x) => x.path === '/api/env/uninstall')) throw new Error('nothing is removed before you confirm');
-    await fire(dialog(p).querySelector('#lu-go'), 'click');
-    const sent = B.posts.find((x) => x.path === '/api/env/uninstall');
-    if (!sent || JSON.stringify(sent.body) !== '{"context":"gke-team-dev"}') throw new Error(JSON.stringify(sent));
-    need(main(p), ['Removing AX · <span data-fmt="elapsed" data-since=', 'ax --context gke-team-dev uninstall']);
-    B.push('streamLine', { id: L.op.id, line: '==> Removing ax-server and ax-postgres from ax-system...' });
-    B.push('envOp', { id: L.op.id, action: 'remote-uninstall', target: 'gke-team-dev', status: 'ok' });
-    await settle();
-    need(toasts(p), ['AX is removed from gke-team-dev']);
-    need(main(p), ['Next: install AX.', 'Install AX…']);
-    B.running = null;
-  });
-  await check('Check again looks at this computer, the tools and the clusters already checked; healthy sections fold to one line', async () => {
+  await check('Check again looks at this computer and the tools again; healthy sections fold to one line', async () => {
     const before = B.calls.length;
     await api.ACTIONS['live-env-refresh']({ dataset: { fresh: '1' }, id: 'live-env-recheck' });
     await settle();
     const calls = B.calls.slice(before);
-    need(calls.join(' '), ['GET /api/env/status?fresh=1', 'GET /api/env/check?context=gke-team-dev', 'GET /api/env/check?context=gke-broken']);
+    need(calls.join(' '), ['GET /api/env/status?fresh=1']);
+    never(calls.join(' '), ['/api/env/check']);
     /* The checks all pass, so they fold; kind is too old, so the tools stay open. What you open stays open. */
     const h = main(p);
     need(h, ['id="live-fold-checks" >', '3 of 3 pass', 'id="live-fold-tools" open', '<span class="mono">kind</span> <span class="tool-v mono">v0.31.0</span>']);
@@ -1232,59 +1025,46 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(api.liveViewPlaces().html, ['id="live-fold-checks" open']);
     L.folds['live-fold-checks'] = false;
   });
-  await check('Clear empties the Output panel, and an install that fails says why on its cluster', async () => {
+  await check('Clear empties the Output panel', async () => {
+    L.op = { id: 'op-out', action: 'local-up', target: 'ax-local', status: 'ok', stage: 'ax', logs: ['==> Creating cluster', '==> Done'], started: 1, finished: 2 };
+    need(api.liveOutputInnerHTML(), ['2 lines', '==&gt; Creating cluster']);
     api.ACTIONS['live-output-clear']();
     need(api.liveOutputInnerHTML(), ['0 lines', 'Cleared. New output shows here as it arrives.']);
-    api.liveOpenInstall('gke-broken');
-    await fire(dialog(p).querySelector('#li-go'), 'click');
-    const id = L.op.id;
-    B.push('streamLine', { id, line: 'Error: Agent Substrate is not installed in namespace ate-system' });
-    B.push('envOp', { id, action: 'remote-install', target: 'gke-broken', status: 'failed', stage: 'ax', error: 'exit status 1' });
-    await settle();
-    need(main(p), ['Couldn&#39;t install AX on gke-broken.', 'Agent Substrate is not installed in namespace ate-system', '</svg>Stopped</span>', 'data-action="live-op-dismiss"']);
-    need(toasts(p), ['Couldn&#39;t install AX on gke-broken. The Output panel has what']);
-    api.ACTIONS['live-op-dismiss']();
-    never(main(p), ['Couldn&#39;t install AX on gke-broken.']);
-    B.running = null;
+    L.op = null;
   });
-  await check('with no remote cluster in the kubeconfig, it says how to add one and offers the needs and setup disclosures', async () => {
-    const saved = L.contexts;
-    L.contexts = saved.filter((c) => c.isLocal);
-    const h = api.liveViewPlaces().html;
-    need(h, ['No remote clusters in your kubeconfig yet', 'gcloud container clusters get-credentials', 'class="disclosure cl-guide" id="live-cl-needs"', 'A cluster for AX needs', 'class="disclosure cl-guide" id="live-cl-setup"', 'To set one up', 'Install Agent Substrate and create a WorkerPool']);
-    never(h, ['id="live-cl-needs" open', 'id="live-cl-setup" open']);
-    L.contexts = saved;
-  });
-  await check("picking a cluster is Studio's own choice: it is remembered, and the kubeconfig is left alone", async () => {
-    api.ACTIONS['live-use-context']({ dataset: { context: 'gke-team-dev' } });
+  await check("Studio stays on AX on this computer, whatever your kubeconfig's current context is, and never changes it", async () => {
+    const keep = L.contexts;
+    L.contexts = keep.map((c) => Object.assign({}, c, { current: c.name === 'gke-team-dev' }));
+    api.render();
     await settle();
-    if (L.context !== 'gke-team-dev' || p.store['ax.live.context'] !== 'gke-team-dev') throw new Error('context');
-    if (!B.calls.includes('GET /api/tasks?context=gke-team-dev&atespace=default')) throw new Error('tasks are read from the new cluster');
-    if (B.calls.some((c) => /\/api\/env\/context/.test(c))) throw new Error('Studio must not switch the kubeconfig');
+    if (L.context !== 'ax-local') throw new Error('context: ' + L.context);
+    if (B.calls.some((c) => /context=gke-/.test(c)) || B.calls.some((c) => /\/api\/env\/context/.test(c))) throw new Error('only ax-local is asked, and the kubeconfig is left alone');
+    L.contexts = keep;
   });
-  await check("a cluster Studio can't reach: it says so with the server's own words and the command, and claims no task count", async () => {
-    api.ACTIONS['live-use-context']({ dataset: { context: 'gke-broken' } });
-    await settle();
+  await check("AX on this computer that Studio can't reach: it says so with the server's own words and the command, and claims no task count", async () => {
+    const before = L.error;
+    L.error = 'Unable to connect to the server: dial tcp 127.0.0.1:39101: connect: connection refused';
     const v = api.liveViewHome();
-    need(v.html, ["Can't reach AX on gke-broken", 'Unable to connect to the server: dial tcp 34.118.12.7:443: i/o timeout', 'ax --context gke-broken get tasks', 'data-action="live-refresh"', "Studio can't reach AX right now."]);
+    need(v.html, ["Can't reach AX on ax-local", 'connection refused', 'ax --context ax-local get tasks', 'data-action="live-refresh"', "Studio can't reach AX right now."]);
     never(v.html, ['0 tasks']);
+    L.error = before;
     return v;
   });
   await check('when AX and AX Studio are different versions, the page says that, not just the decoding error', async () => {
     const before = L.error;
     L.error = 'grpc: failed to unmarshal the received message: proto: cannot parse invalid wire-format data';
     const v = api.liveViewHome();
-    need(v.html, ['AX on gke-broken and AX Studio are different versions', 'Update the older one so the two match.', 'cannot parse invalid wire-format data', "Studio can't read what AX sent.", 'data-action="live-refresh"']);
+    need(v.html, ['AX on ax-local and AX Studio are different versions', 'Update the older one so the two match.', 'cannot parse invalid wire-format data', "Studio can't read what AX sent.", 'data-action="live-refresh"']);
     never(v.html, ["Can't reach AX"]);
     L.error = before;
     return v;
   });
-  await check("a cluster without AX says AX isn't installed there, with the command that installs it", async () => {
+  await check("a local cluster without AX says AX isn't installed there, with the command that repairs it", async () => {
     const before = L.error;
-    L.error = 'kubectl port-forward exited for context "gke-broken": Error from server (NotFound): services "ax-server" not found';
+    L.error = 'kubectl port-forward exited for context "ax-local": Error from server (NotFound): services "ax-server" not found';
     const v = api.liveViewHome();
-    need(v.html, ["AX isn't installed on gke-broken", 'ax --context gke-broken install', 'services &quot;ax-server&quot; not found', "AX isn't on this cluster yet.", 'data-action="live-install" data-context="gke-broken"', 'Install AX…']);
-    never(v.html, ["Can't reach AX", 'different versions']);
+    need(v.html, ["AX isn't installed on ax-local", 'Repair it on Local cluster', 'ax local start', 'services &quot;ax-server&quot; not found', "AX isn't on this cluster yet."]);
+    never(v.html, ["Can't reach AX", 'different versions', 'data-action="live-install"', 'Install AX…']);
     L.error = before;
     return v;
   });
@@ -1295,8 +1075,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
   // ---------- Settings ----------
   await check('Settings: AX & this computer first, Appearance & story last, with the nav marking where you are', async () => {
-    api.ACTIONS['live-use-context']({ dataset: { context: 'ax-local' } });
-    await settle();
     await go(p, '#/settings');
     need(main(p), ['<h1 tabindex="-1">Settings</h1>', 'aria-label="Settings sections"', 'href="#/settings/about" aria-current="page"', 'AX &amp; this computer']);
     never(main(p), ['href="#/settings/command-line"']);
@@ -1395,28 +1173,28 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await api.ACTIONS['live-notify-toggle']({ checked: false });
     if ('ax.live.notify' in p.store) throw new Error('off');
   });
-  await check('the sidebar footer card switches clusters; a link opens on a cluster and atespace; compact lists', async () => {
-    need(api.liveShellHTML(), ['id="live-foot"']);
-    never(api.liveShellHTML(), ['id="live-ctx-switch"']);
-    const sw = api.liveCtxSwitchHTML();
-    need(sw, ['id="live-health"', 'aria-haspopup="menu" aria-expanded="false"', 'role="menuitemradio" aria-checked="true" data-action="live-use-context" data-context="' + L.context + '"', 'data-context="gke-broken"', 'Where agents run']);
-    api.ACTIONS['live-ctx-menu']();
-    need(api.liveCtxSwitchHTML(), ['aria-expanded="true"']);
-    api.ACTIONS['live-ctx-menu']();
-    /* A link to this page names the cluster (and the atespace when it isn't default). */
+  await check('the sidebar footer card is this computer, linking to Local cluster; a link opens on an atespace; compact lists', async () => {
+    need(api.liveShellHTML(), ['id="live-foot"', '<span class="label">Local cluster</span>']);
+    never(api.liveShellHTML(), ['id="live-ctx-switch"', 'Where agents run']);
+    await go(p, '#/');
+    const foot = p.els['#live-foot'].innerHTML;
+    need(foot, ['class="health-card ', 'href="#/places" id="live-health"', 'This computer', 'Connected · ', 'Open Local cluster.']);
+    never(foot, ['aria-haspopup="menu"', 'live-use-context', 'gke-']);
+    /* A link to this page names no cluster: Studio only works with AX on this computer. */
     p.ctx.location.hash = '#/task/fix-flaky-tests';
-    if (!api.liveLinkHere().endsWith(`/?context=${L.context}#/task/fix-flaky-tests`)) throw new Error(api.liveLinkHere());
+    if (!api.liveLinkHere().endsWith('/#/task/fix-flaky-tests') || /context=/.test(api.liveLinkHere())) throw new Error(api.liveLinkHere());
     await go(p, '#/');
     api.ACTIONS['live-compact']({ checked: true });
     if (p.store['ax.live.compact'] !== '1') throw new Error('compact');
     api.ACTIONS['live-compact']({ checked: false });
-    /* A new page opened with ?context=&atespace= starts there, then leaves the address. */
+    /* A new page opened with ?atespace= starts there; an older link's ?context= is dropped. */
     const D = makeBackend();
     const q = makeContext(D);
     q.ctx.location.search = '?context=gke-team-dev&atespace=team';
     await settle();
-    if (q.api.LIVE.context !== 'gke-team-dev' || q.api.LIVE.atespace !== 'team') throw new Error(q.api.LIVE.context + ' ' + q.api.LIVE.atespace);
-    if (!D.calls.some((c) => c.startsWith('GET /api/tasks?context=gke-team-dev&atespace=team'))) throw new Error('lists there');
+    if (q.api.LIVE.context !== 'ax-local' || q.api.LIVE.atespace !== 'team') throw new Error(q.api.LIVE.context + ' ' + q.api.LIVE.atespace);
+    if (!D.calls.some((c) => c.startsWith('GET /api/tasks?context=ax-local&atespace=team'))) throw new Error('lists there');
+    if (D.calls.some((c) => /context=gke-/.test(c))) throw new Error('never another cluster');
   });
   await check('All tasks (#/tasks) lists every task in a searchable, filterable table; #/settings/command-line redirects to Keyboard & commands', async () => {
     need(api.liveShellHTML(), ['class="nav-all" href="#/tasks" data-nav="tasks">See all</a>']);
@@ -1432,25 +1210,22 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(main(p), ['No tasks match', 'Nothing matches “zzzz-nothing”']);
     L.tasksFilter.q = '';
     await go(p, '#/settings/command-line');
-    need(main(p), ['href="#/settings/keyboard" aria-current="page"', 'ax local start', 'ax local status', 'ax --context &lt;cluster&gt; install', 'ax --context ax-local get tasks', 'ax --context ax-local ssh &lt;name&gt;',
-      'ax --context ax-local promote task &lt;name&gt; --to &lt;cluster&gt;', 'your kubeconfig stays as it is']);
+    need(main(p), ['href="#/settings/keyboard" aria-current="page"', 'ax local start', 'ax local status', 'ax --context ax-local get tasks', 'ax --context ax-local ssh &lt;name&gt;',
+      'Suspend or resume a task', 'your kubeconfig stays as it is']);
+    never(main(p), ['ax --context &lt;cluster&gt; install', 'promote']);
     await go(p, '#/settings/nonsense');
     need(main(p), ['href="#/settings/about" aria-current="page"']);
   });
-  await check('the palette offers Settings and diagnostics, and connecting to a cluster shows a command that leaves the kubeconfig alone', async () => {
+  await check('the palette offers Settings, Local cluster and diagnostics, and no other clusters', async () => {
     const items = api.livePaletteItems();
     const labels = items.map((x) => x.label).join(' | ');
-    need(labels, ['Settings', 'Diagnostics (secrets removed)…', 'Connect to gke-team-dev']);
-    const c = items.find((x) => x.label === 'Connect to gke-team-dev');
-    if (c.cli !== 'ax --context gke-team-dev get tasks') throw new Error(c.cli);
+    need(labels, ['Settings', 'Local cluster', 'Diagnostics (secrets removed)…']);
+    never(labels, ['Connect to', 'Where agents run']);
     if (items.some((x) => /^ax ctx /.test(x.cli || ''))) throw new Error('ax ctx changes the kubeconfig');
-    /* Leave another cluster in use, as the checks below expect. */
-    api.ACTIONS['live-use-context']({ dataset: { context: 'gke-team-dev' } });
-    await settle();
   });
   await check('a server restart hands out a new token, and the next change gets it and goes through', async () => {
     B.token = 2;
-    const r = await api.studioPost('/api/tasks/suspend', { context: 'gke-team-dev', atespace: 'default', name: 'nightly-triage' });
+    const r = await api.studioPost('/api/tasks/suspend', { context: 'ax-local', atespace: 'default', name: 'signer-a1b2' });
     const last = B.posts.slice(-2).map((x) => x.token).join();
     if (!r.ok || last !== 'tok-1,tok-2') throw new Error(last);
   });
@@ -1458,7 +1233,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   // ---------- The Studio server stops answering ----------
   await check("when the Studio server stops answering, the page says so and how to start it again", async () => {
     B.offline = true;
-    api.ACTIONS['live-use-context']({ dataset: { context: 'ax-local' } });
+    api.ACTIONS['live-refresh']();
     await settle();
     await go(p, '#/');
     if (L.phase !== 'offline') throw new Error('phase: ' + L.phase);
@@ -1473,23 +1248,31 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   const F = makeBackend({ env: envFresh(), tasks: {} });
   const f = makeContext(F);
   await settle();
-  await check('first run: Home is setup, with the real checks and what gets installed; it asks for the AX server image first', async () => {
+  await check("first run: Home is setup, with the real checks and what gets installed; Studio's own images make it one click", async () => {
     let h = main(f);
     if (f.api.LIVE.context !== '' || f.api.LIVE.local.state !== 'NotFound') throw new Error(JSON.stringify([f.api.LIVE.context, f.api.LIVE.local]));
-    need(h, ['Set up AX on this computer', 'A container runtime that is running', 'docker 27.3 is running', 'Free disk space', '212 GiB free', 'What gets installed?', 'gVisor sandbox',
-      'AX images <span id="live-images-sum"><span class="chip waiting">Needed</span>', 'AX server image <span class="muted">· required</span>', 'Give the AX server image: AX has none of its own yet.',
-      'data-action="live-setup-start"', 'ax local start', 'Or run on a remote cluster']);
-    never(h, ['microVM', 'administrator']);
-    if (!/id="live-setup-start"[^>]*disabled/.test(h)) throw new Error('setup waits for the AX server image');
+    need(h, ['Set up AX on this computer', 'A container runtime that is running', 'docker 27.3 is running', 'Free disk space', '212 GiB free', 'What gets installed?', 'It runs each task in its own sandbox',
+      'AX images <span id="live-images-sum"><span class="muted small mono">· ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.',
+      'data-action="live-setup-start"', 'ax local start', 'aria-label="After setup"', 'Start a task', 'Open a shell in its sandbox, and read its logs']);
+    never(h, ['microVM', 'administrator', 'Or run on a remote cluster', 'gVisor', 'Give the AX server image', '<span class="chip waiting">Needed</span>']);
+    if (/id="live-setup-start"[^>]*disabled/.test(h)) throw new Error("setup needs nothing typed: Studio has images of its own");
     if (F.calls.some((c) => /\/api\/tasks/.test(c))) throw new Error('with no cluster there is nothing to list');
-    /* An image the server's environment sets (AX_SERVER_IMAGE) is enough. */
-    F.env.serverImageEnv = 'ghcr.io/acme/ax-server@' + DIGEST;
+    /* Every page is setup until AX runs here; Local cluster and Settings stay open. */
+    await go(f, '#/new');
+    need(main(f), ['Set up AX on this computer']);
+    never(main(f), ['id="live-new-run"']);
+    await go(f, '#/tasks');
+    need(main(f), ['Set up AX on this computer']);
+    await go(f, '#/settings');
+    need(main(f), ['<h1 tabindex="-1">Settings</h1>']);
+    await go(f, '#/');
+    /* An image the server's environment sets (AX_SERVER_IMAGE) is what an empty field uses. */
+    F.env.setupImages = Object.assign({}, F.env.setupImages, { serverImage: 'ghcr.io/acme/ax-server@' + DIGEST, serverImageFrom: 'env' });
     await f.api.ACTIONS['live-env-refresh']();
     await settle();
     h = main(f);
     if (/id="live-setup-start"[^>]*disabled/.test(h)) throw new Error('the image from the environment is enough');
-    need(h, ['(from AX_SERVER_IMAGE)']);
-    never(h, ['Give the AX server image']);
+    need(h, ["Empty uses the image from Studio's environment."]);
     return { html: h };
   });
   await check('a check that fails says how to fix it, and setup waits', async () => {
@@ -1564,7 +1347,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     for (const [page, v] of [
       ['Home', m.api.liveViewHome()],
-      ['Where agents run', m.api.liveViewPlaces()],
+      ['Local cluster', m.api.liveViewPlaces()],
       ['Task', m.api.liveViewTask('fix-flaky-tests')],
       ['New task', m.api.liveViewNew()],
       ['Setup', m.api.liveViewSetup(false)],
@@ -1573,21 +1356,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
       const count = (v.html.match(/<svg [^>]*class="axo\b/g) || []).length;
       if (count !== 1) throw new Error(`${page} should have 1 Axel, got ${count}`);
     }
-  });
-  await check('per-file Discard confirms first and removes that file from Changes', async () => {
-    const M = makeBackend();
-    const m = makeContext(M);
-    await settle();
-    await go(m, '#/task/fix-flaky-tests');
-    await m.api.liveLoadChanges('fix-flaky-tests');
-    m.api.liveOpenDiscard('fix-flaky-tests', 'notes/why.md');
-    need(m.els['#overlay'].innerHTML, ['Discard changes to notes/why.md?', 'id="ldc-go"']);
-    need(dialog(m).querySelector('#ldc-body').innerHTML, ['git checkout -- notes/why.md']);
-    await fire(dialog(m).querySelector('#ldc-go'), 'click');
-    const sent = M.posts.find((x) => x.path === '/api/tasks/discard-file');
-    if (!sent || sent.body.path !== 'notes/why.md' || sent.body.task !== 'fix-flaky-tests') throw new Error(JSON.stringify(sent));
-    need(m.api.liveChangesInnerHTML('fix-flaky-tests'), ['Discarded changes to <span class="mono">notes/why.md</span>', 'src/signer.py']);
-    never(m.api.liveChangesInnerHTML('fix-flaky-tests'), ['<span class="lf-path">notes/why.md</span>']);
   });
   await check('in-page Terminal opens an ax ssh session, streams output, sends commands and disconnects', async () => {
     const M = makeBackend();
@@ -1627,27 +1395,30 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     m.api.ACTIONS['live-new-tip']({ dataset: { tip: 'done' } });
     if (!/Done when:/.test(m.api.LIVE.draft.goal)) throw new Error(m.api.LIVE.draft.goal);
   });
-  await check('stopping AX on this computer when tasks are running offers to pause them first so checkpoints survive', async () => {
+  await check('stopping AX on this computer when tasks are running offers to suspend them first so checkpoints survive', async () => {
     const M = makeBackend();
     const m = makeContext(M);
     await settle();
     await go(m, '#/places');
     m.api.ACTIONS['live-local-stop']();
     need(m.els['#overlay'].innerHTML, ['Stop AX on this computer?', 'id="ls-go"']);
-    need(dialog(m).querySelector('#ls-body').innerHTML, ['Pause running tasks first']);
+    need(dialog(m).querySelector('#ls-body').innerHTML, ['Suspend running tasks first']);
     await fire(dialog(m).querySelector('#ls-go'), 'click');
     const paused = M.posts.filter((x) => x.path === '/api/tasks/suspend').map((x) => x.body.name).sort().join();
     if (paused !== 'fix-flaky-tests,signer-b2c3') throw new Error('paused before stop: ' + paused);
     if (!M.posts.some((x) => x.path === '/api/env/local/stop')) throw new Error('local stop called after pausing');
   });
-  await check('the live command palette lists real tasks, clusters and actions with their ax CLI equivalents', async () => {
+  await check('the live command palette lists real tasks and actions with their ax CLI equivalents', async () => {
     const M = makeBackend();
     const m = makeContext(M);
     await settle();
     await go(m, '#/task/fix-flaky-tests');
     const items = m.api.livePaletteItems();
     const labels = items.map((x) => x.label).join(' | ');
-    need(labels, ['New task', 'Pause fix-flaky-tests', 'Open shell in sandbox', 'Connect to gke-team-dev', 'Fix the flaky tests.']);
+    need(labels, ['New task', 'Suspend fix-flaky-tests', 'Open shell in sandbox', 'Fix the flaky tests.', 'Delete task…']);
+    never(labels, ['Connect to', 'Send a follow-up', 'Run on another cluster', 'Pause ']);
+    const s = items.find((x) => x.label === 'Suspend fix-flaky-tests');
+    if (s.cli !== 'ax --context ax-local suspend task fix-flaky-tests') throw new Error(s.cli);
   });
 
   console.log(fails ? `\n${fails} FAILED of ${n}` : `\nALL OK (${n} checks)`);

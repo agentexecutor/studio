@@ -15,22 +15,16 @@
 package studio
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/agentexecutor/studio/internal/kube"
-	axclient "github.com/google/ax/client"
 	"github.com/google/ax/pkg/apis/v1alpha1"
-	"google.golang.org/grpc"
 )
 
 type stubAXServer struct {
@@ -206,144 +200,18 @@ func TestServerSecurityControls(t *testing.T) {
 	}
 }
 
-func TestTaskChangesAndApplyLocal(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-
-	repoDir := t.TempDir()
-	runGit := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v (%s)", args, err, string(out))
-		}
-	}
-	runGit("init", "-b", "main")
-	runGit("config", "user.name", "Test")
-	runGit("config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Demo\nLine 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit("add", "README.md")
-	runGit("commit", "-m", "initial")
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcSrv := grpc.NewServer()
-	v1alpha1.RegisterAXServer(grpcSrv, &stubAXServer{
-		task: &v1alpha1.Task{
-			Metadata: &v1alpha1.ObjectMeta{Name: "demo-task", Atespace: "default"},
-			Spec:     &v1alpha1.TaskSpec{Debug: true, Workspace: &v1alpha1.WorkspaceRef{Name: "ws1"}},
-			Status:   &v1alpha1.TaskStatus{State: v1alpha1.TaskState_TASK_STATE_WORKING, Actor: "actor-1"},
-		},
-		ws: &v1alpha1.Workspace{
-			Metadata: &v1alpha1.ObjectMeta{Name: "ws1", Atespace: "default"},
-			Spec: &v1alpha1.WorkspaceSpec{
-				Setup: &v1alpha1.WorkspaceSetup{
-					Git: []*v1alpha1.GitRepo{{Name: "origin", Repo: "https://github.com/example/demo.git", Dir: "."}},
-				},
-			},
-		},
-	})
-	go func() { _ = grpcSrv.Serve(ln) }()
-	t.Cleanup(grpcSrv.Stop)
-
-	sampleTrackedDiff := "diff --git a/README.md b/README.md\nindex 1111111..2222222 100644\n--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,3 @@\n # Demo\n Line 1\n+Added by AX agent\n"
-	sampleUntrackedDiff := "diff --git a/dev/null b/notes.txt\nnew file mode 100644\n--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+hello from sandbox\n"
-
-	srv, err := NewServer(Options{
-		Addr: "127.0.0.1:0",
-		ResolveServer: func(context.Context, axclient.Options) (string, error) {
-			return "http://" + ln.Addr().String(), nil
-		},
-		GuestExec: func(_ context.Context, _, _, _, _ string, cmd []string, _ string) (string, string, int, error) {
-			j := strings.Join(cmd, " ")
-			switch {
-			case strings.Contains(j, "rev-parse --show-toplevel"):
-				return "/workspace\n", "", 0, nil
-			case strings.Contains(j, "rev-parse --abbrev-ref HEAD"):
-				return "main\n", "", 0, nil
-			case strings.Contains(j, "status --porcelain"):
-				return " M README.md\n?? notes.txt\n", "", 0, nil
-			case strings.Contains(j, "diff HEAD"):
-				return sampleTrackedDiff, "", 0, nil
-			case strings.Contains(j, "diff --no-index"):
-				return sampleUntrackedDiff, "", 1, nil
-			default:
-				return "", "", 0, nil
-			}
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := srv.Handler()
-	cookie, csrf := bootstrapTestSession(t, h)
-
-	// 1. Inspect changes.
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/tasks/changes?task=demo-task", nil)
-	req.AddCookie(cookie)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("changes returned %d: %s", rec.Code, rec.Body.String())
-	}
-	var changes TaskChangesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &changes); err != nil {
-		t.Fatal(err)
-	}
-	if !changes.Available || len(changes.Files) != 2 {
-		t.Fatalf("expected 2 changed files, got %+v", changes)
-	}
-
-	// 2. Apply changes onto the local git repo.
-	bodyBytes, _ := json.Marshal(map[string]string{
-		"task":          "demo-task",
-		"localRepoPath": repoDir,
-	})
-	req = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/tasks/apply-local", bytes.NewReader(bodyBytes))
-	req.AddCookie(cookie)
-	req.Header.Set(csrfHeaderName, csrf)
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("apply-local returned %d: %s", rec.Code, rec.Body.String())
-	}
-
-	readmeAfter, err := os.ReadFile(filepath.Join(repoDir, "README.md"))
-	if err != nil || !strings.Contains(string(readmeAfter), "Added by AX agent") {
-		t.Fatalf("expected README.md to contain applied agent line, got %q (%v)", string(readmeAfter), err)
-	}
-	notesAfter, err := os.ReadFile(filepath.Join(repoDir, "notes.txt"))
-	if err != nil || strings.TrimSpace(string(notesAfter)) != "hello from sandbox" {
-		t.Fatalf("expected untracked notes.txt to be created by git apply, got %q (%v)", string(notesAfter), err)
-	}
-
-	// 3. Push the sandbox changes to a branch named after the task.
-	bodyBytes, _ = json.Marshal(map[string]string{"task": "demo-task"})
-	req = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/tasks/push-branch", bytes.NewReader(bodyBytes))
-	req.AddCookie(cookie)
-	req.Header.Set(csrfHeaderName, csrf)
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	var pushed PushBranchResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &pushed); err != nil || rec.Code != http.StatusOK {
-		t.Fatalf("push-branch returned %d: %s (%v)", rec.Code, rec.Body.String(), err)
-	}
-	if pushed.Branch != "ax/demo-task" || pushed.RepoDir != "/workspace" {
-		t.Fatalf("unexpected push-branch result: %+v", pushed)
-	}
+type argsRunner struct {
+	ran  chan []string
+	help string
 }
-
-// argsRunner reports the arguments of each command it is asked to run.
-type argsRunner struct{ ran chan []string }
 
 func (r argsRunner) LookPath(file string) (string, error) { return "/usr/bin/" + file, nil }
 
 func (r argsRunner) Run(_ context.Context, spec kube.Spec) (kube.Result, error) {
+	// Studio reads `ax local start --help` once for the flags this ax takes.
+	if len(spec.Args) > 0 && spec.Args[len(spec.Args)-1] == "--help" {
+		return kube.Result{Stdout: r.help}, nil
+	}
 	r.ran <- spec.Args
 	return kube.Result{}, nil
 }
@@ -384,13 +252,51 @@ func TestLocalUpPassesImageOverrides(t *testing.T) {
 	}
 }
 
+func TestLocalUpUsesStudiosImagesByDefault(t *testing.T) {
+	t.Setenv("AX_SERVER_IMAGE", "")
+	t.Setenv("AX_DEFAULT_TASK_IMAGE", "")
+	start := func(t *testing.T, help string) string {
+		t.Helper()
+		runner := argsRunner{ran: make(chan []string, 1), help: help}
+		srv, err := NewServer(Options{Addr: "127.0.0.1:0", AXBinary: "ax", Runner: runner})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := srv.Handler()
+		cookie, csrf := bootstrapTestSession(t, h)
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/env/local/up", strings.NewReader(`{"purpose":"setup"}`))
+		req.AddCookie(cookie)
+		req.Header.Set(csrfHeaderName, csrf)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("local/up returned %d: %s", rec.Code, rec.Body.String())
+		}
+		return strings.Join(<-runner.ran, " ")
+	}
+	got := start(t, "  --server-image string\n  --default-task-image string\n")
+	if want := "--server-image " + DefaultServerImage + " --default-task-image " + DefaultTaskImage; !strings.HasSuffix(got, want) {
+		t.Errorf("ax arguments = %q, want them to end with %q", got, want)
+	}
+	// An ax without --default-task-image still gets the server image.
+	if got := start(t, "  --server-image string\n"); strings.Contains(got, "--default-task-image") || !strings.Contains(got, "--server-image "+DefaultServerImage) {
+		t.Errorf("ax arguments = %q", got)
+	}
+	// An image in Studio's environment wins: ax reads it from there.
+	t.Setenv("AX_SERVER_IMAGE", "example.com/ax-server:v2")
+	if got := start(t, ""); strings.Contains(got, "--server-image") {
+		t.Errorf("with AX_SERVER_IMAGE set, ax arguments = %q", got)
+	}
+}
+
 func TestValidateAXArgs(t *testing.T) {
-	sub, err := validateAXArgs([]string{"--context", "local", "-a", "default", "promote", "task", "demo", "--to", "team-gke", "--preflight-only"})
-	if err != nil || sub != "promote" {
-		t.Fatalf("validateAXArgs(promote) = (%q, %v), want (promote, nil)", sub, err)
+	sub, err := validateAXArgs([]string{"--context", "ax-local", "-a", "default", "suspend", "task", "demo"})
+	if err != nil || sub != "suspend" {
+		t.Fatalf("validateAXArgs(suspend) = (%q, %v), want (suspend, nil)", sub, err)
 	}
 	for _, bad := range [][]string{
 		nil,
+		{"--context", "ax-local", "promote", "task", "demo", "--to", "team-gke"},
 		{"--context", "local"},
 		{"local", "delete"},
 		{"--kubeconfig", "/tmp/x", "get", "tasks"},

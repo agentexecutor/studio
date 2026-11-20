@@ -63,7 +63,6 @@ type Options struct {
 	UXFS          fs.FS
 	Runner        kube.Runner
 	ResolveServer ServerResolver
-	GuestExec     GuestExecFunc
 	OnListening   func(boundURL string)
 	OnShutdown    func()
 }
@@ -83,7 +82,6 @@ type Server struct {
 	uxFS           fs.FS
 	runner         kube.Runner
 	resolveServer  ServerResolver
-	guestExec      GuestExecFunc
 	onListening    func(string)
 	onShutdown     func()
 	hub            *Hub
@@ -154,15 +152,6 @@ func NewServer(opts Options) (*Server, error) {
 		resolver = axclient.ServerURL
 	}
 
-	guestExec := opts.GuestExec
-	if guestExec == nil {
-		guestExec = func(ctx context.Context, atespace, taskName, kubeContext, axNamespace string, command []string, cwd string) (string, string, int, error) {
-			execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			defer cancel()
-			return kube.ExecInTaskSandbox(execCtx, runner, axBin, atespace, taskName, kubeContext, axNamespace, command, cwd)
-		}
-	}
-
 	sessTok, err := generateSecretHex(32)
 	if err != nil {
 		return nil, fmt.Errorf("generating session secret: %w", err)
@@ -187,7 +176,6 @@ func NewServer(opts Options) (*Server, error) {
 		uxFS:           uxFS,
 		runner:         runner,
 		resolveServer:  resolver,
-		guestExec:      guestExec,
 		onListening:    opts.OnListening,
 		onShutdown:     opts.OnShutdown,
 		hub:            NewHub(),
@@ -242,11 +230,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/env/local/up", s.requireMutatingAuth(s.handleLocalUp))
 	mux.HandleFunc("/api/env/local/stop", s.requireMutatingAuth(s.handleLocalAction("stop")))
 	mux.HandleFunc("/api/env/local/delete", s.requireMutatingAuth(s.handleLocalAction("delete")))
-	mux.HandleFunc("/api/env/install", s.requireMutatingAuth(s.handleRemoteInstall))
-	mux.HandleFunc("/api/env/uninstall", s.requireMutatingAuth(s.handleRemoteUninstall))
 	mux.HandleFunc("/api/env/cancel", s.requireMutatingAuth(s.handleEnvCancel))
-	mux.HandleFunc("/api/env/check", s.requireSession(s.handleClusterCheck))
-	mux.HandleFunc("/api/env/context", s.requireMutatingAuth(s.handleSelectContext))
 	mux.HandleFunc("/api/secrets/credential", s.requireMutatingAuth(s.handleCreateCredentialSecret))
 	mux.HandleFunc("/api/tasks", s.requireSession(s.handleListTasks))
 	mux.HandleFunc("/api/tasks/get", s.requireSession(s.handleGetTask))
@@ -259,11 +243,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/suspend", s.requireMutatingAuth(s.handleTaskAction("suspend")))
 	mux.HandleFunc("/api/tasks/resume", s.requireMutatingAuth(s.handleTaskAction("resume")))
 	mux.HandleFunc("/api/tasks/delete", s.requireMutatingAuth(s.handleTaskAction("delete")))
-	mux.HandleFunc("/api/tasks/changes", s.requireSession(s.handleTaskChanges))
 	mux.HandleFunc("/api/tasks/logs", s.requireSession(s.handleTaskLogs))
-	mux.HandleFunc("/api/tasks/discard-file", s.requireMutatingAuth(s.handleDiscardFile))
-	mux.HandleFunc("/api/tasks/apply-local", s.requireMutatingAuth(s.handleApplyLocal))
-	mux.HandleFunc("/api/tasks/push-branch", s.requireMutatingAuth(s.handlePushBranch))
 	mux.HandleFunc("/api/ax/exec", s.requireMutatingAuth(s.handleAXExec))
 	mux.HandleFunc("/api/sessions/start", s.requireMutatingAuth(s.handleSessionStart))
 	mux.HandleFunc("/api/sessions/write", s.requireMutatingAuth(s.handleSessionWrite))

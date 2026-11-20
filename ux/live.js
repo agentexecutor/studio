@@ -20,16 +20,14 @@
    AX, and every page that has no real source yet stays hidden. In a plain browser there is no server, so the app runs
    on demo data and nothing here is used. api.js is the way to the server.
 
-   Real today:
-   - this computer and the clusters in your kubeconfig, with setup of AX on this computer and checking, installing,
-     upgrading and uninstalling AX on a remote cluster (live-env.js)
-   - the task list, each task's goal and state, and a task's details, result and task file
+   Studio works with AX on this computer only: the local cluster `ax local` sets up (ax-local). Real today:
+   - setting up, starting, updating, stopping and removing AX on this computer (live-env.js)
+   - the task list, each task's state, and a task's details and YAML
    - what a task's sandbox printed, from Agent Substrate's workers (live-logs.js)
-   - for a task with debug access, what it changed in its sandbox, with push to a branch (live-changes.js), and a shell
-     in its sandbox (the Terminal, below)
-   - pause, resume and delete
+   - for a task with debug access, a shell in its sandbox (the Terminal, below)
+   - suspend, resume and delete
    - the workspaces and Gateways on the cluster, and deleting the ones no task uses (live-resources.js)
-   - starting a task, following up on one, and running one on another cluster (live-new.js)
+   - starting a task (live-new.js)
    - Settings: appearance, keyboard and the command palette, accessibility, what this Studio runs against (with the
      atespace), and diagnostics (live-settings.js)
 
@@ -49,7 +47,6 @@ const LIVE = {
   checks: [],            // { id, label, status: ok | warn | fail, detail, command }: what AX on this computer needs
   tools: [],             // { name, version, status: ok | warn | fail | none, detail }: ax, kubectl and kind
   axFlags: {},           // which optional flags this ax takes ({ runnerVolumeImage })
-  clusterChecks: {},     // context -> a read-only check of that cluster: { checking, error, requirements, substrate, router, workerPools, ax, axImage }
   canStartLocal: false,
   local: null,           // { name, state: NotFound | Stopped | Running, context, substrate, server }
   op: null,              // setup in progress, or the last one: { id, action, stage, status, error, logs, started, finished, stageStarted, step, canceled }
@@ -73,7 +70,6 @@ const LIVE = {
 const LIVE_POLL_MS = 4000;
 const LIVE_RETRY_MS = 20000; // after AX couldn't be reached, wait this long before asking again on its own
 const LIVE_ENV_MS = 15000;
-const LIVE_CONTEXT_KEY = 'ax.live.context';
 
 /* AX's task states in the UI's words. `chip` is the status style the rest of the app uses; `rank` sorts the list:
    what needs you first, then what's working, then the rest. */
@@ -82,9 +78,9 @@ const LIVE_STATES = {
   Failed: { label: 'Failed', chip: 'failed', icon: 'xCircle', rank: 0 },
   Working: { label: 'Running', chip: 'running', icon: 'loader', rank: 1, active: true },
   Queued: { label: 'Starting', chip: 'starting', icon: 'loader', rank: 1, active: true },
-  Suspending: { label: 'Pausing', chip: 'stopping', icon: 'loader', rank: 1, active: true },
+  Suspending: { label: 'Suspending', chip: 'stopping', icon: 'loader', rank: 1, active: true },
   Terminating: { label: 'Deleting', chip: 'stopping', icon: 'loader', rank: 1, active: true },
-  Suspended: { label: 'Paused', chip: 'paused', icon: 'pause', rank: 2 },
+  Suspended: { label: 'Suspended', chip: 'paused', icon: 'pause', rank: 2 },
   Idle: { label: 'Idle', chip: 'paused', icon: 'pause', rank: 2 },
   Completed: { label: 'Done', chip: 'done', icon: 'checkCircle', rank: 3 },
   Cancelled: { label: 'Stopped', chip: 'paused', icon: 'pause', rank: 3 },
@@ -129,13 +125,13 @@ function liveLastLine(text) {
 /** The ax command that does the same, to show and copy. It names the cluster, so your kubeconfig is never changed. */
 function liveCmd(args) { return ['ax'].concat(LIVE.context ? ['--context', LIVE.context] : [], LIVE.atespace && LIVE.atespace !== 'default' ? ['-a', LIVE.atespace] : [], args).join(' '); }
 const LIVE_ATESPACE_KEY = 'ax.live.atespace';
-/** Lists and starts tasks in another atespace. Like picking a cluster, it is Studio's own choice, kept in this browser. */
+/** Lists and starts tasks in another atespace. It is Studio's own choice, kept in this browser. */
 function liveUseAtespace(name) {
   name = String(name || '').trim() || 'default';
   if (name === LIVE.atespace) return;
   LIVE.atespace = name;
   try { if (name === 'default') localStorage.removeItem(LIVE_ATESPACE_KEY); else localStorage.setItem(LIVE_ATESPACE_KEY, name); } catch (e) { /* ignore */ }
-  LIVE.tasks = []; LIVE.detail = {}; LIVE.gateways = {}; LIVE.changes = {}; LIVE.logs = {}; LIVE.error = ''; LIVE.errorCode = ''; LIVE.failedAt = 0; LIVE.loaded = false;
+  LIVE.tasks = []; LIVE.detail = {}; LIVE.gateways = {}; LIVE.logs = {}; LIVE.error = ''; LIVE.errorCode = ''; LIVE.failedAt = 0; LIVE.loaded = false;
   if (LIVE.res) LIVE.res.ctx = null;
   LIVE.needsKnown = null;
 }
@@ -150,7 +146,7 @@ function liveSnapshot() {
 async function liveStart() {
   if (!LIVE.on || LIVE.started) return;
   LIVE.started = true;
-  Object.assign(ACTIONS, LIVE_ACTIONS, LIVE_ENV_ACTIONS, LIVE_NEW_ACTIONS, LIVE_CHANGES_ACTIONS, LIVE_LOGS_ACTIONS, LIVE_RES_ACTIONS, LIVE_NAV_ACTIONS);
+  Object.assign(ACTIONS, LIVE_ACTIONS, LIVE_ENV_ACTIONS, LIVE_NEW_ACTIONS, LIVE_LOGS_ACTIONS, LIVE_RES_ACTIONS, LIVE_NAV_ACTIONS);
   state.tasks = []; // no demo tasks here, so the simulated agents have nothing to run
   studioOn('envOp', liveOnEnvOp);
   studioOn('streamLine', liveOnStreamLine);
@@ -171,9 +167,9 @@ async function liveConnect() {
   LIVE.phase = 'ready';
   liveCheckAx();
   await liveLoadEnv();
-  /* Show this computer and the kubeconfig now: the first answer from a cluster can take a minute when it's unreachable. */
+  /* Show this computer now: the first answer from the cluster can take a while when it's starting. */
   render({ keepScroll: true, background: true });
-  /* A link can name the cluster and atespace to open on. */
+  /* A link can name the atespace to open on. */
   if (typeof liveApplyDeepLink === 'function') liveApplyDeepLink();
   await liveRefresh(true);
 }
@@ -193,8 +189,7 @@ async function liveCheckAx() {
   }
   render({ keepScroll: true, background: true });
 }
-/** This computer and your kubeconfig. Picks the cluster to talk to if the one in use is gone. fresh asks for the tools'
-    versions again (Check again). */
+/** This computer and AX on it. fresh asks for the tools' versions again (Check again). */
 async function liveLoadEnv(fresh) {
   LIVE.envAt = Date.now();
   try {
@@ -215,22 +210,19 @@ async function liveLoadEnv(fresh) {
   }
   liveChooseContext();
 }
+/* Studio talks to AX on this computer only: the context `ax local` names (ax-local), whatever your kubeconfig's
+   current context is. Before setup there's none yet, so pages show setup. */
 function liveChooseContext() {
-  const names = LIVE.contexts.map((x) => x.name);
-  if (names.includes(LIVE.context)) return;
-  let saved = '';
-  try { saved = localStorage.getItem(LIVE_CONTEXT_KEY) || ''; } catch (e) { /* ignore */ }
-  const current = LIVE.contexts.find((x) => x.current);
-  const local = LIVE.local && LIVE.local.state === 'Running' && names.includes(LIVE.local.context) ? LIVE.local.context : '';
-  const next = names.includes(saved) ? saved : current ? current.name : local || names[0] || '';
-  if (next !== LIVE.context) liveUseContext(next, true);
+  const L = LIVE.local || {};
+  const local = LIVE.contexts.find((c) => c.isLocal);
+  const name = L.context || (local && local.name) || '';
+  if (name !== LIVE.context) liveUseContext(name);
 }
-function liveUseContext(name, quiet) {
+function liveUseContext(name) {
   LIVE.context = name;
-  LIVE.tasks = []; LIVE.detail = {}; LIVE.gateways = {}; LIVE.changes = {}; LIVE.logs = {}; LIVE.error = ''; LIVE.errorCode = ''; LIVE.failedAt = 0; LIVE.loaded = false;
+  LIVE.tasks = []; LIVE.detail = {}; LIVE.gateways = {}; LIVE.logs = {}; LIVE.error = ''; LIVE.errorCode = ''; LIVE.failedAt = 0; LIVE.loaded = false;
   if (LIVE.res) LIVE.res.ctx = null;
   LIVE.needsKnown = null;
-  if (!quiet) { try { localStorage.setItem(LIVE_CONTEXT_KEY, name); } catch (e) { /* ignore */ } }
 }
 async function liveLoadTask(name) {
   try {
@@ -299,7 +291,7 @@ function liveTick() {
 
 /* ---------- Actions ---------- */
 const LIVE_VERBS = {
-  suspend: { doing: 'Pausing', done: 'Paused', fail: "Couldn't pause" },
+  suspend: { doing: 'Suspending', done: 'Suspended', fail: "Couldn't suspend" },
   resume: { doing: 'Resuming', done: 'Resumed', fail: "Couldn't resume" },
   delete: { doing: 'Deleting', done: 'Deleted', fail: "Couldn't delete" },
 };
@@ -314,7 +306,7 @@ async function liveTaskAction(name, verb) {
   delete LIVE.busy[name];
   if (!error) {
     toast(`${w.done} <span class="mono">${esc(name)}</span>`, { icon: verb === 'delete' ? 'trash' : 'check' });
-    if (verb === 'delete') { delete LIVE.detail[name]; delete LIVE.changes[name]; delete LIVE.logs[name]; LIVE.tasks = LIVE.tasks.filter((t) => t.name !== name); if (liveRouteTask() === name) location.hash = '#/'; }
+    if (verb === 'delete') { delete LIVE.detail[name]; delete LIVE.logs[name]; LIVE.tasks = LIVE.tasks.filter((t) => t.name !== name); if (liveRouteTask() === name) location.hash = '#/'; }
   } else {
     toast(`${w.fail} <span class="mono">${esc(name)}</span>: ${esc(error)}`, { icon: 'alert', timeout: 9000 });
   }
@@ -364,15 +356,6 @@ const LIVE_ACTIONS = {
   'live-suspend': (el) => liveTaskAction(el.dataset.task, 'suspend'),
   'live-resume': (el) => liveTaskAction(el.dataset.task, 'resume'),
   'live-delete': (el) => liveOpenDelete(el.dataset.task),
-  'live-use-context': (el) => {
-    const name = el.dataset.context;
-    if (LIVE.ctxMenu) LIVE.ctxMenu = false;
-    if (!name || name === LIVE.context) { render({ keepScroll: true }); return; }
-    liveUseContext(name);
-    render({ keepScroll: true });
-    announce(`Using ${name}`);
-    liveRefresh(true);
-  },
   'live-first-idea': (el) => {
     LIVE.draft = liveNewDraft('');
     LIVE.draft.goal = el.dataset.goal || '';
@@ -580,7 +563,7 @@ function liveTermInnerHTML(name, stateName) {
       ${canShell && set.list.length < LIVE_TERM_MAX ? `<button type="button" class="tt-new" data-action="live-term-add" data-task="${esc(name)}" aria-label="New shell">${icon('plus', 'xs')}New shell</button>` : ''}</div>` : '';
   const ended = tm.status === 'closed' && tm.exitCode != null ? `\n<span class="m">The shell ended${tm.exitCode ? ` (exit ${esc(tm.exitCode)})` : ''}.</span>` : '';
   return `<h2 id="live-term-h" class="sr-only">Terminal</h2>
-    <div class="log-bar"><span class="lb-text">${canShell ? 'A shell inside its gVisor sandbox, in <span class="mono">/workspace</span>, a line at a time.' : 'The task is not running right now, so its sandbox shell is closed.'}</span><span class="lb-actions">${controls}</span></div>
+    <div class="log-bar"><span class="lb-text">${canShell ? 'A shell inside its sandbox, in <span class="mono">/workspace</span>, a line at a time.' : 'The task is not running right now, so its sandbox shell is closed.'}</span><span class="lb-actions">${controls}</span></div>
     ${tm.error ? `<div class="callout warn" role="alert" style="margin-bottom:10px">${icon('alert')}<div style="overflow-wrap:anywhere">${esc(tm.error)}</div></div>` : ''}
     <div class="terminal live-terminal">
       <div class="term-bar"><span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>${tabs || `<span class="term-tab" aria-hidden="true">${esc(name)} · /workspace</span>`}</div>
@@ -649,7 +632,7 @@ function liveProblemHTML(title, message, cmd, extra) {
       <div class="live-title">${title}</div>
       <p class="small" style="margin-top:4px;overflow-wrap:anywhere">${esc(message)}</p>
       ${cmd ? `<div style="margin-top:10px">${cliHint(cmd)}</div>` : ''}
-      <div class="btn-row" style="margin-top:12px">${extra || ''}<button class="btn sm" data-action="live-refresh">${icon('refresh', 'sm')}Try again</button><a class="btn ghost sm" href="#/places">Where agents run</a></div>
+      <div class="btn-row" style="margin-top:12px">${extra || ''}<button class="btn sm" data-action="live-refresh">${icon('refresh', 'sm')}Try again</button><a class="btn ghost sm" href="#/places">Local cluster</a></div>
     </div></div></div>`;
 }
 function liveKV(rows) {
@@ -688,8 +671,8 @@ function liveRowHTML(t) {
 /* Home's sections, by how much a task needs you (its session's most urgent turn). The tiles jump to them. */
 const LIVE_HOME_SECTIONS = [
   { rank: 0, key: 'needs', cls: 'needs', label: 'Needs you', sub: (n) => (n ? 'Stopped or waiting' : 'All caught up') },
-  { rank: 1, key: 'running', cls: 'working', label: 'Running', sub: (n) => (n ? 'In gVisor sandboxes' : 'No agents running') },
-  { rank: 2, key: 'paused', cls: 'review', label: 'Paused', sub: (n) => (n ? 'Checkpointed' : 'None paused') },
+  { rank: 1, key: 'running', cls: 'working', label: 'Running', sub: (n) => (n ? 'In their sandboxes' : 'None running') },
+  { rank: 2, key: 'paused', cls: 'review', label: 'Suspended', sub: (n) => (n ? 'Checkpointed' : 'None suspended') },
   { rank: 3, key: 'done', cls: 'shipped', label: 'Done', sub: (n) => (n ? 'Finished runs' : 'None finished yet') },
 ];
 const LIVE_CALL_ME_KEY = 'ax.live.callMe';
@@ -712,15 +695,14 @@ function liveViewHome() {
   const lede = !LIVE.loaded ? 'Loading your tasks…'
     : LIVE.error ? `${LIVE_ERROR_WORDS[liveErrorKind()].summary}${list.length ? ' This is the last list it got.' : ''}`
       : needs ? 'Start with what needs you below. Agents keep working in their own sandboxes while you decide.'
-        : active ? 'Nothing needs you right now. Agents are working in their own gVisor sandboxes.'
-          : paused ? 'Every sandbox is quiet. Resume a paused task below, or describe your next outcome.'
+        : active ? 'Nothing needs you right now. Tasks are running in their own sandboxes.'
+          : paused ? 'Every sandbox is quiet. Resume a suspended task below, or describe your next outcome.'
             : list.length ? 'Every sandbox is quiet. Describe your next outcome and an agent will pick it up.'
-              : 'Describe the outcome you want. AX sets up a gVisor sandbox for the agent, and you review what it changed.';
+              : 'Describe the outcome you want. AX runs the task in its own sandbox.';
   const where = esc(LIVE.context || 'this cluster');
   const kind = liveErrorKind();
   const problem = !LIVE.error ? ''
-    : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Install it here or with the command below, then try again. What AX Studio got: ${LIVE.error}`, liveCmd(['install']),
-      liveIsLocal(LIVE.context) ? '' : `<button class="btn primary sm" data-action="live-install" data-context="${esc(LIVE.context)}" ${liveOpRunning() ? 'disabled' : ''}>${icon('wrench', 'sm')}Install AX…</button>`)
+    : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Repair it on Local cluster, then try again. What AX Studio got: ${LIVE.error}`, 'ax local start')
       : kind === 'versions' ? liveProblemHTML(`AX on ${where} and AX Studio are different versions`, `They can't read each other's data. Update the older one so the two match. What AX Studio got: ${LIVE.error}`, '')
         : liveProblemHTML(`Can't reach AX on ${where}`, LIVE.error, liveCmd(['get', 'tasks']));
   const heroMood = LIVE.error || needs ? 'wave' : active ? 'working' : 'idle';
@@ -728,7 +710,7 @@ function liveViewHome() {
   /* Axel only speaks when he has something the page doesn't already say: what you poked him for, or hello on an empty
      cluster. */
   const said = state.axelSpeech && Date.now() - state.axelSpeech.at < 8000 ? state.axelSpeech.text
-    : LIVE.loaded && !LIVE.error && !list.length ? "Hi! I'm Axel. Pick a template, point it at a repo and describe the goal. Each agent runs in its own gVisor sandbox." : '';
+    : LIVE.loaded && !LIVE.error && !list.length ? "Hi! I'm Axel. Start a task and AX runs it in its own sandbox on this computer." : '';
   const callMe = liveCallMe();
   const tile = (s) => {
     const n = inSec(s.rank).length;
@@ -740,10 +722,10 @@ function liveViewHome() {
   const sections = LIVE_HOME_SECTIONS.filter((s) => inSec(s.rank).length).map((s) => `<section class="section live-sec" aria-labelledby="live-sec-${s.key}">
       <div class="section-head"><h3 id="live-sec-${s.key}">${s.label}</h3></div>
       <div class="card task-card">${inSec(s.rank).map(liveRowHTML).join('')}</div></section>`).join('');
-  /* Whose tasks these are: the cluster in use, with a way to switch. New tasks start there too. */
+  /* Whose tasks these are: AX on this computer. New tasks start there too. */
   const upd = LIVE.refreshedAt ? `<span class="llh-upd" title="Studio asks again every few seconds">Updated <span data-live-updated data-fmt="ago" data-since="${LIVE.refreshedAt}">${fmtAgo(LIVE.refreshedAt)}</span></span><button type="button" class="btn ghost sm icon" data-action="live-refresh" aria-label="Refresh the list">${icon('refresh', 'sm')}</button>` : '';
   const ates = LIVE.atespace !== 'default' ? `<span class="env" title="Atespace"><span class="muted">atespace</span>&nbsp;<span class="mono">${esc(LIVE.atespace)}</span></span>` : '';
-  const listHead = `<div class="live-list-head"><h2 class="h-display-sm">Your tasks</h2><span class="llh-scope">${liveWhere(LIVE.context)}${ates}<a class="btn ghost sm" href="#/places">Change cluster</a>${list.length ? '<a class="btn ghost sm" href="#/tasks">All tasks</a>' : ''}</span>${upd}</div>`;
+  const listHead = `<div class="live-list-head"><h2 class="h-display-sm">Your tasks</h2><span class="llh-scope">${liveWhere(LIVE.context)}${ates}${list.length ? '<a class="btn ghost sm" href="#/tasks">All tasks</a>' : ''}</span>${upd}</div>`;
   const ideas = typeof FIRST_IDEAS !== 'undefined' ? `<div class="first-ideas" role="group" aria-label="Ideas to start with" style="margin-top:12px">
       <span class="fi-label">Start with an idea</span>
       ${FIRST_IDEAS.map((x) => `<button type="button" class="pill fi-idea" data-action="live-first-idea" data-goal="${esc(x.goal)}">${icon(x.ic, 'xs')}${esc(x.label)}</button>`).join('')}
@@ -778,7 +760,7 @@ function liveViewHome() {
 }
 
 /* ---------- All tasks: one searchable, filterable table (like the prototype's #/tasks) ---------- */
-const LIVE_TASK_FILTERS = [['all', 'All', -1], ['needs', 'Needs you', 0], ['running', 'Running', 1], ['paused', 'Paused', 2], ['done', 'Done', 3]];
+const LIVE_TASK_FILTERS = [['all', 'All', -1], ['needs', 'Needs you', 0], ['running', 'Running', 1], ['paused', 'Suspended', 2], ['done', 'Done', 3]];
 function liveTasksFilter() {
   if (!LIVE.tasksFilter) LIVE.tasksFilter = { q: '', status: 'all' };
   return LIVE.tasksFilter;
@@ -802,7 +784,6 @@ function liveTasksTableHTML(all) {
     const f = liveTasksFilter();
     return `<div class="tasks-empty"><b>No tasks match</b><span>${f.q.trim() ? `Nothing matches “${esc(f.q.trim())}” with these filters.` : (all || LIVE.tasks).length ? 'No tasks are in this state right now.' : 'Start a task and it shows up here.'}</span></div>`;
   }
-  const where = liveIsLocal(LIVE.context) ? 'This computer' : esc(liveShortCtx(LIVE.context));
   const rows = list.map((t) => {
     const spec = (t.doc && t.doc.spec) || {};
     const tpl = liveTaskTemplate(spec);
@@ -816,11 +797,10 @@ function liveTasksTableHTML(all) {
       <td>${busy ? `<span class="chip stopping">${icon('loader')}${LIVE_VERBS[busy].doing}</span>` : liveChip(t.state)}</td>
       <td><span class="tk-agent">${tpl.tile}${esc(tpl.name)}</span></td>
       <td>${ws ? `<span class="mono">${esc(ws)}</span>` : '<span class="muted">Empty</span>'}</td>
-      <td><span title="${esc(LIVE.context)}">${where}</span></td>
       <td class="tnum">${lim ? esc(lim) : '<span class="muted">Default</span>'}</td>
       <td class="muted">${age ? `${esc(age)} ago` : 'Just now'}</td></tr>`;
   }).join('');
-  return `<table class="table tasks-table"><thead><tr><th>Task</th><th>Status</th><th>Template</th><th>Workspace</th><th>Where</th><th>Resources</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="table tasks-table"><thead><tr><th>Task</th><th>Status</th><th>Template</th><th>Workspace</th><th>Resources</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function liveViewTasks() {
   if (LIVE.loaded && (!LIVE.context || liveLocalDown())) return liveViewSetup(false);
@@ -828,20 +808,18 @@ function liveViewTasks() {
   const f = liveTasksFilter();
   const active = all.filter((t) => liveState(t.state).active).length;
   const count = (rank) => (rank < 0 ? all.length : all.filter((t) => liveState(t.state).rank === rank).length);
-  const whereWords = liveIsLocal(LIVE.context) ? 'this computer' : esc(liveShortCtx(LIVE.context || 'this cluster'));
   const ates = LIVE.atespace !== 'default' ? `<span class="env" title="Atespace"><span class="muted">atespace</span>&nbsp;<span class="mono">${esc(LIVE.atespace)}</span></span>` : '';
   const upd = LIVE.refreshedAt ? `<span class="llh-upd" title="Studio asks again every few seconds">Updated <span data-live-updated data-fmt="ago" data-since="${LIVE.refreshedAt}">${fmtAgo(LIVE.refreshedAt)}</span></span><button type="button" class="btn ghost sm icon" data-action="live-refresh" aria-label="Refresh the list">${icon('refresh', 'sm')}</button>` : '';
   const kind = liveErrorKind();
   const where = esc(LIVE.context || 'this cluster');
   const problem = !LIVE.error ? ''
-    : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Install it here or with the command below, then try again. What AX Studio got: ${LIVE.error}`, liveCmd(['install']),
-      liveIsLocal(LIVE.context) ? '' : `<button class="btn primary sm" data-action="live-install" data-context="${esc(LIVE.context)}" ${liveOpRunning() ? 'disabled' : ''}>${icon('wrench', 'sm')}Install AX…</button>`)
+    : kind === 'missing' ? liveProblemHTML(`AX isn't installed on ${where}`, `Repair it on Local cluster, then try again. What AX Studio got: ${LIVE.error}`, 'ax local start')
       : kind === 'versions' ? liveProblemHTML(`AX on ${where} and AX Studio are different versions`, `They can't read each other's data. Update the older one so the two match. What AX Studio got: ${LIVE.error}`, '')
         : liveProblemHTML(`Can't reach AX on ${where}`, LIVE.error, liveCmd(['get', 'tasks']));
   const html = `
     <div class="page-head">
-      <div class="live-list-head" style="margin-top:0"><h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">All tasks</h1><span class="llh-scope">${liveWhere(LIVE.context)}${ates}<a class="btn ghost sm" href="#/places">Change cluster</a></span>${upd}</div>
-      <p class="lede">${!LIVE.loaded ? 'Loading your tasks…' : `${plural(all.length, 'task')} on ${whereWords}. ${active ? `${plural(active, 'sandbox', 'sandboxes')} running.` : 'No sandboxes running right now.'}`}</p>
+      <div class="live-list-head" style="margin-top:0"><h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">All tasks</h1><span class="llh-scope">${liveWhere(LIVE.context)}${ates}</span>${upd}</div>
+      <p class="lede">${!LIVE.loaded ? 'Loading your tasks…' : `${plural(all.length, 'task')} on this computer. ${active ? `${plural(active, 'sandbox', 'sandboxes')} running.` : 'No sandboxes running right now.'}`}</p>
     </div>
     ${problem}
     <div class="tasks-tools">
@@ -855,16 +833,15 @@ function liveViewTasks() {
   return { title: 'All tasks', crumbs: [{ label: 'Home', href: '#/' }, { label: 'All tasks' }], html, wide: true };
 }
 /* ---------- A task's page ----------
-   The prototype's frame (style guide §4.2): the header (title, then status, template, workspace and age, and the task-level
-   actions), then two columns. On the left, tabs: Activity, and for a task with debug access Changes and Terminal, then
-   Task file. Switching tabs swaps only the panel. On the right, the inspector: the Next step card with Axel (the only
-   Pause and Resume), where it runs (with Run on another cluster), what it can reach, and the turns of its session. */
-const LIVE_TASK_TABS = [['activity', 'Activity'], ['logs', 'Logs'], ['changes', 'Changes'], ['terminal', 'Terminal'], ['file', 'Task file']];
+   The header (title, then status, template, workspace and age, and Suspend or Resume and Delete), then two columns. On
+   the left, tabs: Activity, Logs, Terminal for a task with debug access, and YAML. Switching tabs swaps only the panel.
+   On the right: the task's state in AX's words, where it runs, and what it can reach. */
+const LIVE_TASK_TABS = [['activity', 'Activity'], ['logs', 'Logs'], ['terminal', 'Terminal'], ['file', 'YAML']];
 /* What AX's conditions say, in the UI's words. */
 const LIVE_COND_WORDS = {
   WorkspaceReady: (ok) => (ok ? 'set up the workspace' : 'is setting up the workspace'),
-  Ready: (ok, c) => (ok ? (c.reason === 'TaskRunning' ? 'started the agent in its sandbox' : 'marked it ready')
-    : c.reason === 'Suspended' ? 'paused the task' : `says it isn't ready${c.reason ? ` (${c.reason})` : ''}`),
+  Ready: (ok, c) => (ok ? (c.reason === 'TaskRunning' ? 'started the task in its sandbox' : 'marked it ready')
+    : c.reason === 'Suspended' ? 'suspended the task' : `says it isn't ready${c.reason ? ` (${c.reason})` : ''}`),
 };
 /* Conditions whose message only repeats the words above in AX's own terms ("Actor is suspended"). */
 const LIVE_COND_QUIET = { Ready: ['Suspended'] };
@@ -941,7 +918,7 @@ function liveActivityHTML(name, t, stateName, spec, status, meta, tpl, events) {
   const details = liveKV([
     ['Task name', `<span class="mono">${esc(name)}</span> <button class="btn ghost sm icon" data-action="copy" data-text="${esc(name)}" aria-label="Copy the task name">${icon('copy', 'sm')}</button>`],
     ['Command', cmd.length ? `<span class="mono">${esc(cmd.join(' '))}</span>` : "The image's own command"],
-    ['Debug access', spec.debug ? 'On: while it runs, Changes and Terminal can look inside its sandbox' : 'Off, so there is no shell into the sandbox'],
+    ['Debug access', spec.debug ? 'On: while it runs, Terminal can open a shell in its sandbox' : 'Off, so there is no shell into the sandbox'],
     ['Session', spec.sessionId ? `<span class="mono">${esc(spec.sessionId)}</span>` : ''],
     /* The sandbox's names in Agent Substrate (the actor and its uid), for kubectl and the worker's logs. */
     ['Sandbox', status.actor ? `<span class="mono">${esc(status.actor)}</span>${status.actorUid ? ` <span class="muted">· uid</span> <span class="mono">${esc(status.actorUid)}</span> <button class="btn ghost sm icon" data-action="copy" data-text="${esc(status.actorUid)}" aria-label="Copy the sandbox uid">${icon('copy', 'sm')}</button>` : ''}` : ''],
@@ -951,10 +928,10 @@ function liveActivityHTML(name, t, stateName, spec, status, meta, tpl, events) {
   ]);
   return `<h2 class="sr-only">Activity</h2>
     <ol class="timeline" id="live-timeline" aria-label="Activity">${events.map((e) => e.html).join('')}</ol>
-    ${working ? `<div class="working" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span>${esc(tpl.name)} is working · ${esc(liveAge(meta.createTime) || 'moments')}</div>` : ''}
+    ${working ? `<div class="working" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span>Running · ${esc(liveAge(meta.createTime) || 'moments')}</div>` : ''}
     <p class="xsmall muted" style="margin-top:12px" id="live-task-note">${spec.debug
-      ? `These are the steps AX records. What the agent printed is in <a href="#/task/${encodeURIComponent(name)}/logs">Logs</a>.`
-      : `This task was started without debug access, so its sandbox stays closed. What it printed is in <a href="#/task/${encodeURIComponent(name)}/logs">Logs</a>; review its result here, and the branch or pull request it pushes.`}</p>
+      ? `These are the steps AX records. What the task printed is in <a href="#/task/${encodeURIComponent(name)}/logs">Logs</a>.`
+      : `These are the steps AX records. What the task printed is in <a href="#/task/${encodeURIComponent(name)}/logs">Logs</a>. It was started without debug access, so it has no shell.`}</p>
     <section class="live-details" aria-labelledby="live-details"><h2 id="live-details" class="panel-title">Details</h2><div style="margin-top:10px">${details}</div>
       ${(status.conditions || []).length ? `<details class="disclosure" style="margin-top:10px"><summary>${icon('chevRight', 'sm chev')}AX's conditions, as recorded (${status.conditions.length})</summary><div class="disclosure-body">
         <table class="cond-table"><thead><tr><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Reason</th><th scope="col">Message</th><th scope="col">Updated</th></tr></thead>
@@ -966,6 +943,15 @@ function liveTaskFileHTML(name, det) {
       <div class="log-bar"><span class="lb-text">What AX stores for this task, as <span class="mono">ax get task</span> prints it.</span><span class="lb-actions"><button class="btn ghost sm" data-action="copy" data-text="${esc(det.yaml)}">${icon('copy', 'sm')}Copy</button></span></div>
       <pre class="manifest" tabindex="0" aria-label="Task file">${esc(det.yaml)}</pre>
       <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['get', 'task', name]))}</code></p></section>`;
+}
+/** Suspend for a running task, Resume for a suspended one, as `ax suspend` and `ax resume` do. '' for neither. */
+function liveSuspendResumeHTML(name, stateName, busy, cls) {
+  const canSuspend = ['Working', 'Queued', 'Idle', 'RequiresAction'].includes(stateName);
+  const canResume = stateName === 'Suspended';
+  if (!canSuspend && !canResume) return '';
+  const verb = canResume ? 'resume' : 'suspend';
+  const label = busy ? `${LIVE_VERBS[busy].doing}…` : canResume ? 'Resume' : 'Suspend';
+  return `<button type="button" class="btn ${cls || ''}" data-action="live-${verb}" data-task="${esc(name)}" ${busy ? 'disabled' : ''} title="${esc(liveCmd([verb, 'task', name]))}">${icon(busy ? 'loader' : canResume ? 'play' : 'pause', 'sm')}${label}</button>`;
 }
 function liveTaskHeadHTML(name, t, stateName, spec, meta, tpl, busy) {
   const title = t.goal ? t.goal.split('\n')[0].slice(0, 140) : name;
@@ -983,7 +969,7 @@ function liveTaskHeadHTML(name, t, stateName, spec, meta, tpl, busy) {
           <span class="env">${icon('clock')}${age ? `Created ${esc(age)} ago` : 'Just created'}</span>
         </div>
       </div>
-      <div class="btn-row"><button type="button" class="btn ghost icon" data-action="live-copy-link" aria-label="Copy a link to this task" title="Copy a link to this task">${icon('link', 'sm')}</button><a class="btn" href="#/new?from=${encodeURIComponent(name)}" id="live-follow">Send a follow-up</a><button class="btn danger" data-action="live-delete" data-task="${esc(name)}" ${busy ? 'disabled' : ''}>Delete…</button></div>
+      <div class="btn-row"><button type="button" class="btn ghost icon" data-action="live-copy-link" aria-label="Copy a link to this task" title="Copy a link to this task">${icon('link', 'sm')}</button>${liveSuspendResumeHTML(name, stateName, busy, '')}<button class="btn danger" data-action="live-delete" data-task="${esc(name)}" ${busy ? 'disabled' : ''}>Delete…</button></div>
     </div>`;
 }
 /** The sites a Gateway lets a task reach, and the keys it adds on the way out. */
@@ -1023,57 +1009,41 @@ function liveReachHTML(gw) {
 }
 function liveTaskSideHTML(name, t, stateName, spec, status, busy) {
   const detail = status.statusDetail && (status.statusDetail.detail || status.statusDetail.reason);
-  const canPause = ['Working', 'Queued', 'Idle', 'RequiresAction'].includes(stateName);
-  const canResume = stateName === 'Suspended';
-  /* The agent's command exited with an error while AX still calls the task running: that's what needs you. */
+  /* The task's command exited with an error while AX still calls the task running: its logs say so. */
   const exited = ['Working', 'Idle'].includes(stateName) && typeof liveLogsAgentExit === 'function' ? liveLogsAgentExit(name) : null;
   const nsTone = stateName === 'Failed' ? 'fail' : stateName === 'RequiresAction' || exited ? 'attn' : stateName === 'Completed' ? 'done' : stateName === 'Suspended' ? 'paused' : 'calm';
-  const nsTitle = exited ? 'The agent stopped with an error'
+  const nsTitle = exited ? 'Its command stopped with an error'
     : stateName === 'Failed' ? 'Stopped with an error'
     : stateName === 'RequiresAction' ? 'Waiting for you'
       : stateName === 'Completed' ? 'Finished'
-        : stateName === 'Suspended' ? 'Paused'
-          : 'Working in its sandbox';
+        : stateName === 'Suspended' ? 'Suspended'
+          : stateName === 'Queued' ? 'Starting'
+            : 'Running in its sandbox';
   const tab = (k, label) => `<a href="#/task/${encodeURIComponent(name)}/${k}">${label}</a>`;
-  /* When AX says why it stopped, the next step can say what to change. */
-  const remedy = /out of memory|oom/i.test(detail || '') ? ' Pick a larger size under More options when you try again.' : '';
-  const nsBody = (exited ? `Its command exited${exited.time ? ` at ${esc(exited.time)}` : ''}, though AX still shows the task as running. Fix what it hit, then send a follow-up or try again.`
-    : stateName === 'Failed' ? (detail ? esc(detail) + remedy : `${tab('logs', 'Logs')} has what the agent printed. Try again to start a new turn in the same session.`)
-    : stateName === 'Suspended' ? "Its gVisor sandbox is checkpointed and nothing is running. Resume when you're ready."
-      : stateName === 'Completed' ? 'Review the result in Activity, or send a follow-up to continue in the same session.'
-        : spec.debug ? `Look at what it changed in ${tab('changes', 'Changes')}, or open a shell in ${tab('terminal', 'Terminal')}. Pause anytime.`
-          : 'Running inside an isolated gVisor sandbox. Pause anytime, or send a follow-up in the same session.')
+  /* When AX says why it stopped, say what to change. */
+  const remedy = /out of memory|oom/i.test(detail || '') ? ' Give it more memory when you start it again.' : '';
+  const nsBody = (exited ? `Its command exited${exited.time ? ` at ${esc(exited.time)}` : ''}, though AX still shows the task as running. ${tab('logs', 'Logs')} has what it printed.`
+    : stateName === 'Failed' ? (detail ? esc(detail) + remedy : `${tab('logs', 'Logs')} has what it printed.`)
+    : stateName === 'Suspended' ? "Its sandbox is checkpointed and nothing is running. Resume it when you're ready."
+      : stateName === 'Completed' ? `Its command finished. ${tab('logs', 'Logs')} has what it printed.`
+        : spec.debug ? `Open a shell in ${tab('terminal', 'Terminal')}, or read ${tab('logs', 'Logs')}.`
+          : `${tab('logs', 'Logs')} has what it prints.`)
     /* What AX says about the state, when it says something and the state isn't already explained by it. */
     + (detail && stateName !== 'Failed' ? ` <span class="ns-detail">AX says: ${esc(detail)}</span>` : '')
-    /* The agent can stop with an error while AX still calls the task running: its logs say so. */
     + (typeof liveLogsNextHTML === 'function' && stateName !== 'Completed' ? liveLogsNextHTML(name) : '');
-  /* A failed task can't be resumed; trying again is a new turn in its session, with the same goal to start from. */
-  const tryAgain = `<a class="btn primary sm" id="live-try-again" href="#/new?from=${encodeURIComponent(name)}&amp;again=1">${icon('undo', 'sm')}Try again</a>`;
-  const pauseBtn = `<button class="btn sm" data-action="live-suspend" data-task="${esc(name)}" ${busy ? 'disabled' : ''}>${icon(busy ? 'loader' : 'pause', 'sm')}${busy ? LIVE_VERBS[busy].doing + '…' : 'Pause'}</button>`;
-  const btn = canResume ? `<button class="btn primary sm" data-action="live-resume" data-task="${esc(name)}" ${busy ? 'disabled' : ''}>${icon(busy ? 'loader' : 'play', 'sm')}${busy ? LIVE_VERBS[busy].doing + '…' : 'Resume'}</button>`
-    /* Its agent stopped: try again, or pause the sandbox it left running. */
-    : exited && canPause ? tryAgain + pauseBtn
-      : canPause ? pauseBtn
-        : stateName === 'Failed' ? tryAgain : '';
   const next = `<section class="card card-pad next-card s-${nsTone}" id="next-step" data-tone="${nsTone}" aria-labelledby="ns-k">
       <span class="ns-axel" aria-hidden="true">${axo(liveAxoMood(stateName), { decorative: true, cls: 'axo-ns' }).replace('<svg ', '<svg data-follow ')}</span>
-      <h2 class="panel-title" id="ns-k">${nsTone === 'attn' || nsTone === 'fail' ? '<span class="ns-dot" aria-hidden="true"></span>Your next step' : 'Next'}</h2>
+      <h2 class="panel-title" id="ns-k">${nsTone === 'attn' || nsTone === 'fail' ? '<span class="ns-dot" aria-hidden="true"></span>' : ''}State</h2>
       <p class="ns-title">${nsTitle}</p><p class="ns-body">${nsBody}</p>
-      ${btn ? `<div class="btn-row" style="margin-top:12px">${btn}</div>` : ''}
     </section>`;
-  const local = liveIsLocal(LIVE.context);
   const limits = liveLimitsText(spec);
   const where = `<div class="card card-pad" id="live-where-card"><h2 class="panel-title">Where it runs</h2>
-      <div class="where"><div><b>${local ? 'On this computer' : 'On a remote cluster'}</b><span>${local ? `gVisor sandbox on ${esc(LIVE.context)}` : `${esc(LIVE.context)} · keeps running with your laptop closed`}</span></div></div>
+      <div class="where"><div><b>On this computer</b><span>In its own sandbox on ${esc(LIVE.context || 'ax-local')}</span></div></div>
       <dl class="kv xsmall" style="margin-top:12px">${spec.profile && spec.profile.image ? `<dt>Image</dt><dd><span class="img-short"><span class="mono" title="${esc(spec.profile.image)}">${esc(typeof liveImageShort === 'function' ? liveImageShort(spec.profile.image) : spec.profile.image)}</span><button class="btn ghost sm icon" data-action="copy" data-text="${esc(spec.profile.image)}" aria-label="Copy the image address">${icon('copy', 'sm')}</button></span></dd>` : ''}${limits ? `<dt>Limits</dt><dd>${esc(limits)}</dd>` : ''}${status.attempt ? `<dt>Attempt</dt><dd>${esc(status.attempt)}</dd>` : ''}</dl>
-      <button class="btn sm" style="margin-top:12px;width:100%" data-action="live-promote" data-task="${esc(name)}" ${busy ? 'disabled' : ''}>${icon('cloudUp', 'sm')}Run on another cluster…</button>
     </div>`;
   const gw = spec.gateway && spec.gateway.name;
   const reach = `<div class="card card-pad" id="live-ns-guard-card">${liveReachHTML(gw)}</div>`;
-  const turns = t.session ? LIVE.tasks.filter((x) => x.session === t.session).sort((a, b) => String(a.created).localeCompare(String(b.created)) || a.name.localeCompare(b.name)) : [];
-  const session = turns.length > 1 ? `<div class="card card-pad" id="live-session-card"><h2 class="panel-title">Session · ${plural(turns.length, 'turn')}</h2>
-      <ol class="rail-list live-turns">${turns.map((x, i) => `<li>${x.name === name ? `<b>Turn ${i + 1}</b><span class="muted">· this task</span>` : `<a href="#/task/${encodeURIComponent(x.name)}">Turn ${i + 1}</a><span class="muted lt-goal">· ${esc((x.goal || x.name).split('\n')[0])}</span>`}<span class="r-val">${liveChip(x.state)}</span></li>`).join('')}</ol></div>` : '';
-  return next + where + reach + session;
+  return next + where + reach;
 }
 function liveViewTask(name, tab) {
   const row = LIVE.tasks.find((t) => t.name === name);
@@ -1082,8 +1052,8 @@ function liveViewTask(name, tab) {
   const crumbs = [{ label: 'Home', href: '#/' }, { label: name }];
   if ((!row && !doc) || (det && det.missing && !row)) {
     const html = LIVE.loaded
-      ? `<div class="page-head"><h1 tabindex="-1">${esc(name)} isn't on this cluster</h1><p class="lede">It may have been deleted, or it lives on another cluster.</p></div>
-         <div class="btn-row"><a class="btn" href="#/">Your tasks</a><a class="btn ghost" href="#/places">Change cluster</a></div>`
+      ? `<div class="page-head"><h1 tabindex="-1">${esc(name)} isn't on this cluster</h1><p class="lede">It may have been deleted, or it's in another atespace.</p></div>
+         <div class="btn-row"><a class="btn" href="#/">Your tasks</a></div>`
       : `<div class="page-head"><h1 tabindex="-1">${esc(name)}</h1><p class="lede">Loading…</p></div>`;
     return { title: name, crumbs, html };
   }
@@ -1093,18 +1063,14 @@ function liveViewTask(name, tab) {
   const stateName = row ? row.state : t.state;
   const busy = LIVE.busy[name];
   const tpl = liveTaskTemplate(spec);
-  const tabs = LIVE_TASK_TABS.filter(([k]) => spec.debug || (k !== 'changes' && k !== 'terminal'));
+  const tabs = LIVE_TASK_TABS.filter(([k]) => spec.debug || k !== 'terminal');
   tab = tabs.some(([k]) => k === tab) ? tab : 'activity';
-  /* Changes is read as soon as the page opens, so its tab can say how many files changed. */
-  if (spec.debug && typeof liveChangesWanted === 'function') liveChangesWanted(name, stateName);
   /* The logs are read as the page opens too, so the Logs tab and the Next card can say when the agent logged an error. */
   if (typeof liveLogsWanted === 'function') liveLogsWanted(name);
   if (spec.workspace && spec.workspace.name && typeof liveResWanted === 'function') liveResWanted();
   const logErr = typeof liveLogsError === 'function' && !!liveLogsError(name);
-  const changed = typeof liveChangesCount === 'function' ? liveChangesCount(name) : 0;
   const events = liveActivityEvents(name, t, stateName, spec, status, meta, tpl);
   const panel = tab === 'logs' ? liveLogsHTML(name, t, stateName)
-    : tab === 'changes' ? liveChangesHTML(name, t, stateName)
     : tab === 'terminal' ? liveTermHTML(name, t, stateName)
       : tab === 'file' ? liveTaskFileHTML(name, det)
         : liveActivityHTML(name, t, stateName, spec, status, meta, tpl, events);
@@ -1115,7 +1081,7 @@ function liveViewTask(name, tab) {
       <div style="min-width:0">
         <div class="tabs-bar">
           <div class="seg task-tabs" role="tablist" aria-label="Task views">
-            ${tabs.map(([k, l]) => `<a role="tab" id="tab-${k}" href="#/task/${encodeURIComponent(name)}${k === 'activity' ? '' : '/' + k}" aria-selected="${tab === k}"${tab === k ? ` aria-controls="panel-${k}"` : ''} tabindex="${tab === k ? 0 : -1}">${l}${k === 'changes' ? `<span class="count" id="count-changes" ${changed ? '' : 'hidden'}>${changed || ''}</span>` : ''}${k === 'logs' ? `<span class="tab-dot" id="dot-logs" ${logErr ? '' : 'hidden'}><span class="sr-only">, has an error</span></span>` : ''}</a>`).join('')}
+            ${tabs.map(([k, l]) => `<a role="tab" id="tab-${k}" href="#/task/${encodeURIComponent(name)}${k === 'activity' ? '' : '/' + k}" aria-selected="${tab === k}"${tab === k ? ` aria-controls="panel-${k}"` : ''} tabindex="${tab === k ? 0 : -1}">${l}${k === 'logs' ? `<span class="tab-dot" id="dot-logs" ${logErr ? '' : 'hidden'}><span class="sr-only">, has an error</span></span>` : ''}</a>`).join('')}
           </div>
           <div class="tabs-tools"><span class="xsmall muted tt-meta">${tab === 'logs' ? 'From the Agent Substrate worker' : `${plural(events.length, 'event')} · recorded by AX`}</span></div>
         </div>
@@ -1130,7 +1096,7 @@ function liveViewNotYet(part) {
   const what = LIVE_HIDDEN[part] || 'This page';
   const html = `<div class="page-head"><h1 tabindex="-1">${what} isn't connected to AX yet</h1>
       <p class="lede">It still runs on demo data, so it's hidden here. Your tasks and where they run are real.</p></div>
-    <div class="btn-row"><a class="btn primary" href="#/">Your tasks</a><a class="btn" href="#/places">Where agents run</a></div>`;
+    <div class="btn-row"><a class="btn primary" href="#/">Your tasks</a><a class="btn" href="#/places">Local cluster</a></div>`;
   return { title: what, crumbs: [{ label: 'Home', href: '#/' }, { label: what }], html };
 }
 
@@ -1143,7 +1109,7 @@ function liveShellHTML() {
       <a class="btn primary new-btn" href="#/new" id="live-new">${icon('plus', 'sm')}New task</a>
       <nav class="nav" aria-label="Main">
         <a href="#/" data-nav="home" id="nav-home">${icon('inbox')}<span class="label">Home</span><span class="count attn" id="live-nav-needs" hidden></span></a>
-        <a href="#/places" data-nav="places" id="nav-places">${icon('server')}<span class="label">Where agents run</span></a>
+        <a href="#/places" data-nav="places" id="nav-places">${icon('server')}<span class="label">Local cluster</span></a>
         <a href="#/settings" data-nav="settings" id="nav-settings">${icon('sliders')}<span class="label">Settings</span></a>
       </nav>
       <div class="nav nav-tasks" role="navigation" aria-label="Tasks"><div class="nav-label">Tasks<a class="nav-all" href="#/tasks" data-nav="tasks">See all</a></div><div id="live-nav-tasks"></div></div>
@@ -1162,15 +1128,14 @@ function liveShellHTML() {
   </div>`;
 }
 function liveFootStatus() {
-  /* An operation counts here when it is on the cluster in use: AX on this computer, or the remote one it installs on. */
+  /* Setup, start, update, stop or remove of AX on this computer, while it runs. */
   const op = LIVE.op;
-  const remoteOp = !!op && (op.action === 'remote-install' || op.action === 'remote-uninstall');
-  const opHere = liveOpRunning() && (remoteOp ? op.target === LIVE.context : liveOpIsLocal(op) && (!LIVE.context || liveIsLocal(LIVE.context)));
+  const opHere = liveOpRunning() && liveOpIsLocal(op);
   const setup = opHere || !LIVE.context || liveLocalDown();
   const bad = LIVE.phase !== 'ready' || !!LIVE.error || setup;
-  const title = LIVE.phase === 'offline' ? 'Not connected' : !LIVE.context ? 'No cluster yet' : liveIsLocal(LIVE.context) ? 'This computer' : liveShortCtx(LIVE.context);
+  const title = LIVE.phase === 'offline' ? 'Not connected' : 'This computer';
   const sub = LIVE.phase === 'starting' ? 'Connecting…' : LIVE.phase === 'offline' ? "AX Studio isn't answering"
-    : opHere ? `${typeof liveOpShort === 'function' ? liveOpShort(op) : 'Working'}…` : !LIVE.context ? 'Set up AX to start' : liveLocalDown() ? (LIVE.local.state === 'Stopped' ? 'AX is stopped' : 'AX is not set up')
+    : opHere ? `${typeof liveOpShort === 'function' ? liveOpShort(op) : 'Working'}…` : !LIVE.context ? 'AX is not set up' : liveLocalDown() ? (LIVE.local.state === 'Stopped' ? 'AX is stopped' : 'AX is not set up')
       : LIVE.error ? LIVE_ERROR_WORDS[liveErrorKind()].foot : `Connected · ${plural(LIVE.tasks.filter((t) => liveState(t.state).active).length, 'running', 'running')}`;
   return { bad, title, sub };
 }
@@ -1192,11 +1157,8 @@ function liveChrome(top) {
   if (state.docTitle) document.title = (n ? `(${n}) ` : '') + state.docTitle;
   const foot = $('#live-foot');
   if (foot) {
-    if (typeof liveCtxSwitchHTML === 'function') foot.innerHTML = liveCtxSwitchHTML();
-    else {
-      const { bad, title, sub } = liveFootStatus();
-      foot.innerHTML = `<a class="health-card ${bad ? 'attn' : ''}" href="#/places" id="live-health" aria-label="${esc(title)}: ${esc(sub)}. Open Where agents run.">${icon(!LIVE.context || liveIsLocal(LIVE.context) ? 'laptop' : 'cloud')}<span class="hc-text"><span class="hc-title">${esc(title)}</span><span class="hc-sub">${esc(sub)}</span></span></a>`;
-    }
+    const { bad, title, sub } = liveFootStatus();
+    foot.innerHTML = `<a class="health-card ${bad ? 'attn' : ''}" href="#/places" id="live-health" aria-label="${esc(title)}: ${esc(sub)}. Open Local cluster.">${icon('laptop')}<span class="hc-text"><span class="hc-title">${esc(title)}</span><span class="hc-sub">${esc(sub)}</span></span></a>`;
   }
 }
 function liveRender(opts) {
@@ -1225,6 +1187,8 @@ function liveRender(opts) {
   let v, top = 'home';
   if (LIVE.phase === 'starting') v = liveViewStarting();
   else if (LIVE.phase === 'offline') v = liveViewOffline();
+  /* Until AX runs on this computer, every page but Local cluster and Settings is setup. */
+  else if (LIVE.loaded && (!LIVE.context || liveLocalDown()) && !['places', 'setup', 'settings'].includes(r.parts[0])) v = liveViewSetup(!r.parts[0]);
   else if (!r.parts[0]) v = liveViewHome();
   else if (r.parts[0] === 'tasks') { v = liveViewTasks(); top = 'tasks'; }
   else if (r.parts[0] === 'task') v = liveViewTask(decodeURIComponent(r.parts[1] || ''), r.parts[2]);
@@ -1272,7 +1236,7 @@ function livePaletteItems() {
     { group: 'Go to', label: 'New task', icon: 'plus', cli: liveCmd(['apply', '-f', 'task.yaml']), run: go('#/new'), keys: 'N' },
     { group: 'Go to', label: 'Home (Your tasks)', icon: 'inbox', cli: liveCmd(['get', 'tasks']), run: go('#/') },
     { group: 'Go to', label: 'All tasks', icon: 'layers', cli: liveCmd(['get', 'tasks']), run: go('#/tasks') },
-    { group: 'Go to', label: 'Where agents run', icon: 'server', cli: 'ax local status', run: go('#/places') },
+    { group: 'Go to', label: 'Local cluster', icon: 'server', cli: 'ax local status', run: go('#/places') },
     { group: 'Go to', label: 'Settings', icon: 'sliders', cli: '', run: go('#/settings') },
   );
   if (r.parts[0] === 'task' && r.parts[1]) {
@@ -1280,7 +1244,7 @@ function livePaletteItems() {
     const row = LIVE.tasks.find((t) => t.name === name);
     const st = row ? row.state : '';
     if (['Working', 'Queued', 'Idle', 'RequiresAction'].includes(st)) {
-      items.push({ group: 'This task', label: `Pause ${name}`, icon: 'pause', cli: liveCmd(['suspend', 'task', name]), run: () => liveTaskAction(name, 'suspend') });
+      items.push({ group: 'This task', label: `Suspend ${name}`, icon: 'pause', cli: liveCmd(['suspend', 'task', name]), run: () => liveTaskAction(name, 'suspend') });
     }
     if (st === 'Suspended') {
       items.push({ group: 'This task', label: `Resume ${name}`, icon: 'play', cli: liveCmd(['resume', 'task', name]), run: () => liveTaskAction(name, 'resume') });
@@ -1288,18 +1252,8 @@ function livePaletteItems() {
     if (row && row.debug) {
       items.push({ group: 'This task', label: 'Open shell in sandbox', icon: 'terminal', cli: liveCmd(['ssh', name]), run: () => { location.hash = `#/task/${encodeURIComponent(name)}/terminal`; liveTermOpen(name); } });
     }
-    items.push(
-      { group: 'This task', label: 'Send a follow-up', icon: 'message', cli: liveCmd(['apply', '-f', 'task.yaml']), run: go(`#/new?from=${encodeURIComponent(name)}`) },
-      { group: 'This task', label: 'Run on another cluster…', icon: 'cloudUp', cli: liveCmd(['promote', 'task', name]), run: () => liveOpenPromote(name) },
-      { group: 'This task', label: 'Delete task…', icon: 'trash', cli: liveCmd(['delete', 'task', name]), run: () => liveOpenDelete(name) },
-    );
+    items.push({ group: 'This task', label: 'Delete task…', icon: 'trash', cli: liveCmd(['delete', 'task', name]), run: () => liveOpenDelete(name) });
   }
-  LIVE.contexts.forEach((c) => {
-    if (c.name !== LIVE.context) {
-      /* Connecting is Studio's own choice: the command names the cluster, and the kubeconfig stays as it is. */
-      items.push({ group: 'Clusters', label: `Connect to ${c.name}`, icon: liveIsLocal(c.name) ? 'laptop' : 'cloud', cli: `ax --context ${c.name} get tasks`, run: () => LIVE_ACTIONS['live-use-context']({ dataset: { context: c.name } }) });
-    }
-  });
   LIVE.tasks.forEach((t) => {
     const d = liveState(t.state);
     items.push({ group: 'Tasks', label: t.goal || t.name, icon: d.icon === 'loader' ? 'activity' : d.icon, cli: liveCmd(['get', 'task', t.name]), run: go(`#/task/${encodeURIComponent(t.name)}`), meta: `${t.name} · ${d.label}` });

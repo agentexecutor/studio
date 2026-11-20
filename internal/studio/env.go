@@ -116,6 +116,8 @@ type EnvStatusResponse struct {
 	Tools []ToolInfo `json:"tools"`
 	// AXFlags says which optional flags this ax takes.
 	AXFlags AXFlags `json:"axFlags"`
+	// SetupImages are the images setup uses unless the request names others.
+	SetupImages SetupImages `json:"setupImages"`
 }
 
 // hasContainerCLI reports whether a docker or podman command is on PATH,
@@ -325,6 +327,7 @@ func (s *Server) collectEnvStatusFresh(ctx context.Context, fresh bool) EnvStatu
 	resp.Local.Access = s.localAccess(ctx, resp.Local, resp.Contexts)
 	resp.Tools = s.collectTools(ctx, fresh)
 	resp.AXFlags = s.axFlags(ctx)
+	resp.SetupImages = setupImages(resp.AXFlags)
 
 	s.opMu.Lock()
 	if s.currentOp != nil {
@@ -357,6 +360,7 @@ type localActionRequest struct {
 	Name              string `json:"name"`
 	Workers           int    `json:"workers"`
 	ServerImage       string `json:"serverImage"`
+	DefaultTaskImage  string `json:"defaultTaskImage"`
 	RunnerVolumeImage string `json:"runnerVolumeImage"`
 	// Purpose is the button that started `ax local start`: setup, start,
 	// update or repair. It only changes how the operation is worded.
@@ -393,10 +397,24 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	taskImg, err := validateOptionalFlagImage(req.DefaultTaskImage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	runnerImg, err := validateOptionalFlagImage(req.RunnerVolumeImage)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Without images in the request or in Studio's environment (which ax
+	// reads too), setup uses Studio's pinned defaults (images.go).
+	flags := s.axFlags(r.Context())
+	if srvImg == "" && strings.TrimSpace(os.Getenv("AX_SERVER_IMAGE")) == "" {
+		srvImg = DefaultServerImage
+	}
+	if taskImg == "" && strings.TrimSpace(os.Getenv("AX_DEFAULT_TASK_IMAGE")) == "" && flags.DefaultTaskImage {
+		taskImg = DefaultTaskImage
 	}
 	workers := req.Workers
 	if workers <= 0 {
@@ -409,6 +427,9 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	args := []string{"-n", s.axNamespace, "local", "start", "--name", name, "--workers", strconv.Itoa(workers)}
 	if srvImg != "" {
 		args = append(args, "--server-image", srvImg)
+	}
+	if taskImg != "" {
+		args = append(args, "--default-task-image", taskImg)
 	}
 	if runnerImg != "" {
 		args = append(args, "--runner-volume-image", runnerImg)
@@ -476,68 +497,6 @@ func (s *Server) handleLocalAction(subcmd string) http.HandlerFunc {
 		}
 		s.runAXOperation(w, "local-"+subcmd, name, "", []string{"-n", s.axNamespace, "local", subcmd, "--name", name})
 	}
-}
-
-type remoteInstallRequest struct {
-	Context           string `json:"context"`
-	ServerImage       string `json:"serverImage"`
-	RunnerVolumeImage string `json:"runnerVolumeImage"`
-}
-
-func (s *Server) handleRemoteInstall(w http.ResponseWriter, r *http.Request) {
-	var req remoteInstallRequest
-	if err := decodeJSONBody(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	targetCtx := strings.TrimSpace(req.Context)
-	if targetCtx == "" || strings.HasPrefix(targetCtx, "-") {
-		writeError(w, http.StatusBadRequest, "valid Kubernetes context is required")
-		return
-	}
-	srvImg, err := validateOptionalFlagImage(req.ServerImage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	runnerImg, err := validateOptionalFlagImage(req.RunnerVolumeImage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	args := []string{"--context", targetCtx, "-n", s.axNamespace, "install"}
-	if srvImg != "" {
-		args = append(args, "--server-image", srvImg)
-	}
-	if runnerImg != "" {
-		args = append(args, "--runner-volume-image", runnerImg)
-	}
-
-	s.runAXOperation(w, "remote-install", targetCtx, "ax", args)
-}
-
-type selectContextRequest struct {
-	Context string `json:"context"`
-}
-
-func (s *Server) handleSelectContext(w http.ResponseWriter, r *http.Request) {
-	var req selectContextRequest
-	if err := decodeJSONBody(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	ctxName := strings.TrimSpace(req.Context)
-	if ctxName == "" || strings.HasPrefix(ctxName, "-") {
-		writeError(w, http.StatusBadRequest, "valid context name is required")
-		return
-	}
-	// `ax ctx <name>` owns switching the kubeconfig context.
-	if res, err := s.runner.Run(r.Context(), kube.Spec{Name: s.axBinary, Args: []string{"ctx", ctxName}}); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("switching context: %s", nonEmptyStr(strings.TrimSpace(res.Stderr), err.Error())))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"context": ctxName})
 }
 
 type credentialSecretRequest struct {
