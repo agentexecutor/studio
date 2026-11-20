@@ -481,7 +481,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   await check('the app frame has what is real: New task, Home, Where agents run, Settings, search and shortcuts. No Guardrails or bell', () => {
     const sh = api.liveShellHTML();
     need(sh, ['class="app live"', 'href="#/new" id="live-new"', 'href="#/places"', 'href="#/settings" data-nav="settings"', 'id="theme-toggle"', 'data-action="palette"', 'data-action="shortcuts"']);
-    never(sh, ['#/guardrails', 'id="bell"', 'id="live-classic"']);
+    never(sh, ['#/guardrails', 'id="bell"']);
     return { html: sh };
   });
 
@@ -1292,7 +1292,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     for (const [part, what] of [['guardrails', 'Guardrails'], ['welcome', 'Setup']]) need(api.liveViewNotYet(part).html, [`${what} isn't connected to AX yet`, 'href="#/"']);
     await go(p, '#/guardrails');
     need(main(p), ["Guardrails isn't connected to AX yet"]);
-    never(main(p), ['Open the previous pages']);
   });
   // ---------- Settings ----------
   await check('Settings: AX & this computer first, Appearance & story last, with the nav marking where you are', async () => {
@@ -1556,15 +1555,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     need(main(q), ["Studio couldn't run the <span class=\"mono\">ax</span> command, and setup needs it.", 'executable file not found']);
     if (!/id="live-setup-start"[^>]*disabled/.test(main(q))) throw new Error('setup waits for ax');
-  });
-
-  // ---------- A build that still includes the pages this UI replaces ----------
-  await check('when the build includes the previous pages, the UI links to them for what it lacks', async () => {
-    const C = makeBackend();
-    const c = makeContext(C, { server: true, classic: '/classic/' });
-    await settle();
-    need(c.api.liveShellHTML(), ['id="live-classic" href="/classic/"', 'Previous pages']);
-    need(c.api.liveViewNotYet('guardrails').html, ['Until it is connected, the previous pages do this job.', 'href="/classic/"', 'Open the previous pages']);
   });
 
   // ---------- Sanctuary UI/UX & MVP features ----------

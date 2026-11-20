@@ -27,8 +27,6 @@
 
 const STUDIO = {
   on: typeof window !== 'undefined' && !!(window.AX_STUDIO && window.AX_STUDIO.server),
-  /** Where the pages this UI is replacing are still served, or '' when this build doesn't include them. */
-  classic: (typeof window !== 'undefined' && window.AX_STUDIO && window.AX_STUDIO.classic) || '',
   token: '',
   info: null,            // { os, home, pathSeparator, axNamespace, version, studioVersion, axBinary, kubeconfig }, from /api/bootstrap
   booting: null,

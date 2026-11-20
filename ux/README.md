@@ -68,8 +68,7 @@ Studio never changes your kubeconfig: every request names the cluster. The task 
 because AX has no call that streams changes. An open Logs tab on a running task reads what's new every 4 seconds too.
 
 Not connected yet, so hidden when the server is there: the agent's own structured messages (AX doesn't record them
-yet; Logs shows what it prints) and Guardrails. Until they are, the pages this UI replaces are still served at `/classic/`, and the UI links to
-them when the build includes them.
+yet; Logs shows what it prints) and Guardrails.
 
 New task starts from the answers most tasks want: Antigravity, the cluster in use (this computer when AX runs here),
 the repo you used last, the repo's default branch, Balanced network rules and the Medium size. Pills fill in recent

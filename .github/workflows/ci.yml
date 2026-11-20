@@ -34,19 +34,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
-          cache: "npm"
 
       - name: Set up Go
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: go.mod
-
-      # Audit what ships in the binary. Build-only tools (vite and its
-      # dependencies) are not part of it.
-      - name: Install frontend dependencies & security audit
-        run: |
-          npm ci
-          npm audit --omit=dev --audit-level=high
 
       - name: Build, test, and verify formatting
         run: |

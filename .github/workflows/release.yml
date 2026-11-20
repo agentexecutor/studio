@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
 
-      # The build runs third-party code (npm packages), so it gets no token:
+      # The build needs no token:
       # none is left in the git config, and only the last step is given one.
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -85,11 +85,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-
-      - name: Install frontend dependencies & security audit
-        run: |
-          npm ci
-          npm audit --omit=dev --audit-level=high
 
       - name: Test
         run: make verify
