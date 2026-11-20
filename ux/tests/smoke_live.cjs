@@ -77,6 +77,181 @@ const clusterCheck = (B, ctx) => (ctx === 'gke-broken' ? null : {
 const PATCH_SIGNER = 'diff --git a/src/signer.py b/src/signer.py\nindex 1111111..2222222 100644\n--- a/src/signer.py\n+++ b/src/signer.py\n@@ -3,3 +3,4 @@ class Signer:\n     def now(self):\n-        return time.time()\n+        clock = self.clock\n+        return clock()\n \n';
 const PATCH_NOTE = 'diff --git a/notes/why.md b/notes/why.md\nnew file mode 100644\n--- /dev/null\n+++ b/notes/why.md\n@@ -0,0 +1,2 @@\n+# Why it was flaky\n+The clock was read twice.\n\\ No newline at end of file\n';
 
+/* ---------- What AX reads ----------
+   ax apply decodes each YAML document generically, turns it into JSON and decodes that strictly with protojson: a field
+   AX doesn't know, or a value of the wrong type (a number where AX wants a string), is an error. parseYAML reads the
+   YAML Studio writes (block mappings and sequences, flow lists, quoted and plain scalars, | blocks), and checkAX checks
+   a document against AX's ax.io/v1alpha1 types (task.proto, workspace.proto, gateway.proto, common.proto, and Agent
+   Substrate's EgressRule) the way protojson does. */
+function parseYAML(text) {
+  const dq = (s) => {
+    let out = '';
+    for (let j = 1; j < s.length; j++) {
+      const c = s[j];
+      if (c === '"') return { value: out, rest: s.slice(j + 1) };
+      if (c !== '\\') { out += c; continue; }
+      const n = s[++j];
+      if (n === 'x') { out += String.fromCharCode(parseInt(s.substr(j + 1, 2), 16)); j += 2; continue; }
+      const map = { n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\', 0: '\0', '/': '/' };
+      if (!(n in map)) throw new Error(`unknown escape \\${n} in ${s}`);
+      out += map[n];
+    }
+    throw new Error('a string that is not closed: ' + s);
+  };
+  const plain = (s) => {
+    if (s === '' || s === '~' || s === 'null') return null;
+    if (s === 'true' || s === 'false') return s === 'true';
+    if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+    if (/^-?\d*\.\d+$/.test(s)) return parseFloat(s);
+    if (/^[[{"'|>&*!%@`]/.test(s) || /:\s/.test(s) || /\s#/.test(s)) throw new Error('not a plain scalar: ' + s);
+    return s;
+  };
+  const flow = (s) => {
+    if (s === '[]') return [];
+    const out = [];
+    const re = /\s*("(?:[^"\\]|\\.)*"|[^,\]"]+?)\s*(,|\])/y;
+    re.lastIndex = 1;
+    for (;;) {
+      const m = re.exec(s);
+      if (!m) throw new Error('a flow list AX cannot read: ' + s);
+      out.push(m[1].startsWith('"') ? dq(m[1]).value : plain(m[1].trim()));
+      if (m[2] === ']') { if (re.lastIndex !== s.length) throw new Error('text after ]: ' + s); return out; }
+    }
+  };
+  const value = (s) => {
+    s = s.trim();
+    if (s.startsWith('"')) { const r = dq(s); if (r.rest.trim()) throw new Error('text after a string: ' + s); return r.value; }
+    if (s.startsWith('[')) return flow(s);
+    if (s === '{}') return {};
+    return plain(s);
+  };
+  const KEY = /^([A-Za-z_][\w.-]*|"[^"]*")\s*:(?:\s+(.*))?$/;
+  return String(text).split(/^---[ \t]*$/m).filter((p) => p.trim()).map((part) => {
+    const lines = part.split('\n');
+    let i = 0;
+    const indent = (l) => l.length - l.trimStart().length;
+    const skip = () => { while (i < lines.length && !lines[i].trim()) i++; };
+    const scalarBlock = (keyIndent, header) => {
+      const body = [];
+      let at = -1;
+      while (i < lines.length) {
+        const l = lines[i];
+        if (!l.trim()) { body.push(''); i++; continue; }
+        if (at < 0) { if (indent(l) <= keyIndent) break; at = indent(l); }
+        if (indent(l) < at) break;
+        body.push(l.slice(at)); i++;
+      }
+      while (body.length && body[body.length - 1] === '') body.pop();
+      return body.join('\n') + (header === '|-' ? '' : '\n');
+    };
+    let node;
+    const child = (n) => {
+      skip();
+      if (i >= lines.length) return null;
+      const m = indent(lines[i]);
+      if (m > n) return node(m);
+      if (m === n && lines[i].trim().startsWith('- ')) return seq(m);
+      return null;
+    };
+    const map = (ind) => {
+      const obj = {};
+      for (;;) {
+        skip();
+        if (i >= lines.length || indent(lines[i]) < ind) return obj;
+        if (indent(lines[i]) > ind) throw new Error(`line ${i + 1}: indented too far: ${lines[i]}`);
+        const m = KEY.exec(lines[i].trim());
+        if (!m) throw new Error(`line ${i + 1}: expected key: value, got ${lines[i]}`);
+        const key = m[1].startsWith('"') ? dq(m[1]).value : m[1];
+        if (key in obj) throw new Error(`duplicate key ${key}`);
+        i++;
+        const rest = (m[2] || '').trim();
+        obj[key] = !rest ? child(ind) : /^\|-?$/.test(rest) ? scalarBlock(ind, rest) : value(rest);
+      }
+    };
+    const seq = (ind) => {
+      const arr = [];
+      for (;;) {
+        skip();
+        if (i >= lines.length || indent(lines[i]) !== ind || !lines[i].trim().startsWith('- ')) {
+          if (i < lines.length && indent(lines[i]) > ind) throw new Error(`line ${i + 1}: indented too far: ${lines[i]}`);
+          return arr;
+        }
+        const rest = lines[i].trim().slice(2);
+        if (KEY.test(rest)) { lines[i] = ' '.repeat(ind + 2) + rest; arr.push(map(ind + 2)); }
+        else { i++; arr.push(value(rest)); }
+      }
+    };
+    node = (ind) => (lines[i].trim().startsWith('- ') ? seq(ind) : map(ind));
+    skip();
+    const doc = node(indent(lines[i]));
+    skip();
+    if (i < lines.length) throw new Error(`line ${i + 1}: unexpected ${lines[i]}`);
+    return doc;
+  });
+}
+const AX_TYPES = {
+  Task: { apiVersion: 'str', kind: 'str', metadata: 'ObjectMeta', spec: 'TaskSpec' },
+  Workspace: { apiVersion: 'str', kind: 'str', metadata: 'ObjectMeta', spec: 'WorkspaceSpec' },
+  Gateway: { apiVersion: 'str', kind: 'str', metadata: 'ObjectMeta', spec: 'GatewaySpec' },
+  ObjectMeta: { name: 'str', atespace: 'str', labels: 'map' },
+  TaskSpec: { profile: 'Profile', commands: ['str'], env: ['EnvVar'], workspace: 'WorkspaceRef', debug: 'bool', config: 'struct', goal: 'Goal', retry: 'RetryConfig', gateway: 'GatewayRef', sessionId: 'str' },
+  Profile: { image: 'str', resources: 'ResourcesSpec', ateTemplate: 'ObjectRef' },
+  ResourcesSpec: { limits: 'ResourceList' },
+  ResourceList: { cpu: 'str', memory: 'str' },
+  ObjectRef: { name: 'str', atespace: 'str' },
+  EnvVar: { name: 'str', value: 'str' },
+  WorkspaceRef: { name: 'str', path: 'str' },
+  Goal: { text: 'str' },
+  RetryConfig: { maxRetries: 'int', initialBackoff: 'str', maxBackoff: 'str', backoffMultiplier: 'num' },
+  GatewayRef: { name: 'str' },
+  WorkspaceSpec: { mcp: 'MCPConfig', profile: 'Profile', setup: 'WorkspaceSetup' },
+  WorkspaceSetup: { git: ['GitRepo'], files: ['File'], skills: 'SkillsConfig', commands: ['str'], gateway: 'GatewayRef' },
+  GitRepo: { name: 'str', repo: 'str', dir: 'str', depth: 'int', ref: 'str' },
+  File: { path: 'str', content: 'str' },
+  SkillsConfig: { registries: ['SkillRegistry'], path: 'str' },
+  SkillRegistry: { provider: 'str', project: 'str', query: 'str' },
+  MCPConfig: { registries: ['MCPRegistry'], servers: ['MCPServer'] },
+  MCPRegistry: { provider: 'str', project: 'str', query: 'str', servers: ['MCPServer'] },
+  MCPServer: { name: 'str', endpoint: 'str', command: 'str', args: ['str'] },
+  GatewaySpec: { egress: ['EgressRule'] },
+  EgressRule: { http: 'HttpRule', https: 'HttpsRule', tlsPassthrough: 'TlsPassthroughRule' },
+  HttpRule: { hostnames: ['str'], ports: 'Ports', effects: 'HttpRuleEffects' },
+  HttpsRule: { hostnames: ['str'], ports: 'Ports', effects: 'HttpRuleEffects' },
+  TlsPassthroughRule: { hostnames: ['str'], ports: 'Ports' },
+  Ports: { all: 'struct', numbers: ['int'] },
+  HttpRuleEffects: { replaceHeaders: ['CredentialHeader'] },
+  CredentialHeader: { header: 'str', prefix: 'str', credentialUri: 'str', actorJwt: 'struct' },
+};
+function checkAX(doc) {
+  if (!doc || !['Task', 'Workspace', 'Gateway'].includes(doc.kind)) throw new Error(`unsupported kind ${doc && doc.kind}`);
+  if (doc.apiVersion !== 'ax.io/v1alpha1') throw new Error(`apiVersion ${doc.apiVersion}`);
+  const walk = (v, type, at) => {
+    if (Array.isArray(type)) { if (!Array.isArray(v)) throw new Error(`${at}: want a list, got ${JSON.stringify(v)}`); v.forEach((x, k) => walk(x, type[0], `${at}[${k}]`)); return; }
+    if (type === 'str') { if (typeof v !== 'string') throw new Error(`${at}: want a string, got ${JSON.stringify(v)}`); return; }
+    if (type === 'int') { if (!Number.isInteger(v)) throw new Error(`${at}: want a whole number, got ${JSON.stringify(v)}`); return; }
+    if (type === 'num') { if (typeof v !== 'number') throw new Error(`${at}: want a number, got ${JSON.stringify(v)}`); return; }
+    if (type === 'bool') { if (typeof v !== 'boolean') throw new Error(`${at}: want true or false, got ${JSON.stringify(v)}`); return; }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${at}: want an object, got ${JSON.stringify(v)}`);
+    if (type === 'struct') return;
+    if (type === 'map') { Object.keys(v).forEach((k) => walk(v[k], 'str', `${at}.${k}`)); return; }
+    const fields = AX_TYPES[type];
+    for (const k of Object.keys(v)) {
+      if (!(k in fields)) throw new Error(`${at || type}: unknown field "${k}"`);
+      walk(v[k], fields[k], at ? `${at}.${k}` : k);
+    }
+    if (type === 'EgressRule' && Object.keys(v).length !== 1) throw new Error(`${at}: a rule is one of http, https or tlsPassthrough`);
+    if ((type === 'HttpsRule' || type === 'HttpRule' || type === 'TlsPassthroughRule') && !(v.hostnames || []).length) throw new Error(`${at}: hostnames is required`);
+    if (type === 'TlsPassthroughRule' && !v.ports) throw new Error(`${at}: ports is required`);
+    if (type === 'CredentialHeader' && (!v.header || !v.credentialUri)) throw new Error(`${at}: header and credentialUri are required`);
+    if (type === 'GitRepo' && !v.repo) throw new Error(`${at}: repo is required`);
+  };
+  walk(doc, doc.kind, '');
+  return doc;
+}
+/** The documents Studio would apply for a draft, checked the way AX checks them. */
+const axDocs = (yaml) => parseYAML(yaml).map(checkAX);
+const docOf = (docs, kind) => docs.find((x) => x.kind === kind);
+
 function makeBackend(opts) {
   const B = Object.assign({
     calls: [], posts: [], ax: [], applied: [], secrets: [], es: null, token: 1, offline: false, noAx: false, goalField: 'text', installed: {}, running: null,
@@ -152,20 +327,39 @@ function makeBackend(opts) {
     if (a[0] === 'version') return ok('ax version v0.1.0\n');
     if (a[0] === 'apply') {
       B.applied.push(stdin);
-      const doc = String(stdin).split(/^---$/m).find((d) => /^kind: Task$/m.test(d)) || '';
-      const goal = /^    (text|spec): (.*)$/m.exec(doc);
-      if (goal && goal[1] !== B.goalField) return err(`parsing Task: proto: (line 1:214): unknown field "${goal[1]}"`);
-      const name = (/^  name: "?([a-z0-9-]+)"?$/m.exec(doc) || [])[1];
-      if (!name) return err('no Task in the file');
-      const pick = (re) => (re.exec(doc) || [])[1];
-      /* The goal is one quoted line, or a block of lines indented under the field. */
-      const block = /^    (?:text|spec): \|\n((?: {6}.*\n?)+)/m.exec(doc);
-      const goalText = !goal ? '' : block ? block[1].split('\n').map((l) => l.slice(6)).join('\n').trim() : JSON.parse(goal[2]);
-      list(ctx).push(taskDoc(name, 'SUSPENDED', {
-        goal: goalText, goalField: B.goalField, created: '2026-11-17T12:00:00Z',
-        spec: { sessionId: pick(/^  sessionId: "([^"]+)"$/m) || 'uid-' + name, debug: /^  debug: true$/m.test(doc), workspace: { name: pick(/^  workspace:\n    name: "([^"]+)"$/m) }, gateway: { name: pick(/^  gateway:\n    name: "([^"]+)"$/m) } },
-      }));
-      return ok(`task.ax.io/${name} created\n`);
+      /* As ax apply does: decode the documents, then check each strictly against AX's types and create what it names,
+         one at a time. It stops at the first one AX refuses, with what it made before that printed. */
+      let docs;
+      try { docs = parseYAML(stdin); } catch (e) { return err('decoding document: ' + e.message); }
+      const out = [];
+      const fail = (k, m) => ({ status: 1, stdout: out.map((x) => x + '\n').join(''), stderr: `Error: applying document ${k + 1}: ${m}\n` });
+      for (const [k, doc] of docs.entries()) {
+        const goal = doc && doc.kind === 'Task' && doc.spec && doc.spec.goal;
+        if (goal) {
+          const field = Object.keys(goal)[0];
+          if (field !== B.goalField) return fail(k, `parsing Task: proto: (line 1:214): unknown field "${field}"`);
+          doc.spec.goal = { text: goal[field] };
+        }
+        try { checkAX(doc); } catch (e) { return fail(k, 'proto: ' + e.message); }
+        if (doc.kind === 'Workspace' && doc.spec.setup && doc.spec.setup.gateway && !B.prewarm) return fail(k, 'rpc error: code = Unimplemented desc = spec.setup.gateway is not supported yet');
+        if (doc.kind === 'Task' && doc.spec.retry) return fail(k, 'rpc error: code = Unimplemented desc = spec.retry is not supported yet');
+        const name = doc.metadata.name;
+        if (doc.kind === 'Task') {
+          const spec = Object.assign({ sessionId: 'uid-' + name }, doc.spec);
+          const goalText = spec.goal ? spec.goal.text : '';
+          delete spec.goal;
+          list(ctx).push(taskDoc(name, 'SUSPENDED', { goal: goalText, goalField: B.goalField, created: '2026-11-17T12:00:00Z', spec }));
+        } else {
+          const arr = doc.kind === 'Workspace' ? B.workspaces : B.gatewayList;
+          const at = arr.findIndex((x) => x.metadata.name === name);
+          const res = Object.assign({ kind: doc.kind, metadata: { name, atespace: 'default' }, spec: doc.spec }, doc.kind === 'Workspace' ? { status: { phase: 'Ready' } } : {});
+          if (at >= 0) arr[at] = res; else arr.push(res);
+          if (at >= 0) { out.push(`${doc.kind.toLowerCase()}.ax.io/${name} unchanged`); continue; }
+        }
+        out.push(`${doc.kind.toLowerCase()}.ax.io/${name} created`);
+      }
+      if (!docs.some((d) => d.kind === 'Task')) return err('no Task in the file');
+      return ok(out.join('\n') + '\n');
     }
     if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_WORKING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
     if (a[0] === 'promote' && a[1] === 'task') {
@@ -374,7 +568,8 @@ function makeContext(B, env) {
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
   liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
-  liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
+  liveNewDraft, liveNewApplyPreset, liveNewPresetChanges, liveYAMLHTML, liveYAMLTaskName, liveNewStatusHTML, LIVE_AGENTS,
+  liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems,
   liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
   viewHome, studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
@@ -756,6 +951,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   });
 
   // ---------- New task ----------
+  const blankDraft = () => { const d = api.liveNewDraft(); api.liveNewApplyPreset(d, 'blank'); return d; };
   await check('New task runs on AX on this computer: while it is stopped, New task is setup; once it runs, the form', async () => {
     const keep = L.local;
     L.local = Object.assign({}, keep, { state: 'Stopped' }); L.draft = null;
@@ -764,8 +960,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(main(p), ['id="live-new-run"']);
     L.local = keep;
     await go(p, '#/new');
-    if (L.draft.where !== 'ax-local' || !L.draft.debug) throw new Error(JSON.stringify([L.draft.where, L.draft.debug]));
-    need(main(p), ['id="live-new-run"', '1 of 3 done · next: add a Git repo, or choose Empty workspace']);
+    if (L.draft.preset !== 'antigravity' || !L.draft.debug) throw new Error(JSON.stringify([L.draft.preset, L.draft.debug]));
+    need(main(p), ['id="live-new-commit-bar"', 'id="live-new-run"', '1 thing to fix first']);
     /* Nothing changed on the cluster side: a background refresh leaves the form alone. */
     p.els['#main'].innerHTML = main(p) + '<!--kept-->';
     api.render({ keepScroll: true, background: true });
@@ -774,145 +970,331 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     L.draft = null;
   });
   await go(p, '#/new');
-  await check('New task: three steps, with the best defaults (Antigravity, Balanced, debug access on), and it runs on this computer', () => {
+  await check("New task is one page that follows AX's specs: Start from cards, Task, Workspace and Network, progressive disclosure, sticky commit bar, and the YAML beside them", () => {
     const h = main(p);
-    need(h, ['Start a task', 'id="live-agent-antigravity"', 'id="live-agent-claude"', 'id="live-agent-image"', 'Your own image', 'Gemini API key', 'Git repo', 'Debug access', 'id="live-new-run"',
-      'Pick a template', 'Set up the workspace', 'Customize workspace', 'Describe the goal', 'More options: network, resources, command, environment, task file',
-      'aria-checked="true" data-action="live-new-source" data-source="git"', 'data-action="live-new-branch-pick" data-branch="main"',
-      'class="card plan-card"', 'Almost ready', 'On by default.', 'aria-checked="true" data-action="live-new-network" data-network="balanced"', 'aria-checked="true" data-action="live-new-size" data-size="medium"',
-      'AX runs the task on this computer, in its own sandbox.']);
-    never(h, ['Where should it run?', 'id="live-where-remote"', 'remote cluster', 'gVisor', 'review what it changed']);
-    if (!/aria-checked="true"[^>]*id="live-agent-antigravity"/.test(h)) throw new Error('Antigravity is the default');
-    if (!/id="live-new-debug"[^>]*checked/.test(h) || !L.draft.debug) throw new Error('debug access is on by default');
-    /* Nothing runs before there is code (or an empty workspace) and a goal, and the plan says what's next. */
-    if (api.liveNewIssues(L.draft)[0] !== 'Add a Git repo, or choose Empty workspace.') throw new Error(api.liveNewIssues(L.draft).join(' | '));
-    need(h, ['1 of 3 done · next: add a Git repo, or choose Empty workspace']);
-    api.ACTIONS['live-new-source']({ dataset: { source: 'empty' } });
-    if (api.liveNewIssues(L.draft)[0] !== 'Describe the goal.') throw new Error(api.liveNewIssues(L.draft).join(' | '));
-    need(main(p), ['starts in an empty <span class="mono">/workspace</span>', 'next: describe the goal']);
-    api.ACTIONS['live-new-source']({ dataset: { source: 'git' } });
+    need(h, ['<h1 tabindex="-1">New task</h1>', 'id="nt-start-h">Start from</h2>', 'data-action="live-new-preset-card" data-preset="antigravity"', 'data-action="live-new-preset-card" data-preset="claude"', 'data-action="live-new-preset-card" data-preset="blank"',
+      'data-action="live-new-load"', 'Load a task file…', 'id="live-new-commit-bar"', 'id="live-new-run"', 'Create task',
+      'id="nt-task-h">Task</h2>', 'id="nt-ws-h">Workspace</h2>', 'id="nt-net-h">Network</h2>', 'kind: Task', 'kind: Workspace', 'kind: Gateway',
+      /* The Task's fields (Goal and Name upfront; the rest tucked under Advanced task options), each naming the field it writes. */
+      'id="live-new-goal"', 'id="live-new-name"', 'id="live-new-adv-task"', 'Advanced task options',
+      'id="live-new-image"', 'id="live-new-command"', 'Environment', 'id="live-new-cpu"', 'id="live-new-memory"',
+      'id="live-new-config"', 'id="live-new-debug"', 'spec.<wbr>profile.<wbr>image', 'spec.<wbr>goal.<wbr>text',
+      /* Preset API key upfront + Advanced network options accordion. */
+      'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options',
+      /* The workspace starts at none, as a radio group; Antigravity starts with Allow hosts. */
+      'aria-checked="true" data-action="live-new-ws" data-ws="none"', 'aria-checked="true" data-action="live-new-net" data-net="allow"',
+      /* The YAML panel: what Studio applies, to edit or download, and the same from a terminal. */
+      'id="live-new-manifest"', 'data-action="live-new-raw"', 'Edit YAML', 'data-action="live-new-download"', 'ax --context ax-local apply -f task.yaml']);
+    /* Preset cards are ordered Antigravity, Claude Code, then Blank. */
+    const ia = h.indexOf('data-preset="antigravity"'), ic = h.indexOf('data-preset="claude"'), ib = h.indexOf('data-preset="blank"');
+    if (!(ia > 0 && ia < ic && ic < ib)) throw new Error('preset order: ' + [ia, ic, ib]);
+    /* AX refuses spec.retry until it retries tasks, so the form doesn't offer it. */
+    never(h, ['Where should it run?', 'Pick a template', 'Customize', 'More options', 'Send a follow-up', 'Try again', 'gVisor', '—', '→', 'live-new-gatemap', 'class="card plan-card"', 'retry', 'Retries']);
+    if (!/id="live-new-debug"[^>]*checked/.test(h)) throw new Error('debug access is on by default');
+    if (JSON.stringify(api.liveViewNew().crumbs) !== JSON.stringify([{ label: 'Home', href: '#/' }, { label: 'New task' }])) throw new Error(JSON.stringify(api.liveViewNew().crumbs));
+    if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-agent'] || api.ACTIONS['live-new-source']) throw new Error('the old steps are gone');
     return { html: h };
   });
-  await check('New task: branch pills fill the branch, and resources set the limits in the Task', () => {
-    need(main(p), ['ax --context ax-local apply -f task.yaml']);
-    if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-cluster']) throw new Error('there is no other cluster to pick');
-    /* Branch pills fill the branch; pressing the same one again goes back to the repo's default branch. */
-    api.ACTIONS['live-new-branch-pick']({ dataset: { branch: 'develop' } });
-    if (L.draft.branch !== 'develop') throw new Error(L.draft.branch);
-    api.ACTIONS['live-new-branch-pick']({ dataset: { branch: 'develop' } });
-    if (L.draft.branch !== '') throw new Error(L.draft.branch);
-    /* Resources set the limits in the Task. */
-    api.ACTIONS['live-new-size']({ dataset: { size: 'large' } });
-    need(api.liveNewYAML(L.draft, 'text', ''), ['cpu: "4"', 'memory: "8Gi"']);
-    api.ACTIONS['live-new-size']({ dataset: { size: 'medium' } });
-  });
-  await check('the form says what is wrong: an image without a digest, a repo that is not https', () => {
-    const d = Object.assign({}, L.draft, { agent: 'image', image: 'ghcr.io/me/agent:latest', goal: 'x' });
-    if (!/must end in its digest/.test(api.liveNewIssues(d)[0])) throw new Error(api.liveNewIssues(d).join(' | '));
-    d.image = 'ghcr.io/me/agent@sha256:' + 'a'.repeat(64);
-    d.repo = 'git@github.com:me/project.git';
-    if (!/https:\/\/ Git address/.test(api.liveNewIssues(d)[0])) throw new Error(api.liveNewIssues(d).join(' | '));
-    d.repo = 'https://github.com/me/project.git';
+  await check('Blank works without keys: the default task image, a command that keeps the sandbox open, debug access, no workspace and no network', () => {
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'blank' } });
+    const d = L.draft;
+    if (d.preset !== 'blank') throw new Error('switched to blank: ' + d.preset);
     if (api.liveNewIssues(d).length) throw new Error(api.liveNewIssues(d).join(' | '));
+    const docs = axDocs(api.liveNewYAML(d, 'text', {}));
+    if (docs.length !== 1) throw new Error('only a Task: ' + docs.map((x) => x.kind).join());
+    const t = docOf(docs, 'Task');
+    if (!/^task-ab[0-9a-f]{2}$/.test(t.metadata.name)) throw new Error('name: ' + t.metadata.name);
+    if (JSON.stringify(t.spec) !== JSON.stringify({ commands: ['sh', '-c', 'sleep infinity'], debug: true })) throw new Error(JSON.stringify(t.spec));
+    /* The panel shows the same YAML, with its keys marked, and Ready to create. */
+    need(main(p), ["The cluster's default task image", 'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'Ready to create', '<span class="k">kind</span>: Task', 'sleep infinity']);
   });
-  await check('the task files are what AX reads: a Gateway that adds the key outside the sandbox, a Workspace that clones the repo, a Task', () => {
-    Object.assign(L.draft, { goal: 'Make the signer tests pass.\nExplain what was wrong.', repo: 'https://gitlab.example.com/me/project.git', branch: 'dev', debug: false, debugTouched: true });
-    const y = api.liveNewYAML(L.draft, 'text', '');
-    const name = api.liveDraftName(L.draft);
+  await check('Start from Antigravity fills its image, environment and resources, and a Gateway that adds its key outside the sandbox', () => {
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
+    const d = L.draft;
+    const A = api.LIVE_AGENTS.antigravity;
+    if (d.preset !== 'antigravity' || d.image !== A.image || d.net !== 'allow' || d.command !== '') throw new Error(JSON.stringify([d.preset, d.image, d.net, d.command]));
+    need(api.liveNewIssues(d).join(' | '), ['Describe the goal: the agent works from it.']);
+    need(main(p), ['aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'storage.googleapis.com', 'id="live-new-preset-key"', 'id="nt-creds-0-value"', 'type="password"']);
+    d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
+    const name = api.liveDraftName(d);
     if (!/^make-the-signer-tests-ab[0-9a-f]{2}$/.test(name)) throw new Error('name: ' + name);
-    need(y, ['kind: Gateway', `name: "gw-${name}"`, 'tlsPassthrough:\n        hostnames: ["storage.googleapis.com"]\n        ports:\n          numbers: [443]', 'hostnames: ["generativelanguage.googleapis.com"]', 'header: "x-goog-api-key"', 'credentialUri: "ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY"',
-      'hostnames: ["gitlab.example.com", "github.com", "api.github.com"', 'kind: Workspace', `name: "ws-${name}"`, 'repo: "https://gitlab.example.com/me/project.git"', 'dir: "."', 'ref: "dev"',
-      'kind: Task', 'image: "ghcr.io/agentexecutor/antigravity@sha256:0ccd91d03f996c375d6d391dc20106102187f15210a0016212b6721cd8044078"', '  goal:\n    text: |\n      Make the signer tests pass.\n      Explain what was wrong.', '- name: "GEMINI_API_KEY"\n      value: "placeholder"', '- name: "AGY_RUNTIME_INSTALL"\n      value: "true"',
-      `  workspace:\n    name: "ws-${name}"`, `  gateway:\n    name: "gw-${name}"`]);
-    never(y, ['debug:', 'sessionId:', 'sk-', 'config:', 'maxTurns:']);
-    if (y.split('\n---\n').length !== 3) throw new Error('three files');
+    const docs = axDocs(api.liveNewYAML(d, 'text', {}));
+    if (docs.map((x) => x.kind).join() !== 'Gateway,Task') throw new Error(docs.map((x) => x.kind).join());
+    const gw = docOf(docs, 'Gateway'), t = docOf(docs, 'Task');
+    if (gw.metadata.name !== `gw-${name}`) throw new Error(gw.metadata.name);
+    const egress = [
+      { tlsPassthrough: { hostnames: ['storage.googleapis.com'], ports: { numbers: [443] } } },
+      { https: { hostnames: ['generativelanguage.googleapis.com'], effects: { replaceHeaders: [{ header: 'x-goog-api-key', credentialUri: 'ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY' }] } } },
+    ];
+    if (JSON.stringify(gw.spec.egress) !== JSON.stringify(egress)) throw new Error(JSON.stringify(gw.spec.egress));
+    const spec = { profile: { image: A.image, resources: { limits: { cpu: '2', memory: '4Gi' } } }, env: [{ name: 'GEMINI_API_KEY', value: 'placeholder' }, { name: 'AGY_RUNTIME_INSTALL', value: 'true' }],
+      debug: true, goal: { text: 'Make the signer tests pass.\nExplain what was wrong.\n' }, gateway: { name: `gw-${name}` } };
+    if (JSON.stringify(t.spec) !== JSON.stringify(spec)) throw new Error(JSON.stringify(t.spec));
   });
-  await check('Locked down reaches only the model and the repo; debug access and your own image show in the Task', () => {
-    const d = Object.assign({}, L.draft, { network: 'locked', debug: true });
-    const y = api.liveNewYAML(d, 'text', '');
-    need(y, ['hostnames: ["storage.googleapis.com"]', 'hostnames: ["gitlab.example.com"]', '\n  debug: true']);
-    never(y, ['pypi.org', 'registry.npmjs.org']);
-    const own = api.liveNewYAML(Object.assign({}, L.draft, { agent: 'image', image: 'ghcr.io/me/agent@sha256:' + 'a'.repeat(64), repo: '', network: 'locked', nameEdited: true, name: 'my-agent' }), 'text', '');
-    need(own, ['kind: Task', 'name: "my-agent"', 'image: "ghcr.io/me/agent@sha256:']);
-    never(own, ['kind: Gateway', 'kind: Workspace', 'config:', 'GEMINI_API_KEY', 'AGY_RUNTIME_INSTALL', 'storage.googleapis.com']);
+  await check('Start from Claude Code: its image, its key from anthropic-api-creds, and the config its runner reads, with the goal as the prompt', () => {
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'claude' } });
+    const d = L.draft;
+    if (d.preset !== 'claude') throw new Error('nothing was changed, so it switches without asking: ' + d.preset);
+    if (d.goal !== 'Make the signer tests pass.\nExplain what was wrong.') throw new Error('the goal stays');
+    need(main(p), ['Anthropic API key', 'id="live-new-goal-prompt" data-action="live-new-goal-prompt" checked']);
+    const docs = axDocs(api.liveNewYAML(d, 'text', {}));
+    const gw = docOf(docs, 'Gateway'), t = docOf(docs, 'Task');
+    if (JSON.stringify(gw.spec.egress) !== JSON.stringify([{ https: { hostnames: ['api.anthropic.com'], effects: { replaceHeaders: [{ header: 'x-api-key', credentialUri: 'ate-secret://k8s.io/default/ax-system/anthropic-api-creds/ANTHROPIC_API_KEY' }] } } }])) throw new Error(JSON.stringify(gw.spec.egress));
+    if (JSON.stringify(t.spec.config) !== JSON.stringify({ agent: { model: 'claude-opus-5-5', system: 'You are a careful software engineer working in /workspace.' }, prompt: 'Make the signer tests pass.\nExplain what was wrong.\n' })) throw new Error(JSON.stringify(t.spec.config));
+    if (t.spec.profile.image !== api.LIVE_AGENTS.claude.image || JSON.stringify(t.spec.env) !== JSON.stringify([{ name: 'ANTHROPIC_API_KEY', value: 'placeholder' }])) throw new Error(JSON.stringify(t.spec));
+    /* Passing the goal as the prompt is a choice: without it, the config is what you typed. */
+    d.goalAsPrompt = false;
+    if ('prompt' in docOf(axDocs(api.liveNewYAML(d, 'text', {})), 'Task').spec.config) throw new Error('no prompt');
+    d.goalAsPrompt = true;
   });
-  await check('More options: a custom size, a command, environment variables, and what each makes of the Task', () => {
-    const base = Object.assign({}, L.draft, { files: [], mcp: [], repos: '', setup: '' });
-    let d = Object.assign({}, base, { size: 'custom', cpu: '3', memory: '6Gi', command: 'sh -c "npm test && npm run lint"', envText: 'CI=true\nLOG_LEVEL=debug' });
-    let y = api.liveNewYAML(d, 'text', '');
-    need(y, ['cpu: "3"', 'memory: "6Gi"', 'commands: ["sh", "-c", "npm test && npm run lint"]', '- name: "GEMINI_API_KEY"\n      value: "placeholder"', '- name: "CI"\n      value: "true"', '- name: "LOG_LEVEL"\n      value: "debug"']);
+  await check('Starting from another preset after you changed what this one filled in asks first, and keeps the goal, the workspace and your hosts', async () => {
+    const d = L.draft;
+    d.cpu = '3';
+    d.hosts.push('docs.example.com');
+    if (api.liveNewPresetChanges(d).join() !== 'the resources') throw new Error(api.liveNewPresetChanges(d).join());
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
+    need(p.els['#overlay'].innerHTML, ['Start from Antigravity?', 'That replaces the resources.', 'The name, goal, workspace and the hosts you allowed stay as they are.', 'Keep what I typed', 'id="np-go"']);
+    if (d.preset !== 'claude' || d.cpu !== '3') throw new Error('nothing changes before you choose');
+    await fire(dialog(p).querySelector('#np-go'), 'click');
+    if (L.draft.preset !== 'antigravity' || L.draft.cpu !== '2' || !L.draft.hosts.includes('docs.example.com') || !L.draft.goal) throw new Error(JSON.stringify([L.draft.preset, L.draft.cpu, L.draft.hosts, L.draft.goal]));
+    /* Claude Code's credential went with it, and Antigravity's came in. */
+    if (L.draft.creds.length !== 1 || L.draft.creds[0].secret !== 'gemini-api-creds') throw new Error(JSON.stringify(L.draft.creds));
+    /* Back to Blank: the agent's fields and rules go, and the host you allowed keeps the network on. */
+    api.liveNewApplyPreset(L.draft, 'blank');
+    if (L.draft.image || L.draft.command !== "sh -c 'sleep infinity'" || L.draft.creds.length || L.draft.tls.length || L.draft.net !== 'allow') throw new Error(JSON.stringify(L.draft));
+    Object.assign(L.draft, { hosts: [], net: 'none', goal: '' });
+  });
+  await check("A new workspace has every setup option AX has (Git repos, files, skills, setup commands, a setup network) and its MCP servers, in AX's order", () => {
+    api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    const d = L.draft;
+    if (d.git.length !== 1) throw new Error('a new workspace starts with a row for a repo');
+    need(main(p), ['aria-checked="true" data-action="live-new-ws" data-ws="new"', 'Git repos', 'id="nt-git-0-repo"', '<span>Ref</span>', '<span>Folder</span>', '<span>Depth</span>',
+      'Setup commands', 'data-action="live-new-setup-pick" data-cmd="npm ci"',
+      'id="live-new-adv-ws"', 'More workspace options', 'Files', 'AGENTS.md',
+      'Skills', 'id="live-new-skills-path"', 'Setup network', 'id="sel-live-new-setup-gw"', "AX on this computer doesn't support one yet",
+      'MCP servers', 'spec.<wbr>setup.<wbr>git', 'spec.<wbr>setup.<wbr>skills', 'spec.<wbr>mcp.<wbr>servers']);
+    need(api.liveNewIssues(d).join(' | '), ['Add something to the new workspace']);
+    Object.assign(d, {
+      git: [{ repo: 'https://github.com/acme/api.git', ref: 'dev', dir: '', depth: '1' }, { repo: 'https://gitlab.example.com/acme/shared-lib.git', ref: '', dir: '', depth: '' }, { repo: '', ref: '', dir: '', depth: '' }],
+      files: [{ path: 'AGENTS.md', content: 'Run the tests with npm test.\nNever push to main.' }],
+      skills: [{ provider: 'github', project: 'acme/skills', query: 'review' }], skillsPath: '.ax/skills',
+      setup: [{ cmd: 'npm ci' }, { cmd: 'npm run build' }],
+      mcp: [{ name: 'docs', kind: 'remote', endpoint: 'https://mcp.example.com/mcp', command: '' }, { name: 'fs', kind: 'local', endpoint: '', command: 'npx -y @modelcontextprotocol/server-filesystem /workspace' },
+        { name: 'cluster-docs', kind: 'remote', endpoint: 'http://docs-mcp.default.svc.cluster.local:8080/mcp', command: '' }],
+    });
+    /* AX on this computer sets the workspace up inside the task's sandbox, so without a network it can't clone. */
+    need(api.liveNewIssues(d).join(' | '), ['The workspace needs github.com to set up, and the task has no network. Choose Allow hosts under Network.']);
+    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
     if (api.liveNewIssues(d).length) throw new Error(api.liveNewIssues(d).join(' | '));
-    d = Object.assign({}, base, { size: 'custom', cpu: 'lots', memory: '6GB', command: 'echo "unclosed', envText: 'not a variable' });
-    const issues = api.liveNewIssues(d).join(' | ');
-    need(issues, ['Give the CPU as a number, like 2 or 500m.', 'Give the memory with its unit, like 4Gi or 512Mi.', "The command has a quote that isn't closed.", 'Write each environment variable as NAME=value, one per line.']);
-    const split = api.liveSplitArgs;
-    if (JSON.stringify(split("python -m pytest -k 'flaky and not slow' tests\\ dir").args) !== JSON.stringify(['python', '-m', 'pytest', '-k', 'flaky and not slow', 'tests dir'])) throw new Error(JSON.stringify(split("python -m pytest -k 'flaky and not slow' tests\\ dir")));
-  });
-  await check("More options: the workspace's setup (more repos, setup commands, files, MCP servers) goes in its Workspace, and its hosts in the Gateway", () => {
-    const d = Object.assign({}, L.draft, { repos: 'https://github.com/acme/shared-lib.git\nhttps://gitlab.example.com/acme/api.git', setup: 'npm ci\nnpm run build',
-      files: [{ path: 'AGENTS.md', content: 'Run the tests with npm test.\nNever push to main.' }], mcp: [{ name: 'github', endpoint: 'https://mcp.github.example/sse' }] });
-    const y = api.liveNewYAML(d, 'text', '');
-    need(y, ['kind: Workspace', '    git:\n      - name: "origin"', '      - name: "shared-lib"\n        repo: "https://github.com/acme/shared-lib.git"\n        dir: "shared-lib"', '      - name: "api"',
-      '    files:\n      - path: "AGENTS.md"\n        content: |\n          Run the tests with npm test.\n          Never push to main.', '    commands:\n      - "npm ci"\n      - "npm run build"',
-      '  mcp:\n    servers:\n      - name: "github"\n        endpoint: "https://mcp.github.example/sse"', 'mcp.github.example']);
-    if (api.liveNewIssues(d).length) throw new Error(api.liveNewIssues(d).join(' | '));
-    const bad = Object.assign({}, d, { repos: 'git@github.com:acme/x.git', files: [{ path: '/etc/passwd', content: 'x' }], mcp: [{ name: '', endpoint: 'http://insecure' }] });
-    need(api.liveNewIssues(bad).join(' | '), ['Each extra repo must be an https:// Git address.', 'Give each file a path inside /workspace, like AGENTS.md.', 'Give each MCP server a name and an https:// address.']);
-    /* An empty workspace with setup still gets a Workspace, without the repo. */
-    const empty = api.liveNewYAML(Object.assign({}, L.draft, { source: 'empty', repos: '', setup: 'apt-get install -y jq', files: [], mcp: [] }), 'text', '');
-    need(empty, ['kind: Workspace', '    commands:\n      - "apt-get install -y jq"']);
-    never(empty, ['name: "origin"']);
-  });
-  await check('New task can start from a workspace already on the cluster: it names it, and a failed one is refused', async () => {
-    await go(p, '#/new');
-    api.ACTIONS['live-new-source']({ dataset: { source: 'existing' } });
-    await settle();
+    const name = api.liveDraftName(d);
+    const docs = axDocs(api.liveNewYAML(d, 'text', {}));
+    if (docs.map((x) => x.kind).join() !== 'Gateway,Workspace,Task') throw new Error(docs.map((x) => x.kind).join());
+    const ws = docOf(docs, 'Workspace');
+    if (ws.metadata.name !== `ws-${name}` || Object.keys(ws.spec).join() !== 'setup,mcp' || Object.keys(ws.spec.setup).join() !== 'git,files,skills,commands') throw new Error(JSON.stringify(ws));
+    const setup = {
+      git: [{ name: 'api', repo: 'https://github.com/acme/api.git', dir: '.', depth: 1, ref: 'dev' }, { name: 'shared-lib', repo: 'https://gitlab.example.com/acme/shared-lib.git' }],
+      files: [{ path: 'AGENTS.md', content: 'Run the tests with npm test.\nNever push to main.\n' }],
+      skills: { registries: [{ provider: 'github', project: 'acme/skills', query: 'review' }], path: '.ax/skills' },
+      commands: ['npm ci', 'npm run build'],
+    };
+    if (JSON.stringify(ws.spec.setup) !== JSON.stringify(setup)) throw new Error(JSON.stringify(ws.spec.setup));
+    const servers = [{ name: 'docs', endpoint: 'https://mcp.example.com/mcp' }, { name: 'fs', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/workspace'] }, { name: 'cluster-docs', endpoint: 'http://docs-mcp.default.svc.cluster.local:8080/mcp' }];
+    if (JSON.stringify(ws.spec.mcp) !== JSON.stringify({ servers })) throw new Error(JSON.stringify(ws.spec.mcp));
+    /* What the workspace needs goes in the Gateway: its repos' hosts, and its remote MCP servers by scheme and port. */
+    const gw = docOf(docs, 'Gateway');
+    if (JSON.stringify(gw.spec.egress) !== JSON.stringify([{ https: { hostnames: ['github.com', 'gitlab.example.com', 'mcp.example.com'] } }, { http: { hostnames: ['docs-mcp.default.svc.cluster.local'], ports: { numbers: [8080] } } }])) throw new Error(JSON.stringify(gw.spec.egress));
+    if (docOf(docs, 'Task').spec.workspace.name !== `ws-${name}`) throw new Error('the Task binds it');
     api.render();
-    let h = main(p);
-    need(h, ['aria-checked="true" data-action="live-new-source" data-source="existing"', 'data-action="live-new-ws-pick" data-ws="itsdangerous"', 'next: pick a workspace']);
-    need(api.liveNewIssues(L.draft).join(' | '), ['Pick a workspace, or choose another way to start.']);
-    api.ACTIONS['live-new-ws-pick']({ dataset: { ws: 'itsdangerous' } });
-    h = main(p);
-    need(h, ['aria-pressed="true" data-action="live-new-ws-pick" data-ws="itsdangerous"', 'The task starts from its snapshot', '<span class="mono">itsdangerous</span>']);
-    const y = api.liveNewYAML(L.draft, 'text', '');
-    need(y, ['  workspace:\n    name: "itsdangerous"']);
-    never(y, ['kind: Workspace']);
-    if (L.res.workspaces.some((w) => w.metadata.name === 'ws-broken')) {
-      api.ACTIONS['live-new-ws-pick']({ dataset: { ws: 'ws-broken' } });
-      need(api.liveNewIssues(L.draft).join(' | '), ['The workspace ws-broken failed its setup. Pick another one.']);
-      need(main(p), ['Its setup failed: setup step 2 exited 1']);
-    }
-    api.ACTIONS['live-new-source']({ dataset: { source: 'git' } });
+    need(main(p), ['github.com</span><span class="nt-chip-why">for the workspace</span>', 'docs-mcp.default.svc.cluster.local:8080', 'placeholder="shared-lib"']);
+    /* Common setup commands are pills: one adds the command, pressing it again takes it out. */
+    api.ACTIONS['live-new-setup-pick']({ dataset: { cmd: 'uv sync' } });
+    if (d.setup.map((c) => c.cmd).join() !== 'npm ci,npm run build,uv sync') throw new Error(d.setup.map((c) => c.cmd).join());
+    api.ACTIONS['live-new-setup-pick']({ dataset: { cmd: 'uv sync' } });
+    if (d.setup.length !== 2) throw new Error('taken out again');
+    return { html: main(p) };
   });
-  await check('the task file can be downloaded, and a task file from this computer opens in the editor', async () => {
-    api.ACTIONS['live-new-download']();
-    api.liveNewLoadFile({ name: 'nightly.yaml', size: 120, text: 'apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: nightly-check\nspec: {}\n' });
+  await check('List rows are added and removed with their buttons, and empty rows are left out of the YAML', () => {
+    const d = L.draft;
+    const before = api.liveNewYAML(d, 'text', {});
+    api.ACTIONS['live-new-row-add']({ dataset: { kind: 'env' } });
+    api.ACTIONS['live-new-row-add']({ dataset: { kind: 'files', path: 'CLAUDE.md' } });
+    api.ACTIONS['live-new-row-add']({ dataset: { kind: 'mcp' } });
+    api.ACTIONS['live-new-mcp-kind']({ dataset: { i: '3', kind: 'local' } });
+    if (d.env.length !== 1 || d.files[1].path !== 'CLAUDE.md' || d.mcp[3].kind !== 'local') throw new Error(JSON.stringify([d.env, d.files, d.mcp[3]]));
+    need(main(p), ['id="nt-env-0-name"', 'aria-label="Variable 1: name"', 'data-action="live-new-row-del" data-kind="env" data-i="0"', 'id="nt-files-1-content"', 'id="nt-mcp-3-command"', 'aria-label="MCP server 4: command and arguments"']);
+    /* A row you haven't filled in (the variable) is left out; a file with only a path is written empty. */
+    const y = api.liveNewYAML(d, 'text', {});
+    if (/\n  env:/.test(y)) throw new Error('an empty variable');
+    if (docOf(axDocs(y), 'Workspace').spec.setup.files[1].content !== '') throw new Error('an empty file');
+    api.ACTIONS['live-new-row-del']({ dataset: { kind: 'env', i: '0' } });
+    api.ACTIONS['live-new-row-del']({ dataset: { kind: 'files', i: '1' } });
+    api.ACTIONS['live-new-row-del']({ dataset: { kind: 'mcp', i: '3' } });
+    if (api.liveNewYAML(d, 'text', {}) !== before) throw new Error('back as it was');
+  });
+  await check('The workspace and the Gateway can be ones already on this computer: the YAML names them, and a failed workspace is refused', async () => {
+    L.draft = blankDraft();
+    api.ACTIONS['live-new-ws']({ dataset: { ws: 'existing' } });
     await settle();
-    if (!L.draft.raw || !L.draft.yaml.includes('name: nightly-check')) throw new Error('loaded into the editor');
-    need(toasts(p), ['Loaded <span class="mono">nightly.yaml</span>']);
-    need(main(p), ['data-action="live-new-download"', 'data-action="live-new-load"']);
-    api.ACTIONS['live-new-form']();
+    need(main(p), ['aria-checked="true" data-action="live-new-ws" data-ws="existing"', 'id="sel-live-new-ws-pick"', 'data-value="itsdangerous"', 'Pick a workspace', 'Setup failed']);
+    need(api.liveNewIssues(L.draft).join(' | '), ['Pick a workspace, or choose None or New.']);
+    api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-ws-pick', value: 'itsdangerous' } });
+    need(main(p), ['The task starts with what it sets up']);
+    let docs = axDocs(api.liveNewYAML(L.draft, 'text', {}));
+    if (docs.length !== 1 || docOf(docs, 'Task').spec.workspace.name !== 'itsdangerous') throw new Error(JSON.stringify(docs));
+    api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-ws-pick', value: 'ws-broken' } });
+    need(api.liveNewIssues(L.draft).join(' | '), ['The workspace ws-broken failed its setup. Pick another one.']);
+    need(main(p), ['Its setup failed: setup step 2 exited 1']);
+    api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-ws-pick', value: 'itsdangerous' } });
+    /* A Gateway already on this computer: the Task names it, and no Gateway is made for it. */
+    api.ACTIONS['live-new-net']({ dataset: { net: 'existing' } });
+    need(api.liveNewIssues(L.draft).join(' | '), ['Pick a Gateway, or choose No network or Allow hosts.']);
+    need(main(p), ['id="sel-live-new-gw-pick"', 'data-value="review-bot-gw"']);
+    api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-gw-pick', value: 'review-bot-gw' } });
+    need(main(p), ['It allows api.anthropic.com, github.com.', 'The task gets a copy of its rules when it starts.']);
+    docs = axDocs(api.liveNewYAML(L.draft, 'text', {}));
+    if (docs.length !== 1 || docOf(docs, 'Task').spec.gateway.name !== 'review-bot-gw') throw new Error(JSON.stringify(docs));
+    if (api.liveNewIssues(L.draft).length) throw new Error(api.liveNewIssues(L.draft).join(' | '));
+    /* It says when the Gateway you picked doesn't allow what the workspace needs. */
+    Object.assign(L.draft, { ws: 'new', git: [{ repo: 'https://gitlab.example.com/me/project.git', ref: '', dir: '', depth: '' }] });
+    api.render();
+    need(main(p), ["It doesn't allow gitlab.example.com, which the workspace needs to set up."]);
+    L.draft = blankDraft();
   });
-  await check('Run stores the key on the cluster, applies the files, starts the task and opens it', async () => {
-    L.draft.key = 'sk-not-a-real-key';
-    const name = api.liveDraftName(L.draft);
+  await check('The form says what is wrong, in page order', () => {
+    const base = () => Object.assign(blankDraft(), { net: 'allow' });
+    const issues = (o) => api.liveNewIssues(Object.assign(base(), o)).join(' | ');
+    need(issues({ image: 'ghcr.io/me/agent:latest' }), ['The image address must end in its digest: @sha256: and 64 characters.']);
+    if (issues({ image: 'ghcr.io/me/agent@sha256:' + 'a'.repeat(64), hosts: ['github.com'] })) throw new Error('a pinned image is fine');
+    need(issues({ nameEdited: true, name: 'Not A Name' }), ['The name can use lowercase letters, digits and hyphens, up to 63 characters.']);
+    need(issues({ command: 'echo "unclosed', env: [{ name: '1BAD', value: 'x' }], cpu: 'lots', memory: '6GB', config: '- not a mapping' }),
+      ["The command has a quote that isn't closed.", 'Give each environment variable a name', 'Give the CPU as a number, like 2 or 500m.', 'Give the memory with its unit, like 4Gi or 512Mi.',
+        'Write the config as YAML keys and values']);
+    need(issues({ env: [{ name: 'CI', value: '1' }, { name: 'CI', value: '2' }] }), ['Each environment variable needs its own name.']);
+    need(issues({ config: 'prompt: "x"', goalAsPrompt: true, goal: 'Do it.' }), ['The config has a prompt already.']);
+    need(issues({ ws: 'new', git: [{ repo: 'git@github.com:me/x.git', ref: 'my branch', dir: '../out', depth: 'all' }], files: [{ path: '/etc/passwd', content: 'x' }], skills: [{ provider: '', project: 'acme/skills', query: '' }],
+      mcp: [{ name: 'bad name', kind: 'remote', endpoint: 'ftp://x' }, { name: 'ok', kind: 'local', command: '' }] }),
+    ['Each repo must be an https:// Git address.', 'Give each ref as a branch, tag or commit, without spaces.', 'Give each repo folder as a path inside /workspace', 'Give the depth as a whole number',
+      'Give each file a path inside /workspace, like AGENTS.md.', 'Give each skills registry its provider.', 'Give each MCP server a name', 'Give each remote MCP server its http:// or https:// address.',
+      'Give each local MCP server the command that starts it.']);
+    need(issues({ ws: 'new', git: [{ repo: 'https://github.com/a/x.git', dir: 'lib' }, { repo: 'https://github.com/b/x.git', dir: 'lib' }] }), ['Each repo needs a folder of its own.']);
+    need(issues({ creds: [{ host: 'Not a host', header: 'Bad Header', prefix: '', secret: 'Bad_Secret', key: 'bad key', value: '' }] }),
+      ['Give each credential the host it is for', 'Give each credential the header it sets', 'Give each credential its secret', 'Give each credential the key in its secret']);
+    need(issues({ creds: [{ host: 'api.example.com', header: 'X-Key', prefix: '', secret: 'k', key: 'v', value: '' }], tls: ['api.example.com'] }), ["api.example.com can't both pass through and get a credential."]);
+    need(issues({ hosts: [] }), ['Add a host to allow, or choose No network.']);
+    need(api.liveNewIssues(Object.assign(base(), { net: 'existing', gateway: 'gone-gw' })).join(' | '), ["The Gateway gone-gw isn't on this computer anymore."]);
+    /* The order follows the page: the Task, then the workspace, then the network. */
+    const all = api.liveNewIssues(Object.assign(base(), { image: 'x:latest', ws: 'existing' }));
+    if (!/digest/.test(all[0]) || !/Pick a workspace/.test(all[1]) || !/Add a host/.test(all[2])) throw new Error(all.join(' | '));
+    /* Create task with something wrong says the first thing, and sends nothing. */
+    const sent = B.ax.length;
+    L.draft = Object.assign(blankDraft(), { image: 'x:latest' });
+    return api.liveNewRun().then(() => {
+      if (B.ax.length !== sent || !/digest/.test(L.draft.error)) throw new Error(L.draft.error);
+      need(main(p), ['role="alert"', 'The image address must end in its digest']);
+      L.draft = blankDraft();
+    });
+  });
+  await check('Allow hosts: quick picks, hosts you type, passthrough with its port, and a header from a secret', async () => {
+    await go(p, '#/new');
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'blank' } });
+    const d = L.draft;
+    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
+    need(main(p), ['data-action="live-new-host-pick" data-pick="github"', 'id="live-new-host"', 'data-action="live-new-host-add"', 'id="live-new-tls"', 'Add a header from a secret', 'Pass through', 'No hosts yet.']);
+    api.ACTIONS['live-new-host-pick']({ dataset: { pick: 'github' } });
+    api.ACTIONS['live-new-host-pick']({ dataset: { pick: 'npm' } });
+    if (d.hosts.join() !== 'github.com,api.github.com,*.githubusercontent.com,registry.npmjs.org') throw new Error(d.hosts.join());
+    need(main(p), ['aria-pressed="true" title="github.com, api.github.com, *.githubusercontent.com"']);
+    api.ACTIONS['live-new-host-pick']({ dataset: { pick: 'npm' } });
+    if (d.hosts.includes('registry.npmjs.org')) throw new Error('pressing it again takes them out');
+    d.hostIn = 'https://Docs.Example.com/guide';
+    api.ACTIONS['live-new-host-add']();
+    if (!d.hosts.includes('docs.example.com') || d.hostIn !== '') throw new Error(d.hosts.join());
+    d.hostIn = 'not a host!';
+    api.ACTIONS['live-new-host-add']();
+    need(toasts(p), ['isn\'t a host name']);
+    if (d.hosts.length !== 4) throw new Error('nothing added');
+    d.tlsIn = 'pinned.example.com:8443';
+    api.ACTIONS['live-new-tls-add']();
+    api.ACTIONS['live-new-row-add']({ dataset: { kind: 'creds' } });
+    Object.assign(d.creds[0], { host: 'api.github.com', header: 'Authorization', prefix: 'Bearer ', secret: 'github-token', key: 'token' });
+    const gw = docOf(axDocs(api.liveNewYAML(d, 'text', {})), 'Gateway');
+    const egress = [
+      { tlsPassthrough: { hostnames: ['pinned.example.com'], ports: { numbers: [8443] } } },
+      { https: { hostnames: ['api.github.com'], effects: { replaceHeaders: [{ header: 'Authorization', prefix: 'Bearer ', credentialUri: 'ate-secret://k8s.io/default/ax-system/github-token/token' }] } } },
+      { https: { hostnames: ['github.com', '*.githubusercontent.com', 'docs.example.com'] } },
+    ];
+    if (JSON.stringify(gw.spec.egress) !== JSON.stringify(egress)) throw new Error(JSON.stringify(gw.spec.egress));
+    api.render();
+    need(main(p), ['ate-secret://k8s.io/default/ax-system/github-token/token', 'id="nt-creds-0-prefix"', 'pinned.example.com:8443']);
+    api.ACTIONS['live-new-host-del']({ dataset: { host: 'docs.example.com' } });
+    api.ACTIONS['live-new-tls-del']({ dataset: { host: 'pinned.example.com:8443' } });
+    if (d.hosts.includes('docs.example.com') || d.tls.length) throw new Error('removed');
+    L.draft = null;
+  });
+  await check('Edit YAML opens what Studio applies in an editor; Download saves it; a task file from this computer opens there too', async () => {
+    await go(p, '#/new');
+    api.ACTIONS['live-new-raw']();
+    const d = L.draft;
+    if (!d.raw || !/^kind: Task$/m.test(d.yaml)) throw new Error('raw');
+    need(main(p), ['id="live-new-yaml"', 'Back to the form', "The form doesn't follow edits made here.", 'data-action="live-new-download"', 'data-action="live-new-load"', 'Create task']);
+    never(main(p), ['id="sel-live-new-preset"', 'id="nt-task-h"']);
+    api.ACTIONS['live-new-download']();
+    api.ACTIONS['live-new-form']();
+    if (d.raw) throw new Error('back to the form');
+    api.liveNewLoadFile({ name: 'nightly.yaml', size: 120, text: 'apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: nightly-check\nspec:\n  commands: ["sh", "-c", "date"]\n' });
+    await settle();
+    if (!L.draft.raw || !L.draft.yaml.includes('name: nightly-check') || api.liveYAMLTaskName(L.draft.yaml) !== 'nightly-check') throw new Error('loaded into the editor');
+    need(toasts(p), ['Loaded <span class="mono">nightly.yaml</span>']);
+    need(main(p), ['ax --context ax-local resume task nightly-check']);
+    api.liveNewLoadFile({ name: 'notes.yaml', size: 20, text: 'just: notes\n' });
+    await settle();
+    if (L.draft.error !== 'The YAML needs a Task.') throw new Error(L.draft.error);
+    need(main(p), ['role="alert"', 'The YAML needs a Task.']);
+  });
+  await check('Create task from the YAML editor applies it as written, then resumes the Task it names', async () => {
+    const yaml = 'apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: nightly-check\nspec:\n  commands: ["sh", "-c", "date"]\n  debug: true\n';
+    Object.assign(L.draft, { yaml, error: '' });
+    await api.liveNewRun();
+    await settle();
+    if (B.applied[B.applied.length - 1] !== yaml) throw new Error(B.applied[B.applied.length - 1]);
+    if (B.ax[B.ax.length - 1] !== '--context ax-local -a default resume task nightly-check') throw new Error(B.ax.slice(-2).join(' | '));
+    if (p.ctx.location.hash !== '#/task/nightly-check' || L.draft !== null) throw new Error(p.ctx.location.hash);
+  });
+  await check('Create task stores the key you typed as a secret, applies YAML that AX reads, resumes the task and opens it; its repos are remembered', async () => {
+    await go(p, '#/new');
+    const d = L.draft;
+    api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-preset', value: 'antigravity' } });
+    d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
+    api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    Object.assign(d.git[0], { repo: 'https://gitlab.example.com/me/project.git', ref: 'dev' });
+    d.creds[0].value = 'sk-not-a-real-key';
+    d.debug = false;
+    const name = api.liveDraftName(d);
     await api.liveNewRun();
     await settle();
     if (JSON.stringify(B.secrets) !== '[{"context":"ax-local","name":"gemini-api-creds","key":"GEMINI_API_KEY","length":17}]') throw new Error(JSON.stringify(B.secrets));
     const tail = B.ax.slice(-2).join(' | ');
     if (tail !== `--context ax-local -a default apply -f - | --context ax-local -a default resume task ${name}`) throw new Error(tail);
-    if (B.applied[B.applied.length - 1].includes('sk-not-a-real-key')) throw new Error('the key never goes into the task files');
+    const applied = B.applied[B.applied.length - 1];
+    if (applied.includes('sk-not-a-real-key')) throw new Error('the key never goes into the YAML');
+    const docs = axDocs(applied);
+    if (docs.map((x) => x.kind).join() !== 'Gateway,Workspace,Task') throw new Error(docs.map((x) => x.kind).join());
+    if (JSON.stringify(docOf(docs, 'Gateway').spec.egress.slice(-1)) !== JSON.stringify([{ https: { hostnames: ['gitlab.example.com'] } }])) throw new Error('the repo is allowed');
     const t = L.tasks.find((x) => x.name === name);
-    if (!t || t.state !== 'Working' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.') throw new Error(JSON.stringify(t && [t.state, t.goal]));
+    if (!t || t.state !== 'Working' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.' || t.debug) throw new Error(JSON.stringify(t && [t.state, t.goal, t.debug]));
     if (p.ctx.location.hash !== `#/task/${name}` || L.draft !== null) throw new Error('opens the task: ' + p.ctx.location.hash);
     need(toasts(p), [`Started <span class="mono">${name}</span>`]);
-    /* The repo is remembered for next time: the next New task starts with it, and offers it as a pill. */
     if (JSON.parse(p.store['ax.live.recentRepos'])[0] !== 'https://gitlab.example.com/me/project.git') throw new Error(p.store['ax.live.recentRepos']);
+    /* The next new workspace offers the repo, and a recent repo fills the empty row. */
     await go(p, '#/new');
-    if (L.draft.repo !== 'https://gitlab.example.com/me/project.git') throw new Error('the last repo is the default: ' + L.draft.repo);
-    need(main(p), ['<span class="gh-label">Recent</span>', 'aria-pressed="true" data-action="live-new-repo-pick" data-repo="https://gitlab.example.com/me/project.git"', 'gitlab.example.com/me/project']);
+    api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    need(main(p), ['<span class="gh-label">Recent</span>', 'data-action="live-new-repo-pick" data-repo="https://gitlab.example.com/me/project.git"', 'gitlab.example.com/me/project']);
+    api.ACTIONS['live-new-repo-pick']({ dataset: { repo: 'https://gitlab.example.com/me/project.git' } });
+    if (L.draft.git.length !== 1 || L.draft.git[0].repo !== 'https://gitlab.example.com/me/project.git') throw new Error(JSON.stringify(L.draft.git));
+    need(main(p), ['aria-pressed="true" data-action="live-new-repo-pick"']);
+    L.draft = null;
   });
-  await check('with an AX from before the goal field was renamed, the same task is sent again with the old name', async () => {
+  await check('with an AX from before the goal field was renamed, the same task is sent again with goal.spec', async () => {
     B.goalField = 'spec';
     await go(p, '#/new');
     Object.assign(L.draft, { goal: 'Tidy the docs.' });
@@ -924,7 +1306,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!L.tasks.some((x) => x.name === name && x.goal === 'Tidy the docs.')) throw new Error('the task is created');
     B.goalField = 'text';
   });
-  await check('when ax apply fails, the form stays with what AX said', async () => {
+  await check('when ax apply fails, the form stays with what AX said; a setup network AX on this computer refuses says what to do instead', async () => {
     B.noAx = true;
     await go(p, '#/new');
     L.draft.goal = 'Anything.';
@@ -933,26 +1315,27 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     B.noAx = false;
     if (!L.draft || !/executable file not found/.test(L.draft.error) || L.draft.busy) throw new Error(JSON.stringify(L.draft && [L.draft.error, L.draft.busy]));
     need(main(p), ['role="alert"', 'executable file not found', 'Anything.']);
-  });
-
-  // ---------- A follow-up ----------
-  await check('a follow-up is a new task in the same session, on the same workspace and network rules', async () => {
-    const first = L.tasks.find((x) => /^make-the-signer-tests-/.test(x.name));
-    await go(p, `#/new?from=${first.name}`);
-    const h = main(p);
-    need(h, ['Send a follow-up', `Following up on <span class="mono">${first.name}</span>`, "Files the last turn left unpushed don't carry over.", `It uses the workspace <span class="mono">ws-${first.name}</span> from the last turn.`,
-      `It uses the network rules <span class="mono">gw-${first.name}</span> from the last turn.`, 'Send follow-up']);
-    never(h, ['id="live-new-repo"']);
-    L.draft.goal = 'Also add a regression test.';
-    const name = api.liveDraftName(L.draft);
-    if (name === first.name || !/^make-the-signer-tests-ab[0-9a-f]{2}$/.test(name)) throw new Error('a new name on the same stem: ' + name);
-    const y = api.liveNewYAML(L.draft, 'text', '');
-    need(y, [`sessionId: "uid-${first.name}"`, `  workspace:\n    name: "ws-${first.name}"`, `  gateway:\n    name: "gw-${first.name}"`, 'text: "Also add a regression test."']);
-    never(y, ['kind: Gateway', 'kind: Workspace']);
+    /* A workspace with a setup network: AX on this computer doesn't support one yet, and Studio says what to do. */
+    Object.assign(L.draft, { ws: 'new', git: [{ repo: 'https://github.com/acme/api.git', ref: '', dir: '', depth: '' }], setupGateway: 'review-bot-gw', net: 'allow' });
     await api.liveNewRun();
     await settle();
-    /* Both turns are rows in the Tasks table, each saying which turn it is. */
-    need(api.liveViewHome().html, [`id="live-trow-${first.name}"`, `id="live-trow-${name}"`, 'Turn 1 of 2', 'Turn 2 of 2']);
+    if (L.draft.error !== "AX on this computer doesn't support a setup network yet. Set Setup network to None: setup then uses the task's own network.") throw new Error(L.draft.error);
+    if (docOf(axDocs(B.applied[B.applied.length - 1]), 'Workspace').spec.setup.gateway.name !== 'review-bot-gw') throw new Error('the YAML names it');
+    /* ax apply made the Gateway before AX refused the Workspace: Studio deletes it again, so nothing is left behind. */
+    const gwName = 'gw-' + api.liveDraftName(L.draft);
+    if (!B.posts.some((x) => x.path === '/api/gateways/delete' && x.body.name === gwName) || B.gatewayList.some((x) => x.metadata.name === gwName)) throw new Error('the Gateway it made is gone again');
+    /* A task file with spec.retry: AX says it doesn't support it yet, and Studio shows what AX said. */
+    Object.assign(L.draft, { raw: true, yaml: 'apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: "retry-me"\nspec:\n  retry:\n    maxRetries: 2\n' });
+    await api.liveNewRun();
+    await settle();
+    if (L.draft.error !== 'applying document 1: rpc error: code = Unimplemented desc = spec.retry is not supported yet') throw new Error(L.draft.error);
+    L.draft.raw = false;
+    /* An AX that sets workspaces up before their tasks takes it. */
+    B.prewarm = true;
+    await api.liveNewRun();
+    await settle();
+    B.prewarm = false;
+    if (L.draft !== null) throw new Error('created: ' + (L.draft && L.draft.error));
   });
 
   // ---------- Local cluster ----------
@@ -1467,17 +1850,30 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (starts().length !== 3 || m.api.liveTermActive('fix-flaky-tests').id !== starts()[2].body.id) throw new Error('open again');
     need(panel(), ['Opening the shell again…', 'Shell 2']);
   });
-  await check('New task shows prompt-clarity helper pills and the visual Guardrails gateMap', async () => {
+  await check('New task: every field has a label, choices are radio groups, and the words stay plain', async () => {
     const M = makeBackend();
     const m = makeContext(M);
     await settle();
     await go(m, '#/new');
-    need(main(m), ['id="live-goal-help"', 'data-action="live-new-suggest"', 'id="live-new-gatemap"', 'generativelanguage.', 'github.com']);
-    m.api.ACTIONS['live-new-suggest']({ dataset: { text: 'Fix the failing tests' } });
-    if (m.api.LIVE.draft.goal !== 'Fix the failing tests') throw new Error(m.api.LIVE.draft.goal);
-    need(m.api.liveGoalHelpHTML(m.api.LIVE.draft), ['<span class="gh-label">Make it clearer</span>', 'data-action="live-new-tip"']);
-    m.api.ACTIONS['live-new-tip']({ dataset: { tip: 'done' } });
-    if (!/Done when:/.test(m.api.LIVE.draft.goal)) throw new Error(m.api.LIVE.draft.goal);
+    m.api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
+    m.api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    ['env', 'files', 'skills', 'setup', 'mcp', 'mcp', 'creds'].forEach((kind) => m.api.ACTIONS['live-new-row-add']({ dataset: { kind } }));
+    m.api.ACTIONS['live-new-mcp-kind']({ dataset: { i: '1', kind: 'local' } });
+    await settle();
+    const h = main(m);
+    const fields = [...h.matchAll(/<(input|textarea)\b[^>]*>/g)];
+    if (fields.length < 30) throw new Error('fields: ' + fields.length);
+    for (const f of fields) {
+      const before = h.slice(0, f.index);
+      const inLabel = before.lastIndexOf('<label') > before.lastIndexOf('</label>');
+      if (!inLabel && !/aria-label(ledby)?="[^"]+"/.test(f[0])) throw new Error('a field without a label: ' + f[0].slice(0, 160));
+    }
+    if ((h.match(/role="radiogroup"/g) || []).length < 4) throw new Error('radio groups');
+    for (const r of h.matchAll(/<button[^>]*role="radio"[^>]*>/g)) if (!/aria-checked="(true|false)"/.test(r[0])) throw new Error(r[0]);
+    for (const c of h.matchAll(/role="combobox"[^>]*>/g)) if (!/aria-label="[^"]+"/.test(c[0])) throw new Error(c[0]);
+    never(h, ['—', '→', 'gVisor', 'undefined']);
+    if ((h.match(/<svg [^>]*class="axo\b/g) || []).length !== 1) throw new Error('one Axel');
+    return { html: h };
   });
   await check('stopping AX on this computer when tasks are running offers to suspend them first so checkpoints survive', async () => {
     const M = makeBackend();

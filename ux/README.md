@@ -56,7 +56,7 @@ is the page's one way to the server.
 | The sidebar footer card says how AX on this computer is doing and opens Local cluster. Links can open Studio on an atespace (`?atespace=…`); Copy link on a task and in the command palette | `GET /api/env/status` |
 | What a task can reach: the sites its Gateway allows, and the keys the Gateway adds outside the sandbox | `GET /api/gateways/get` (`GetGateway`) |
 | Suspend, resume and delete | `POST /api/tasks/suspend`, `resume`, `delete` |
-| New task, in the prototype's four steps (a template or your own image, where it runs, the workspace, the goal), with the best defaults and pills for common answers. The workspace can be a Git repo, one already on the cluster, or empty, with Customize workspace for more repos, setup commands, files and MCP servers. More options has the network rules, a size or a custom CPU and memory, the command, environment variables, the name, and the task file to edit, download or load | `ax apply -f -`, then `ax resume task`, through `POST /api/ax/exec`. The key goes to `POST /api/secrets/credential`; existing workspaces from `GET /api/workspaces` |
+| New task: a sequential 4-step form that follows AX's specs, starting with preset cards (Antigravity, Claude Code, or Blank) and Load a task file, then Task (Goal and Name upfront; image, command, resources, environment, config, and debug access under Advanced task options), Workspace (none, existing, or new with repos and setup commands upfront, and files, skills, setup network, and MCP servers under More workspace options), Network (none, allow hosts with the preset API key and hosts upfront and full credential rules under Advanced network options, or existing), and a sticky bottom commit bar. The YAML beside it is what Studio applies, to edit, download or load from a file | `ax apply -f -`, then `ax resume task`, through `POST /api/ax/exec`. Keys you type go to `POST /api/secrets/credential`; existing workspaces and Gateways from `GET /api/workspaces` and `GET /api/gateways` |
 | Terminal: for a running task with debug access, shells in its sandbox (`ax ssh`), drawn by xterm.js ([vendor/xterm](vendor/xterm/README.md)): Tab completion, history, Ctrl-C, full-screen programs such as `top`, and resizing. Several at once as tabs; they stay connected while you look at other pages. A task that can't have a shell says why. The server runs `ax ssh` on a pseudo-terminal and gives the shell a terminal inside the sandbox too (util-linux `script` or Python's `pty`; without either, a line at a time) | `POST /api/sessions/start`, `write` (keys as typed), `resize`, `close`, and `GET /api/events` (output as base64) |
 | Settings: what this Studio runs against (its version, the `ax` command, the kubeconfig), the atespace it lists and starts tasks in (kept in this browser), and a diagnostics report with secrets removed | `GET /api/bootstrap`, `GET /api/env/status`, `GET /api/env/diagnostics` |
 
@@ -66,21 +66,27 @@ because AX has no call that streams changes. An open Logs tab on a running task 
 Not connected yet, so hidden when the server is there: the agent's own structured messages (AX doesn't record them
 yet; Logs shows what it prints) and Guardrails.
 
-New task starts from the answers most tasks want: Antigravity, the repo you used last, the repo's default branch, Balanced network rules and the Medium size. Pills fill in recent
-repos, branch names, goal ideas and goal tips. The plan card beside the form says what is left and holds Run.
+New task starts from Antigravity by default (ordered Antigravity, Claude Code, then Blank). Antigravity and Claude Code fill
+in an agent with solid defaults: its image, environment, resources and config, and the Gateway rules that add its API key outside the
+sandbox, tucked into collapsible advanced sections until you want to customize them. Blank uses the cluster's default task image,
+`sh -c 'sleep infinity'` so there is a sandbox to open a shell in, debug access on, and no workspace or network, so a first task
+works without keys. Everything stays editable, and switching presets after editing what the last one filled in asks first. Each
+row names the YAML field it writes, and the YAML panel and sticky bottom bar say what is left to fix.
 
 Each fact is said once, where it belongs: Home's tiles carry the counts (the lede says where to start, and Axel only
 speaks when poked or on an empty cluster); a task's state is its header chip and each check AX records is a step in
 Activity; what AX says about its state is in the State card; this computer's checks are on Local cluster.
 
-Three things to know about how tasks are written:
+Four things to know about how tasks are written:
 
-- The templates use the images the Studio pages used before this UI. They are staging images until the templates
-  are published.
+- Antigravity uses its official image. Claude Code's image is a staging image until it is published.
 - The goal field of a Task is `goal.text`. AX called it `goal.spec` until mid-November 2026. If `ax apply` says it
   doesn't know `text`, Studio sends the same task again with `spec`.
 - Debug access is on by default. You can change it for each task. Without it the sandbox stays closed: there is no
   shell, and Logs has what the task printed.
+- AX on this computer sets a workspace up inside the task's sandbox, on the task's network (its `ax-server` runs
+  without workspace pre-warming). So a new Gateway also allows the hosts the workspace clones from, and AX refuses a
+  workspace with a setup network (`spec.setup.gateway`) or a profile until it pre-warms workspaces.
 
 ## Review links
 

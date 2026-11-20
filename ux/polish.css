@@ -1820,19 +1820,93 @@ button.station:disabled::after { display: none; }
 .new-grid .prow { padding: 16px 20px; gap: 8px 24px; }
 .new-grid .panel-more > summary { padding: 14px 20px; }
 .prow-hint .svg { vertical-align: -2px; margin-right: 3px; }
-#live-ws-existing { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-#live-ws-existing .pills { margin-top: 0; }
-#live-ws-existing .pill .svg { flex: none; }
-.mcp-rows { display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
-.mcp-rows > .btn-row { margin-top: 2px; }
-.kv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
-.kv-row.kv-2 { grid-template-columns: minmax(120px, .65fr) minmax(0, 1.35fr) auto; }
-.size-custom { margin-top: 2px; gap: 14px; }
-.size-custom label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--muted); }
-.size-custom .input { width: 104px; }
-#live-new-manifest { max-height: 220px; }
-.live-cli-stack { display: grid; gap: 8px; }
 .more-block > summary { padding: 4px 0; }
+
+/* New task with real data: the form beside its YAML. Each section is one of AX's specs (Task, Workspace, Gateway), each
+   row names the YAML field it writes, lists are rows of fields with their labels beside them, and the YAML stays in
+   view while the form scrolls. */
+.nt-head { align-items: flex-start; flex-wrap: wrap; }
+.nt-title { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1 1 420px; }
+.nt-title .axo { --axo-size: 64px; flex: none; margin: -6px -4px -8px -6px; }
+.nt-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+.nt-from { font-size: 12.5px; font-weight: 550; color: var(--muted); }
+.nt-actions .sel-btn { gap: 8px; }
+.nt-actions .sel-btn .agent-tile { width: 20px; height: 20px; border-radius: 6px; }
+.agent-tile.nt-blank { --t: #64748B; }
+.nt-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(340px, 1fr); gap: 28px; align-items: start; margin-top: 22px; }
+.nt-form .step-block { margin-top: 30px; padding-top: 24px; }
+.nt-form .step-block.first { margin-top: 0; padding-top: 0; }
+.nt-form .step-head { flex-wrap: wrap; margin-bottom: 12px; }
+.nt-kind { margin-left: auto; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; color: var(--muted); background: var(--surface); }
+.nt-none { margin-top: 10px; }
+.nt-panel { margin-top: 12px; }
+.nt-form .prow { grid-template-columns: 128px minmax(0, 1fr); gap: 8px 16px; padding: 14px 16px; }
+.nt-path { display: block; margin-top: 3px; font-size: 11px; color: var(--faint); }
+.prow + .nt-group { border-top: 1px solid var(--line); }
+.nt-group { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 12px 16px 0; }
+.nt-group b { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.nt-group span { font-size: 12px; color: var(--faint); }
+.nt-rows { display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
+.nt-rows > .btn-row, .nt-rows > .nt-add-row { align-self: flex-start; }
+.nt-row { display: grid; gap: 8px; align-items: center; }
+.nt-row.nt-env { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr) 28px; }
+.nt-row.nt-cmd { grid-template-columns: minmax(0, 1fr) 28px; }
+.nt-eq { font: 500 12px var(--font-mono); color: var(--faint); }
+.nt-item { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-subtle); }
+.nt-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nt-line > .input { flex: 1; min-width: 0; }
+.nt-line.nt-small { flex-wrap: wrap; gap: 8px 14px; }
+.nt-f { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; font-weight: 550; color: var(--muted); }
+.nt-f > span { flex: none; }
+.nt-f .input { width: 120px; min-width: 0; min-height: 32px; padding: 5px 10px; }
+.nt-small .nt-f { flex: 1 1 130px; }
+.nt-small .nt-f .input, .nt-f.nt-wide .input { flex: 1 1 0; width: 0; }
+.nt-small .nt-f.nt-depth { flex: 0 1 112px; }
+.nt-small .nt-f.nt-grow { flex: 1 1 auto; }
+.nt-f.nt-wide { align-self: stretch; }
+.nt-item .textarea { min-height: 64px; }
+.nt-line .seg.sm { flex: none; }
+.nt-res { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.nt-res .nt-f .input { width: 96px; }
+.nt-check { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.nt-chips { display: flex; flex-wrap: wrap; gap: 6px; align-self: stretch; }
+.nt-chip { display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 3px 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12px; background: var(--bg); }
+.nt-chip.auto { padding-right: 10px; border-style: dashed; color: var(--muted); }
+.nt-chip-why { margin-left: 6px; font-size: 11px; color: var(--faint); }
+.nt-chip-x { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 2px; border: 0; border-radius: 50%; background: transparent; color: var(--faint); cursor: pointer; }
+.nt-chip-x:hover { color: var(--ink); background: var(--surface); }
+.nt-chip-x:focus-visible { box-shadow: var(--ring); outline: none; }
+.nt-add { display: flex; gap: 8px; align-self: stretch; }
+.nt-add .input { flex: 1; min-width: 0; }
+.nt-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.nt-pick .sel-btn { min-width: 260px; justify-content: flex-start; }
+.nt-pick .sel-btn .sel-val { flex: 1; text-align: left; }
+.nt-warn { color: var(--wait); }
+.nt-uri .mono { overflow-wrap: anywhere; }
+.nt-yaml.card {
+  position: sticky; top: 74px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 96px); padding: 18px;
+  background: var(--glass-2); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--hl);
+}
+.nt-yaml-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.nt-yaml-head h2 { font-size: 15px; }
+.nt-status p { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 550; }
+.nt-ok { color: var(--done); }
+.nt-todo { color: var(--wait); }
+.nt-issues { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.nt-yaml > * { min-width: 0; }
+.app.live .nt-yaml .manifest { flex: 1 1 auto; min-height: 160px; max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A long line wraps under its own indentation, two characters in. */
+.manifest .yl { display: block; padding-left: calc((var(--yi) + 2) * 1ch); text-indent: -2ch; }
+.manifest .yl:empty::before { content: "\200b"; }
+.nt-cli { display: grid; gap: 6px; min-width: 0; }
+.nt-cli > * { min-width: 0; }
+.nt-raw { margin-top: 22px; }
+.nt-raw .textarea { min-height: 420px; }
+@media (max-width: 1180px) {
+  .nt-grid { grid-template-columns: minmax(0, 1fr); }
+  .nt-yaml.card { position: static; max-height: none; }
+  .app.live .nt-yaml .manifest { max-height: 480px; }
+}
 .plan-card.card { padding: 22px; }
 .plan-card .ready-list { margin-top: 16px; gap: 4px; }
 .plan-card .ready-list li { align-items: flex-start; padding: 7px 0; gap: 10px; }
@@ -2001,3 +2075,34 @@ html[data-theme="dark"] .setup-acc { background: rgba(255, 255, 255, .025); }
 .tasks-tabs .tab-n { margin-left: 7px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--surface); color: var(--muted); }
 .tasks-tabs [aria-selected="true"] .tab-n { background: var(--key-soft); color: var(--key-ink); }
 .tasks-res-panel .live-res:first-child { margin-top: 4px; }
+
+/* New task: sequential flow, Start from cards, progressive disclosure, sticky commit bar */
+.nt-head { align-items: flex-start; }
+.nt-step-num { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 999px; background: var(--key-soft); color: var(--key-ink); font-size: 12px; font-weight: 700; }
+.nt-load-btn { margin-left: auto; }
+.nt-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+@media (max-width: 760px) { .nt-presets { grid-template-columns: 1fr; } }
+.nt-preset-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px 15px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: inherit; text-align: left; font: inherit; cursor: pointer; transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease), background var(--dur-2) var(--ease); }
+html[data-theme="dark"] .nt-preset-card { background: rgba(255, 255, 255, .025); }
+.nt-preset-card:hover { border-color: var(--line-strong); }
+.nt-preset-card:focus-visible { outline: none; box-shadow: var(--ring); }
+.nt-preset-card.on { border-color: var(--key); background: color-mix(in srgb, var(--key) 6%, var(--bg)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--key) 35%, transparent); }
+.npc-top { display: flex; align-items: center; gap: 9px; width: 100%; }
+.npc-name { font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.npc-check { margin-left: auto; color: var(--key-ink); display: inline-flex; }
+.npc-desc { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.nt-panel { border-radius: 16px; border: 1px solid var(--line); background: var(--bg); box-shadow: 0 4px 16px rgba(11, 18, 25, .03); }
+html[data-theme="dark"] .nt-panel { background: rgba(255, 255, 255, .02); box-shadow: none; }
+.nt-adv { margin-top: 10px; }
+.nt-adv-body { border-top: 1px solid var(--line); }
+.nt-adv-body .prow:first-child { border-top: 0; }
+.nt-commit-bar {
+  position: sticky; bottom: 16px; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  margin-top: 24px; padding: 14px 18px; border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong); box-shadow: 0 10px 28px rgba(11, 18, 25, .10), var(--hl);
+}
+html[data-theme="dark"] .nt-commit-bar { background: color-mix(in srgb, var(--bg) 90%, transparent); box-shadow: 0 12px 32px rgba(0, 0, 0, .45), var(--hl); }
+.nt-commit-status > span { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.nt-commit-bar .btn-row { gap: 10px; }
