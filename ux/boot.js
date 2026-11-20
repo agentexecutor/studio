@@ -17,19 +17,12 @@
 /* Runs in <head>, before the first paint. It is a file of its own because the Studio server's content security
    policy doesn't allow scripts written into the page. */
 
-// Demo reset: open ...?reset to start over from a fresh install (clears AX Studio's saved state only).
-// CUJ review links: ...?cuj=1 opens CUJ 1 (the installation experience) on its own, from a fresh install.
-// ...?cuj=2 opens CUJ 2 (deploy your first agent) as a true first run: setup is done, nothing has run yet,
-// no template is signed in, and the templates you didn't pick first are still downloading.
+// ...?reset clears what AX Studio keeps in this browser (theme, settings, typed images) and opens Home.
 (function () {
   try {
-    var cuj = (location.search.match(/[?&]cuj=(\d)\b/) || [])[1];
-    if (/[?&]reset\b/.test(location.search) || cuj) {
+    if (/[?&]reset\b/.test(location.search)) {
       Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ax.') === 0) localStorage.removeItem(k); });
-      if (cuj === '2') { localStorage.setItem('ax.firstrun', '1'); localStorage.setItem('ax.setup', '1'); localStorage.setItem('ax.env', 'local'); }
-      /* A review link can name the page to open, e.g. ...?cuj=2#/new opens New task in a first run. */
-      var keep = cuj === '2' && /^#\/(new|settings|guardrails|places)\b/.test(location.hash) ? location.hash : '';
-      location.replace(location.pathname + (keep || (cuj === '1' ? '#/cuj/1' : '#/welcome')));
+      location.replace(location.pathname + '#/');
     }
   } catch (e) {}
 })();

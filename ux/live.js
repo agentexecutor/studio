@@ -17,8 +17,8 @@
 /* AX Studio: live mode.
 
    When the Studio server (ax-studio) serves this page, the pages in this file and in live-env.js show real data from
-   AX, and every page that has no real source yet stays hidden. In a plain browser there is no server, so the app runs
-   on demo data and nothing here is used. api.js is the way to the server.
+   AX, and every page that has no real source yet stays hidden. In a plain browser there is no server, so the page says
+   how to start it and nothing here is used. api.js is the way to the server.
 
    Studio works with AX on this computer only: the local cluster `ax local` sets up (ax-local). Real today:
    - setting up, starting, updating, stopping and removing AX on this computer (live-env.js)
@@ -147,7 +147,6 @@ async function liveStart() {
   if (!LIVE.on || LIVE.started) return;
   LIVE.started = true;
   Object.assign(ACTIONS, LIVE_ACTIONS, LIVE_ENV_ACTIONS, LIVE_NEW_ACTIONS, LIVE_LOGS_ACTIONS, LIVE_RES_ACTIONS, LIVE_NAV_ACTIONS);
-  state.tasks = []; // no demo tasks here, so the simulated agents have nothing to run
   studioOn('envOp', liveOnEnvOp);
   studioOn('streamLine', liveOnStreamLine);
   studioOn('sessionData', liveOnSessionData);
@@ -318,16 +317,19 @@ function liveOpenDelete(name) {
   const left = typeof liveTaskLeftovers === 'function' ? liveTaskLeftovers(name) : [];
   const pick = {};
   left.forEach((x) => { pick[`${x.kind}/${x.name}`] = x.own; });
-  const keptWords = () => {
-    const kept = left.filter((x) => !pick[`${x.kind}/${x.name}`]).map((x) => `${x.kind === 'workspace' ? 'workspace' : 'Gateway'} <span class="mono">${esc(x.name)}</span>`);
-    return kept.length ? `Its ${kept.join(' and ')}, for other tasks to use` : left.length ? 'Its model, for other tasks to use' : 'Its workspace, Gateway and model, for other tasks to use';
-  };
+  /* What the task uses, by kind: Kept names only these, so a task with no model never reads "Its model". */
+  const t = LIVE.tasks.find((x) => x.name === name) || (LIVE.detail[name] && LIVE.detail[name].doc ? { doc: LIVE.detail[name].doc } : null);
+  const sp = (t && t.doc && t.doc.spec) || {};
+  const uses = [['workspace', 'workspace'], ['gateway', 'Gateway'], ['model', 'model']].filter(([k]) => sp[k] && sp[k].name).map(([k, word]) => ({ kind: k, word, name: sp[k].name }));
+  const keptList = () => uses.filter((u) => !pick[`${u.kind}/${u.name}`]).map((u) => `${u.word} <span class="mono">${esc(u.name)}</span>`);
+  const keptWords = () => { const kept = keptList(); return kept.length ? `Its ${kept.join(' and ')}, for other tasks to use` : ''; };
+  const keptRow = () => `<li class="check-item ok" id="ld-kept-row"${keptList().length ? '' : ' hidden'}><span class="ci-icon">${icon('check')}</span><div><div class="ci-title">Kept</div><div class="ci-desc" id="ld-kept">${keptWords()}</div></div></li>`;
   const cmds = () => [liveCmd(['delete', 'task', name])].concat(left.filter((x) => pick[`${x.kind}/${x.name}`]).map((x) => liveCmd(['delete', x.kind, x.name])));
   const dlg = openDialog(dialogShell('ld', `Delete ${esc(name)}?`, '', `
     <p class="small">This removes the task from AX and tears down its sandbox. It can't be undone.</p>
     <ul class="check-list" style="margin-top:10px">
       <li class="check-item no"><span class="ci-icon">${icon('trash')}</span><div><div class="ci-title">Removed</div><div class="ci-desc">The task, its sandbox and the files in it</div></div></li>
-      <li class="check-item ok"><span class="ci-icon">${icon('check')}</span><div><div class="ci-title">Kept</div><div class="ci-desc" id="ld-kept">${keptWords()}</div></div></li>
+      ${keptRow()}
     </ul>
     ${left.length ? `<div class="ld-also"><div class="res-h" style="margin-top:12px">No other task uses</div>${left.map((x) => `<label class="ld-opt"><input type="checkbox" data-ld="${x.kind}/${esc(x.name)}" ${x.own ? 'checked' : ''}> Delete its ${x.kind === 'workspace' ? 'workspace' : 'Gateway'} <span class="mono">${esc(x.name)}</span> too</label>`).join('')}</div>` : ''}
     <div style="margin-top:14px;display:grid;gap:6px" id="ld-cmds">${cmds().map(cliHint).join('')}</div>`, `<span class="left"></span><button class="btn ghost" data-action="close-dialog">Cancel</button><button class="btn danger" id="ld-go">${icon('trash', 'sm')}Delete task</button>`, false, 'trash'));
@@ -336,6 +338,7 @@ function liveOpenDelete(name) {
     if (!k) return;
     pick[k] = e.target.checked;
     const kept = $('#ld-kept', dlg); if (kept) kept.innerHTML = keptWords();
+    const row = $('#ld-kept-row', dlg); if (row) row.hidden = !keptList().length;
     const c = $('#ld-cmds', dlg); if (c) c.innerHTML = cmds().map(cliHint).join('');
   });
   $('#ld-go', dlg).addEventListener('click', async () => {
@@ -1378,11 +1381,11 @@ function liveViewTask(name, tab) {
   const after = tab === 'terminal' ? () => liveTermShown(name, !liveTermWhyNot(t, stateName)) : null;
   return { title: t.goal ? t.goal.split('\n')[0].slice(0, 60) : name, crumbs, html, wide: true, after };
 }
-const LIVE_HIDDEN = { guardrails: 'Guardrails', welcome: 'Setup', cuj: 'This page', review: 'This page', get: 'This page' };
+const LIVE_HIDDEN = { guardrails: 'Guardrails' };
 function liveViewNotYet(part) {
   const what = LIVE_HIDDEN[part] || 'This page';
   const html = `<div class="page-head"><h1 tabindex="-1">${what} isn't connected to AX yet</h1>
-      <p class="lede">It still runs on demo data, so it's hidden here. Your tasks and where they run are real.</p></div>
+      <p class="lede">Studio shows what AX can back today. Your tasks and AX on this computer are real.</p></div>
     <div class="btn-row"><a class="btn primary" href="#/">Home</a><a class="btn" href="#/tasks">Tasks</a><a class="btn" href="#/places">Local cluster</a></div>`;
   return { title: what, crumbs: [{ label: 'Home', href: '#/' }, { label: what }], html };
 }

@@ -16,7 +16,7 @@
 
 /* Says where this page is running.
 
-   This copy is the one a plain web server sends: there is no Studio server behind the page, so the app runs on demo
-   data. The Studio server (ax-studio) answers /env.js itself and sets window.AX_STUDIO, which switches the app to
-   real data from AX. See live.js. */
+   This copy is the one a plain web server sends: there is no Studio server behind the page, so the page only says how
+   to start it. The Studio server (ax-studio) answers /env.js itself and sets window.AX_STUDIO, which turns on the app
+   and its real data from AX. See live.js. */
 window.AX_STUDIO = null;

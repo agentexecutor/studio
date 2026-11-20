@@ -3,11 +3,9 @@
 The interface for AX Studio: set up AX on your computer, start tasks in their own sandboxes, and see what they do:
 their state, what AX recorded, their logs, and a shell inside.
 
-It's a static web app (plain HTML, CSS and JavaScript, no build step), and it runs in two ways:
-
-- **Served by the Studio server** (`ax studio`) it shows real data from AX on this computer. Pages that have no real
-  source yet stay hidden.
-- **In a plain browser** every page runs on demo data. This is the full design, for reviews.
+It's a static web app (plain HTML, CSS and JavaScript, no build step), served by the Studio server (`ax studio`). It
+shows real data from AX on this computer, and pages that have no real source yet stay hidden. Opened without the
+server (as plain files), the page only says how to start Studio.
 
 ## Run it
 
@@ -25,19 +23,12 @@ go build -o bin/ax-studio ./cmd/ax-studio
 ./bin/ax-studio --ux-dir ux
 ```
 
-Without AX, for the design on demo data: serve this folder with any static file server.
-
-```sh
-cd ux
-python3 -m http.server 8789      # then open http://localhost:8789/
-```
-
-The page knows which of the two it is from `env.js`. The copy in this folder says there is no server. The Studio
-server answers `/env.js` itself and says there is one.
+The page knows whether the server is behind it from `env.js`. The copy in this folder says there is no server. The
+Studio server answers `/env.js` itself and says there is one.
 
 ## What's connected to AX
 
-When the Studio server is there, the `live*.js` files take over and show only what AX can back today. [api.js](api.js)
+The `live*.js` files are the pages, and they show only what AX can back today. [api.js](api.js)
 is the page's one way to the server.
 
 | In the app | From |
@@ -47,8 +38,7 @@ is the page's one way to the server.
 | Set up, start, update, repair (all `ax local start`), stop and remove AX on this computer, with its output as it arrives. One line says what runs, for how long, and the step `ax` is on; Cancel stops it | `POST /api/env/local/up` (with its `purpose`), `stop`, `delete`, `POST /api/env/cancel`, and `GET /api/events` |
 | The AX images setup deploys: Studio's own (pinned to the AX in its `go.mod`, since AX publishes none yet), or `AX_SERVER_IMAGE` and `AX_DEFAULT_TASK_IMAGE` from Studio's environment, unless you type others. Checked as you type and kept in this browser | `GET /api/env/status` (`setupImages`, `axFlags`) |
 | Until AX runs on this computer, every page but Local cluster and Settings is setup. Studio only uses AX on this computer (`ax-local`), whatever your kubeconfig's current context is | `GET /api/env/status` (`local`) |
-| Home greets you by name: the full name on your account on this computer, else git's `user.name` (Settings can change it). Studio never makes a name up from your login | `GET /api/bootstrap` |
-| Your tasks on Home in sections that match its tiles (Needs you, Running, Suspended, Done) with session turns grouped, plus All tasks (`#/tasks`) as a searchable, filterable table | `GET /api/tasks` (the AX API's `ListTasks`) |
+| Home: what's running, what needs you and what's suspended, as cards, and your most recent tasks. With no tasks yet, Create a new task and Try a sample task. Tasks (`#/tasks`) is a searchable, filterable table with Suspend or Resume, a shell, Logs and Delete on each row; its second tab (`#/tasks/resources`) holds Workspaces and Gateways | `GET /api/tasks` (the AX API's `ListTasks`) |
 | A task's page: its header with Suspend or Resume and Delete, then tabs for Activity (what AX recorded), Logs, Terminal and YAML, and an inspector with its state, where it runs and what it can reach. Details name the sandbox (actor and uid), the previous attempt's failure, and AX's raw conditions | `GET /api/tasks/get` (`GetTask`) |
 | Logs: what the task's sandbox printed (the agent, AX's runner, the worker starting or pausing it), read from Agent Substrate's workers. When the task's command exited with an error while AX still says running, Activity and the State card say so, with the error | `GET /api/tasks/logs` (the server runs `kubectl logs -l ate.dev/worker-pool` and keeps the task's lines) |
 | Workspaces, Gateways and models on this computer: which tasks use each, workspace setups that failed, and Delete for the workspaces and Gateways no task uses (models are read-only). Deleting a task can take its own workspace and Gateway with it | `GET /api/workspaces`, `GET /api/gateways`, `GET /api/models`, `POST /api/workspaces/delete`, `POST /api/gateways/delete` |
@@ -56,7 +46,7 @@ is the page's one way to the server.
 | The sidebar footer card says how AX on this computer is doing and opens Local cluster. Links can open Studio on an atespace (`?atespace=…`); Copy link on a task and in the command palette | `GET /api/env/status` |
 | What a task can reach: the sites its Gateway allows, and the keys the Gateway adds outside the sandbox | `GET /api/gateways/get` (`GetGateway`) |
 | Suspend, resume and delete | `POST /api/tasks/suspend`, `resume`, `delete` |
-| New task: a sequential 4-step form that follows AX's specs, starting with preset cards (Antigravity, Claude Code, or Blank) and Load a task file, then Task (Goal and Name upfront; image, command, resources, environment, config, and debug access under Advanced task options), Workspace (none, existing, or new with repos and setup commands upfront, and files, skills, setup network, and MCP servers under More workspace options), Network (none, allow hosts with the preset API key and hosts upfront and full credential rules under Advanced network options, or existing), and a sticky bottom commit bar. The YAML beside it is what Studio applies, to edit, download or load from a file | `ax apply -f -`, then `ax resume task`, through `POST /api/ax/exec`. Keys you type go to `POST /api/secrets/credential`; existing workspaces and Gateways from `GET /api/workspaces` and `GET /api/gateways` |
+| New task: a sequential 4-step form that follows AX's specs, starting with preset cards (Antigravity, Claude Code, or Blank) and Load a task file, then Task (Goal and Name upfront; image, command, resources, environment, config, and debug access under Advanced task options), Workspace (none, existing, or new with repos and setup commands upfront, and files, skills, setup network, and MCP servers under More workspace options), Network (none, allow hosts with the preset API key and hosts upfront and full credential rules under Advanced network options, or existing), and a sticky bottom commit bar. The YAML beside it is what Studio applies, to edit, download or load from a file. For Antigravity and Claude Code, New task says whether the agent's key is already stored, and asks for it when it isn't | `ax apply -f -`, then `ax resume task`, through `POST /api/ax/exec`. Keys you type go to `POST /api/secrets/credential`; whether one is stored from `GET /api/secrets/credential/status` (key names only, never values); existing workspaces and Gateways from `GET /api/workspaces` and `GET /api/gateways` |
 | Terminal: for a running task with debug access, shells in its sandbox (`ax ssh`), drawn by xterm.js ([vendor/xterm](vendor/xterm/README.md)): Tab completion, history, Ctrl-C, full-screen programs such as `top`, and resizing. Several at once as tabs; they stay connected while you look at other pages. A task that can't have a shell says why. The server runs `ax ssh` on a pseudo-terminal and gives the shell a terminal inside the sandbox too (util-linux `script` or Python's `pty`; without either, a line at a time) | `POST /api/sessions/start`, `write` (keys as typed), `resize`, `close`, and `GET /api/events` (output as base64) |
 | Settings: what this Studio runs against (its version, the `ax` command, the kubeconfig), the atespace it lists and starts tasks in (kept in this browser), and a diagnostics report with secrets removed | `GET /api/bootstrap`, `GET /api/env/status`, `GET /api/env/diagnostics` |
 
@@ -73,7 +63,7 @@ sandbox, tucked into collapsible advanced sections until you want to customize t
 works without keys. Everything stays editable, and switching presets after editing what the last one filled in asks first. Each
 row names the YAML field it writes, and the YAML panel and sticky bottom bar say what is left to fix.
 
-Each fact is said once, where it belongs: Home's tiles carry the counts (the lede says where to start, and Axel only
+Each fact is said once, where it belongs: Home's cards carry the counts (the lede says where to start, and Axel only
 speaks when poked or on an empty cluster); a task's state is its header chip and each check AX records is a step in
 Activity; what AX says about its state is in the State card; this computer's checks are on Local cluster.
 
@@ -88,45 +78,12 @@ Four things to know about how tasks are written:
   without workspace pre-warming). So a new Gateway also allows the hosts the workspace clones from, and AX refuses a
   workspace with a setup network (`spec.setup.gateway`) or a profile until it pre-warms workspaces.
 
-## Review links
-
-Each link opens one state of the app, from the same demo data every time.
-
-| Add to the URL | What it opens |
-|---|---|
-| `?reset` | A fresh install (clears the app's saved state) |
-| `?cuj=1` | Journey 1, the installation experience, on its own |
-| `#/get` | The download page, before AX Studio is on the computer |
-| `?scenario=setup-preinstalled-it` | A first launch on a computer that IT already set up |
-| `?scenario=setup-preinstalled-cli` | A first launch after AX was set up from a terminal |
-| `?cuj=2` | Journey 2, deploy your first agent, as a true first run |
-| `?scenario=task-mcp` | An MCP server that didn't start |
-| `?scenario=task-skill` | A skill that didn't load |
-| `?scenario=task-permission` | The agent asks before a risky command |
-| `?scenario=task-oom` | A task runs out of memory |
-| `?scenario=task-budget` | A task reaches its budget check-in |
-| `?scenario=task-queued` | No room on this computer: the task waits in line |
-| `?scenario=task-midturn` | A message queued for the agent's next turn |
-| `?scenario=handoff-slow` | Continue with another agent while the current turn takes too long |
-| `?scenario=handoff-fail` | The new agent fails to start, and the first task is untouched |
-| `?scenario=cluster-run` | Run a task on a remote cluster as a fresh run |
-| `?scenario=cluster-version` | The check finds an older AX version on the cluster |
-| `?scenario=cluster-blocker` | The check finds the cluster can't read the repo |
-| `?scenario=cluster-missing` | The cluster lacks an MCP server the workspace setup names |
-| `?scenario=cluster-permission` | The check finds a missing role |
-| `?scenario=setup-memory` | Not enough free memory for the local sandbox |
-| `?scenario=setup-ram` | Too little memory installed |
-| `?scenario=env-disconnected` | Lost connection to AX, then it reconnects |
-| `?scenario=env-sleep` | A task paused while the computer slept |
-
-Every scenario is also listed on the review page, `index.html#/review`. Nothing in the app links to it.
-
 ## What's inside
 
 | Path | What it is |
 |---|---|
 | `index.html` | Entry point |
-| `boot.js` | Runs first: review links that reset the app, and the colour theme |
+| `boot.js` | Runs first: the colour theme, and `?reset`, which clears what Studio keeps in this browser |
 | `env.js` | Says whether the Studio server is behind the page. The server answers `/env.js` itself |
 | `api.js` | The Studio server's API: the session, requests, and the events the server pushes |
 | `live.js` | Real data: the task list, a task's page, suspend, resume and delete, the sandbox terminal, and the app frame |
@@ -136,12 +93,10 @@ Every scenario is also listed on the review page, `index.html#/review`. Nothing 
 | `live-resources.js` | Real data: workspaces, Gateways and models, which tasks use them, and deleting the unused ones |
 | `live-nav.js` | Notifications, links to an atespace, and compact task lists |
 | `live-settings.js` | Real data: Settings (appearance, keyboard and the command palette, accessibility, what Studio runs against, diagnostics) |
-| `core.js` | Templates, seeded demo tasks, statuses and shared helpers |
-| `views.js`, `task.js` | Demo pages: setup, home, new task, task, guardrails, where agents run, settings |
-| `overlays.js` | Dialogs: command palette, health check, continue with another agent, run on a remote cluster |
-| `failures.js` | Plain-language errors and the review scenarios |
-| `app.js` | Routing, the simulated agents and every action |
-| `mascot.js`, `viz.js` | Axel the axolotl and small charts |
+| `core.js` | Shared helpers, icons, Axel's story, and small UI pieces (dropdowns, labelled rows, the setup steps, the Gateway map) |
+| `overlays.js` | Theme, toasts, dialogs, the command palette and the shortcuts |
+| `app.js` | The app shell: actions, dropdowns, keyboard, focus, routing and start-up |
+| `mascot.js` | Axel the axolotl |
 | `*.css` | Styles. Colour, radius and type tokens are at the top of `styles.css` |
 | `assets/` | The logo, Axel and the backdrop images |
 | `embed.go` | Puts this folder into the Studio server's binary |
@@ -156,17 +111,12 @@ the app uses a copy installed on your computer, and the system font otherwise.
 
 ## Tests
 
-The smoke tests load the app in a stubbed DOM with Node (nothing to install) and check every page, flow and failure
-state. `make test` runs them all. To run one, from the repo root:
+The smoke tests load the app in a stubbed DOM with Node (nothing to install), with a stand-in Studio server that
+answers the way `/api` does. `make test` runs them with the Go tests. To run them on their own, from the repo root:
 
 ```sh
-node ux/tests/smoke_general.cjs   # every demo view, overlay and scenario
-node ux/tests/smoke_cuj2.cjs      # journey 2: deploy your first agent
-node ux/tests/smoke_cuj3.cjs      # journey 3: watch, steer and unblock
-node ux/tests/smoke_cuj45.cjs     # journeys 4 and 5: continue with another agent, run on a remote cluster
-node ux/tests/smoke_live.cjs      # real data: a stand-in Studio server answers the way /api does
+node ux/tests/smoke_live.cjs
 ```
 
 `smoke_live.cjs` checks what the page sends as well as what it shows: the task files, and that every request names
-the local cluster. The Go tests in `internal/studio` check the server's side of the same
-calls.
+the local cluster. The Go tests in `internal/studio` check the server's side of the same calls.

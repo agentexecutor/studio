@@ -15,7 +15,7 @@
 AX Studio is the local web app for [AX](https://github.com/google/ax), a task orchestrator. It's one small binary that opens in your browser and works with AX on your computer: a Kubernetes cluster in your container runtime that AX sets up for you.
 
 - **Set up AX in one click.** Studio checks this computer, then runs `ax local start` and shows each step as it happens.
-- **Start tasks.** From a template, your own image, or a task file. Each task runs in its own sandbox and can only reach the sites you allow. An API key is added outside the sandbox, so the task never holds it.
+- **Start tasks.** From Antigravity, Claude Code, your own image, or a task file. Each task runs in its own sandbox and can only reach the sites you allow. An API key is added outside the sandbox, so the task never holds it.
 - **See what they do.** Every task's state, what AX recorded, its logs, and a shell inside its sandbox. Suspend, resume or delete it.
 
 ## Quick start
@@ -39,7 +39,7 @@ ax-studio   # opens http://127.0.0.1:8080
 
 **3. Set up AX on this computer.** Studio opens on setup until AX runs here. Click **Set up AX on this computer**: Studio runs `ax local start`, which creates a Kind cluster with Agent Substrate and AX in Docker or Podman. AX doesn't publish release images yet, so Studio deploys images built from the same AX commit as its [`go.mod`](go.mod). To use others, set `AX_SERVER_IMAGE`, or enter them under **AX images**.
 
-**4. Start a task.** Click **New task**, describe the goal, and press **Run task**.
+**4. Start a task.** Click **New task**, pick Antigravity, Claude Code or Blank, describe the goal, and press **Create task**.
 
 > [!TIP]
 > When an AX release includes AX Studio, AX's installer sets up both tools, and `ax studio` starts Studio:
@@ -55,24 +55,24 @@ Stopping Studio (`Ctrl-C`) only stops the web app. AX on this computer and its t
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
-    <img alt="AX Studio's Home: tasks sorted into Needs you, Running, Suspended and Done, each running in its own sandbox." src="docs/screenshots/home.png">
+    <img alt="AX Studio's Home: counts of running, waiting and suspended tasks, and the most recent tasks with Suspend, Resume, Logs and Delete." src="docs/screenshots/home.png">
   </picture>
 </p>
 
-<p align="center"><b>Home.</b> Your tasks, sorted by what needs you: waiting for you, running, suspended and done.</p>
+<p align="center"><b>Home.</b> What's running on this computer, what needs you, and your most recent tasks.</p>
 
 <table>
   <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: templates, where it runs, the workspace and the goal, with a plan card that holds Run task."><br><b>New task.</b> Pick a template, the code it starts with, and the goal. The plan on the right says what's left.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/task.png" alt="A task's page: its activity, where it runs, and the sites it can reach."><br><b>A task.</b> What AX recorded, its state, where it runs, and the sites it can reach.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/setup.png" alt="Set up AX on this computer: system checks, what gets installed, the AX images, and one button."><br><b>Setup.</b> Studio checks this computer, then runs <code>ax local start</code> and shows each step.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: start from Antigravity, Claude Code or Blank, then the goal, the workspace and the network, with the YAML beside it."><br><b>New task.</b> Start from Antigravity, Claude Code or Blank. The YAML beside it is what Studio applies.</td>
   </tr>
   <tr>
+    <td width="50%" valign="top"><img src="docs/screenshots/task.png" alt="A task's page: what AX recorded, its state, where it runs, and the sites it can reach."><br><b>A task.</b> What AX recorded, its state, where it runs, and the sites it can reach.</td>
     <td width="50%" valign="top"><img src="docs/screenshots/logs.png" alt="Logs: what the task and its sandbox print, live."><br><b>Logs.</b> What the task and its sandbox print, as it happens.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/terminal.png" alt="Terminal: a shell in the task's sandbox."><br><b>Terminal.</b> A shell in the task's sandbox, through <code>ax ssh</code>. Open more shells as tabs.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><img src="docs/screenshots/all-tasks.png" alt="All tasks: a searchable table with status, template, workspace and resources."><br><b>All tasks.</b> Search and filter every task on this computer.</td>
-    <td width="50%" valign="top"></td>
+    <td width="50%" valign="top"><img src="docs/screenshots/terminal.png" alt="Terminal: a shell in the task's sandbox, with Tab completion and colours."><br><b>Terminal.</b> A real shell in the task's sandbox, through <code>ax ssh</code>. Open more shells as tabs.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/tasks.png" alt="Tasks: a searchable table with Suspend or Resume, a shell, logs and Delete on each row, and a second tab for workspaces and Gateways."><br><b>Tasks.</b> Search and filter every task, with Suspend or Resume on each row. Workspaces and Gateways have their own tab.</td>
   </tr>
 </table>
 
@@ -238,7 +238,6 @@ make build                             # bin/ax-studio
 make test                              # UI smoke tests (needs Node.js), Go tests with -race
 make verify                            # make test, then gofmt and go vet (what CI runs)
 ./bin/ax-studio --ux-dir ux            # serve ux/ from disk, so a reload shows your edit
-cd ux && python3 -m http.server 8789   # the whole design on demo data, no AX needed
 ```
 
 ### Release

@@ -16,7 +16,7 @@
 
 /* AX Studio, live mode: Settings.
 
-   Only what is real with the Studio server, one section at a time (like the demo's Settings):
+   Only what is real with the Studio server, one section at a time:
    - Appearance & story: the theme, compact task lists, and Axel's story
    - Keyboard & commands: the command palette and the shortcuts that work here
    - Accessibility: single-key shortcuts and reduced motion

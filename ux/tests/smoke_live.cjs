@@ -254,7 +254,7 @@ const docOf = (docs, kind) => docs.find((x) => x.kind === kind);
 
 function makeBackend(opts) {
   const B = Object.assign({
-    calls: [], posts: [], ax: [], applied: [], secrets: [], es: null, token: 1, offline: false, noAx: false, goalField: 'text', installed: {}, running: null,
+    calls: [], posts: [], ax: [], applied: [], secrets: [], storedKeys: ['gemini-api-creds/GEMINI_API_KEY', 'anthropic-api-creds/ANTHROPIC_API_KEY'], es: null, token: 1, offline: false, noAx: false, goalField: 'text', installed: {}, running: null,
     env: envRunning(),
     tasks: {
       'ax-local': [
@@ -461,8 +461,14 @@ function makeBackend(opts) {
       case '/api/sessions/resize':
       case '/api/sessions/close':
         return answer(200, { ok: true, id: body.id });
+      case '/api/secrets/credential/status': {
+        if (!/^[a-z0-9.-]+$/.test(q.name || '') || !q.key) return answer(400, { error: 'invalid secret name' });
+        const has = B.storedKeys.includes(`${q.name}/${q.key}`);
+        return answer(200, { name: q.name, key: q.key, exists: has || B.storedKeys.some((k) => k.startsWith(q.name + '/')), hasKey: has });
+      }
       case '/api/secrets/credential':
         B.secrets.push({ context: body.context, name: body.name, key: body.key, length: String(body.value).length });
+        if (!B.storedKeys.includes(`${body.name}/${body.key}`)) B.storedKeys.push(`${body.name}/${body.key}`);
         return answer(200, { credentialUri: `ate-secret://k8s.io/default/ax-system/${body.name}/${body.key}` });
       case '/api/env/local/up': case '/api/env/local/stop': case '/api/env/local/delete': {
         const action = 'local-' + u.pathname.split('/').pop();
@@ -564,14 +570,14 @@ function makeContext(B, env) {
     ctx.window.AX_STUDIO = null;                        // what the env.js in this folder sets
   }
   vm.createContext(ctx);
-  const files = ['core.js', 'mascot.js', 'viz.js', 'failures.js', 'views.js', 'task.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
+  const files = ['core.js', 'mascot.js', 'overlays.js', 'api.js', 'live.js', 'live-env.js', 'live-new.js', 'live-logs.js', 'live-resources.js', 'live-nav.js', 'live-settings.js', 'app.js'];
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
   liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
   liveNewDraft, liveNewApplyPreset, liveNewPresetChanges, liveYAMLHTML, liveYAMLTaskName, liveNewStatusHTML, LIVE_AGENTS,
   liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems,
   liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
-  viewHome, studioPost };`, ctx);
+  studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
 }
 
@@ -596,14 +602,14 @@ const dialog = (p) => p.els['#overlay'].querySelector('[role="dialog"]');
 const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await fn(ev || { target: el }); await settle(); };
 
 (async () => {
-  // ---------- Without the Studio server (a plain browser): demo data, untouched ----------
-  const demo = makeContext(null);
-  await check('in a plain browser there is no Studio server, so the app stays on demo data', () => {
-    if (demo.api.liveOn() || demo.api.LIVE.on || demo.api.STUDIO.on) throw new Error('live mode must be off without the server');
-    if (demo.api.state.tasks.length < 5) throw new Error('the demo tasks should still be there');
-    const v = demo.api.viewHome();
-    need(v.html, ['Add rate limiting to the checkout API']);
-    return v;
+  // ---------- Without the Studio server (the folder opened as plain files) ----------
+  const bare = makeContext(null);
+  await check('without the Studio server, the page says how to start it and shows no data', () => {
+    if (bare.api.liveOn() || bare.api.LIVE.on || bare.api.STUDIO.on) throw new Error('live mode must be off without the server');
+    const h = bare.els['#root'].innerHTML;
+    need(h, ['Start AX Studio to use it', 'make build &amp;&amp; ./bin/ax-studio', '--ux-dir ux']);
+    never(h, ['Add rate limiting', 'checkout API', 'Rajitha']);
+    return { html: h };
   });
 
   // ---------- Reading what AX returns ----------
@@ -636,7 +642,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!api.liveOn() || L.phase !== 'ready') throw new Error('phase: ' + L.phase);
     if (L.context !== 'ax-local' || L.contexts.length !== 3 || L.local.state !== 'Running') throw new Error(JSON.stringify([L.context, L.contexts.length, L.local]));
     if (L.tasks.length !== 6 || L.axVersion !== 'v0.1.0') throw new Error(JSON.stringify([L.tasks.length, L.axVersion]));
-    if (api.state.tasks.length) throw new Error('demo tasks should be gone');
     if (!B.es || B.es.url !== '/api/events') throw new Error('the page should listen for the server\'s events');
     const order = B.calls.filter((c) => /bootstrap|env\/status|\/api\/tasks\?/.test(c)).map((c) => c.split('?')[0]).join(' ');
     if (!/^GET \/api\/bootstrap .*GET \/api\/env\/status .*GET \/api\/tasks$/.test(order)) throw new Error('order: ' + order);
@@ -927,9 +932,13 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     api.ACTIONS['live-delete']({ dataset: { task: 'changelog-draft' } });
     const d = dialog(p);
     need(p.els['#overlay'].innerHTML, ['No other task uses', 'data-ld="workspace/ws-changelog-draft" checked', 'data-ld="gateway/gw-changelog-draft" checked',
-      'ax --context ax-local delete workspace ws-changelog-draft', 'Its model, for other tasks to use']);
+      'ax --context ax-local delete workspace ws-changelog-draft']);
+    /* It uses no model, and both of its own are ticked: nothing is kept, so there is no Kept line (and never "Its model"). */
+    never(p.els['#overlay'].innerHTML, ['Its model']);
+    need(p.els['#overlay'].innerHTML, ['id="ld-kept-row" hidden']);
     /* Untick the Gateway: it stays, and the dialog says so. */
     await fire(d, 'change', { target: { dataset: { ld: 'gateway/gw-changelog-draft' }, checked: false } });
+    if (d.querySelector('#ld-kept-row').hidden !== false) throw new Error('the Kept line shows the Gateway');
     need(d.querySelector('#ld-kept').innerHTML, ['Its Gateway <span class="mono">gw-changelog-draft</span>, for other tasks to use']);
     never(d.querySelector('#ld-cmds').innerHTML, ['delete gateway']);
     await fire(d.querySelector('#ld-go'), 'click');
@@ -1030,6 +1039,32 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const spec = { profile: { image: A.image, resources: { limits: { cpu: '2', memory: '4Gi' } } }, env: [{ name: 'GEMINI_API_KEY', value: 'placeholder' }, { name: 'AGY_RUNTIME_INSTALL', value: 'true' }],
       debug: true, goal: { text: 'Make the signer tests pass.\nExplain what was wrong.\n' }, gateway: { name: `gw-${name}` } };
     if (JSON.stringify(t.spec) !== JSON.stringify(spec)) throw new Error(JSON.stringify(t.spec));
+  });
+  await check("Antigravity's key: New task asks the cluster whether it's stored, and a missing key is something to fix first", async () => {
+    const d = L.draft;
+    const keep = B.storedKeys.slice();
+    /* Stored: the box says so, and leaving it empty is fine. */
+    L.credStatus = {};
+    api.render(); await settle();
+    if (!B.calls.some((c) => /\/api\/secrets\/credential\/status\?context=ax-local&name=gemini-api-creds&key=GEMINI_API_KEY/.test(c))) throw new Error('asked the server: ' + B.calls.filter((c) => /secrets/.test(c)).join());
+    api.render();
+    need(main(p), ['Already stored on the cluster as <span class="mono">gemini-api-creds/GEMINI_API_KEY</span>', 'placeholder="Already stored: leave empty to use it"']);
+    never(api.liveNewIssues(d).join(' | '), ['Add your Gemini API key']);
+    /* Missing: it asks for the key, and Create task waits for it. */
+    B.storedKeys = [];
+    L.credStatus = {};
+    api.render(); await settle(); api.render();
+    need(main(p), ['Not stored on this computer yet', 'placeholder="Paste your Gemini API key"']);
+    need(api.liveNewIssues(d).join(' | '), ["Add your Gemini API key: it isn't stored on this computer yet."]);
+    /* Typing the key is enough: Create task stores it first. */
+    d.creds.find((c) => c.preset).value = 'AIza-test';
+    never(api.liveNewIssues(d).join(' | '), ['Add your Gemini API key']);
+    d.creds.find((c) => c.preset).value = '';
+    /* A server that can't tell keeps today's hint and doesn't block. */
+    L.credStatus = { 'gemini-api-creds/GEMINI_API_KEY': { state: 'unknown', at: Date.now() } };
+    never(api.liveNewIssues(d).join(' | '), ['Add your Gemini API key']);
+    B.storedKeys = keep;
+    L.credStatus = {};
   });
   await check('Start from Claude Code: its image, its key from anthropic-api-creds, and the config its runner reads, with the goal as the prompt', () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'claude' } });
@@ -1481,8 +1516,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     L.error = before;
     return v;
   });
-  await check('pages with no real source say so instead of showing demo data', async () => {
-    for (const [part, what] of [['guardrails', 'Guardrails'], ['welcome', 'Setup']]) need(api.liveViewNotYet(part).html, [`${what} isn't connected to AX yet`, 'href="#/"']);
+  await check("pages with no real source say so, and old demo links land on a page that says so too", async () => {
+    for (const [part, what] of [['guardrails', 'Guardrails'], ['welcome', 'This page'], ['review', 'This page']]) need(api.liveViewNotYet(part).html, [`${what} isn't connected to AX yet`, 'href="#/"']);
+    never(api.liveViewNotYet('welcome').html, ['demo']);
     await go(p, '#/guardrails');
     need(main(p), ["Guardrails isn't connected to AX yet"]);
   });
