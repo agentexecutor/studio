@@ -33,10 +33,11 @@
    to AX whichever page started it. They are staging images until the templates are published. */
 const LIVE_AGENTS = {
   antigravity: {
-    id: 'antigravity', name: 'Antigravity', desc: "Google's coding agent, on Gemini", keyFrom: 'Gemini', model: 'gemini-3.8-flash',
-    image: 'ghcr.io/rakyll/ax-images/antigravity@sha256:8025a987861673718564e0e648a3c7785d23c2514be8c7a3d3b133413d9bc81e',
+    id: 'antigravity', name: 'Antigravity', desc: "Google's coding agent, on Gemini", keyFrom: 'Gemini', model: '',
+    image: 'ghcr.io/agentexecutor/antigravity@sha256:0ccd91d03f996c375d6d391dc20106102187f15210a0016212b6721cd8044078',
     secret: 'gemini-api-creds', keyName: 'GEMINI_API_KEY', host: 'generativelanguage.googleapis.com', header: 'x-goog-api-key',
-    config: (goal) => `prompt: ${liveYBlock(goal, 2)}\nmodel: gemini-3.8-flash\nmaxTurns: 100`,
+    tlsPassthrough: ['storage.googleapis.com'],
+    extraEnv: [['AGY_RUNTIME_INSTALL', 'true']],
   },
   claude: {
     id: 'claude', name: 'Claude Code', desc: "Anthropic's coding agent", keyFrom: 'Anthropic', model: 'claude-opus-5-5',
@@ -266,15 +267,17 @@ function liveNewYAML(d, goalField, credentialUri) {
   /* Network: an existing Gateway (a follow-up), or a new one with what this task may reach. No hosts, no Gateway. */
   let gateway = d.gateway;
   if (!gateway) {
+    const tlsHosts = A ? (A.tlsPassthrough || []) : [];
     const hosts = [];
-    const add = (h) => { if (h && !hosts.includes(h) && !(A && h === A.host)) hosts.push(h); };
+    const add = (h) => { if (h && !hosts.includes(h) && !(A && h === A.host) && !tlsHosts.includes(h)) hosts.push(h); };
     add(liveRepoHost(repo));
     x.repos.forEach((r) => add(liveRepoHost(r)));
     x.mcp.forEach((m) => add(liveRepoHost(String(m.endpoint || '').trim())));
     if (d.network === 'balanced') LIVE_BALANCED_HOSTS.forEach(add);
-    if (A || hosts.length) {
+    if (A || hosts.length || tlsHosts.length) {
       gateway = `gw-${name}`.slice(0, 63);
       let y = `${head('Gateway', gateway)}\nspec:\n  egress:`;
+      if (tlsHosts.length) y += `\n    - tlsPassthrough:\n        hostnames: [${tlsHosts.map(liveYQ).join(', ')}]\n        ports:\n          numbers: [443]`;
       if (A) {
         const ns = (STUDIO.info && STUDIO.info.axNamespace) || 'ax-system';
         /* The key is added to requests outside the sandbox, so the agent never holds it. */
@@ -311,8 +314,8 @@ function liveNewYAML(d, goalField, credentialUri) {
   if (d.session) t += `\n  sessionId: ${liveYQ(d.session)}`;
   const cmd = d.command.trim() ? liveSplitArgs(d.command.trim()).args : [];
   if (cmd.length) t += `\n  commands: [${cmd.map(liveYQ).join(', ')}]`;
-  if (A) t += `\n  config:\n${liveIndent(A.config(goal), 4)}`;
-  const env = (A ? [[A.keyName, 'placeholder']] : []).concat(liveLines(d.envText).map((l) => LIVE_ENV_RE.exec(l)).filter(Boolean).map((m) => [m[1], m[2]]));
+  if (A && A.config) t += `\n  config:\n${liveIndent(A.config(goal), 4)}`;
+  const env = (A ? [[A.keyName, 'placeholder'], ...(A.extraEnv || [])] : []).concat(liveLines(d.envText).map((l) => LIVE_ENV_RE.exec(l)).filter(Boolean).map((m) => [m[1], m[2]]));
   if (env.length) t += `\n  env:\n${env.map(([k, v]) => `    - name: ${liveYQ(k)}\n      value: ${liveYQ(v)}`).join('\n')}`;
   if (workspace) t += `\n  workspace:\n    name: ${liveYQ(workspace)}`;
   if (gateway) t += `\n  gateway:\n    name: ${liveYQ(gateway)}`;
@@ -374,7 +377,7 @@ function liveNewAgentHTML(d) {
   const card = (id, tile, title, desc, foot) => `<button type="button" class="choice" role="radio" aria-checked="${d.agent === id}" data-action="live-new-agent" data-agent="${id}" id="live-agent-${id}">
       <span class="c-check">${icon('check')}</span>${tile}<span><span class="c-title">${title}</span><span class="c-desc">${desc}</span></span><span class="c-foot">${foot}</span></button>`;
   const picker = `<div class="choice-grid" role="radiogroup" aria-labelledby="live-step-agent">
-      ${Object.keys(LIVE_AGENTS).map((k) => card(k, agentTile(k, 'lg'), LIVE_AGENTS[k].name, LIVE_AGENTS[k].desc, `${icon('sparkle', 'xs')}<span class="mono">${esc(LIVE_AGENTS[k].model)}</span>`)).join('')}
+      ${Object.keys(LIVE_AGENTS).map((k) => card(k, agentTile(k, 'lg'), LIVE_AGENTS[k].name, LIVE_AGENTS[k].desc, `${icon('sparkle', 'xs')}${LIVE_AGENTS[k].model ? `<span class="mono">${esc(LIVE_AGENTS[k].model)}</span>` : `${esc(LIVE_AGENTS[k].keyFrom)} default`}`)).join('')}
       ${card('image', byoTile('lg'), 'Your own image', 'Any agent you packaged as a container image', `${icon('box', 'xs')}Pinned by its digest`)}
     </div>`;
   const A = LIVE_AGENTS[d.agent];
@@ -609,6 +612,7 @@ function liveAllowedHosts(d) {
     x.mcp.forEach((m) => add(liveRepoHost(String(m.endpoint || '').trim())));
   }
   if (d.network === 'balanced') LIVE_BALANCED_HOSTS.forEach(add);
+  if (A) (A.tlsPassthrough || []).forEach(add);
   return hosts;
 }
 function liveNewGateMapHTML(d) {
@@ -635,7 +639,7 @@ function liveReadyItems(d) {
   const repo = d.repo.trim();
   const line = (s) => { const first = s.split('\n')[0]; return esc(first.slice(0, 48)) + (first.length > 48 ? '…' : ''); };
   return [
-    { ok: agentOk, todo: 'give the image address', t: A ? `${A.name} · <span class="mono">${esc(A.model)}</span>` : 'Your own image',
+    { ok: agentOk, todo: 'give the image address', t: A ? (A.model ? `${A.name} · <span class="mono">${esc(A.model)}</span>` : A.name) : 'Your own image',
       s: A ? (d.key.trim() ? 'The key is stored on the cluster when you run' : 'Its key is added outside the sandbox') : (d.image.trim() ? esc(liveImageShort(d.image.trim())) : 'An image address with @sha256:…') },
     { ok: whereOk, todo: liveIsLocal(d.where) ? 'start AX on this computer' : 'choose where it runs',
       t: !d.where ? 'Where it runs' : liveIsLocal(d.where) ? 'On this computer' : `On ${esc(d.where)}`,
