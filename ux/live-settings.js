@@ -17,7 +17,7 @@
 /* AX Studio, live mode: Settings.
 
    Only what is real with the Studio server, one section at a time (like the demo's Settings):
-   - Appearance & story: the theme, the name Home greets you by, compact task lists, and Axel's story
+   - Appearance & story: the theme, compact task lists, and Axel's story
    - Keyboard & commands: the command palette and the shortcuts that work here
    - Accessibility: single-key shortcuts and reduced motion
    - Notifications: a browser notification when something needs you (live-nav.js)
@@ -56,19 +56,6 @@ function liveKeysHTML(k) {
 function liveGiB(bytes) { return bytes > 0 ? `${(bytes / 1073741824).toFixed(1)} GiB` : ''; }
 
 /* ---------- The sections ---------- */
-/** The name Home greets you by: yours if you typed one, else the one this computer knows. */
-function liveSetNameRowHTML() {
-  let mine = '';
-  try { mine = localStorage.getItem(LIVE_CALL_ME_KEY) || ''; } catch (e) { /* ignore */ }
-  const u = (STUDIO.info && STUDIO.info.user) || {};
-  const known = (u.name || '').trim().split(/\s+/)[0] || '';
-  const from = u.source === 'git' ? 'your Git name' : 'your account on this computer';
-  const desc = known
-    ? `Home greets you as “${esc(known)}”, from ${from}. Type another name to change it, or clear the field to go back.`
-    : "This computer doesn't know your name, so Home greets you without one. Type the name you'd like.";
-  return `<div class="set-row" id="ls-name-row"><div class="sr-main"><div class="sr-title" id="ls-name-title">Your name on Home</div><div class="sr-desc" id="ls-name-desc">${desc}</div></div>
-      <input class="input ls-name" type="text" id="ls-name" value="${esc(mine)}" placeholder="${esc(known || 'Your name')}" maxlength="40" autocomplete="off" spellcheck="false" aria-labelledby="ls-name-title" aria-describedby="ls-name-desc"></div>`;
-}
 function liveSetAppearanceHTML() {
   const pref = themePref();
   const preview = (k) => `<span class="theme-preview ${k}" aria-hidden="true"><span class="tp-ui"><i class="tp-sb"></i><i class="tp-bd"><b></b><s></s><s></s></i></span>${k === 'system' ? '<span class="tp-ui tp-dark"><i class="tp-sb"></i><i class="tp-bd"><b></b><s></s><s></s></i></span>' : ''}</span>`;
@@ -76,7 +63,6 @@ function liveSetAppearanceHTML() {
       <div class="theme-cards" role="radiogroup" aria-labelledby="ls-h-appearance">
         ${[['system', 'Match system'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button type="button" class="theme-card" role="radio" aria-checked="${pref === k}" data-action="set-theme" data-theme="${k}">${preview(k)}<span class="tc-label">${l}</span></button>`).join('')}
       </div>
-      ${liveSetNameRowHTML()}
       <div class="set-row"><div class="sr-main"><div class="sr-title" id="ls-compact-title">Compact task lists</div><div class="sr-desc" id="ls-compact-desc">More tasks on screen on Home: tighter rows, the same facts.</div></div>
         <label class="switch"><input type="checkbox" role="switch" id="ls-compact" data-action="live-compact" ${liveCompact() ? 'checked' : ''} aria-labelledby="ls-compact-title" aria-describedby="ls-compact-desc"><span class="track"></span><span class="thumb"></span></label></div>
       <div class="set-row ls-story" id="ls-story-row">
@@ -227,11 +213,3 @@ Object.assign(LIVE_ACTIONS, {
     liveRefresh(true);
   },
 });
-/* The name Home greets you by is kept as you type. Empty goes back to the name this computer knows. */
-if (LIVE.on) {
-  document.addEventListener('input', (e) => {
-    if (!e.target || e.target.id !== 'ls-name') return;
-    const v = String(e.target.value || '').trim();
-    try { if (v) localStorage.setItem(LIVE_CALL_ME_KEY, v); else localStorage.removeItem(LIVE_CALL_ME_KEY); } catch (err) { /* ignore */ }
-  });
-}
