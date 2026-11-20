@@ -871,21 +871,21 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const y = api.liveNewYAML(L.draft, 'text', '');
     const name = api.liveDraftName(L.draft);
     if (!/^make-the-signer-tests-ab[0-9a-f]{2}$/.test(name)) throw new Error('name: ' + name);
-    need(y, ['kind: Gateway', `name: "gw-${name}"`, 'hostnames: ["generativelanguage.googleapis.com"]', 'header: "x-goog-api-key"', 'credentialUri: "ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY"',
+    need(y, ['kind: Gateway', `name: "gw-${name}"`, 'tlsPassthrough:\n        hostnames: ["storage.googleapis.com"]\n        ports:\n          numbers: [443]', 'hostnames: ["generativelanguage.googleapis.com"]', 'header: "x-goog-api-key"', 'credentialUri: "ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY"',
       'hostnames: ["gitlab.example.com", "github.com", "api.github.com"', 'kind: Workspace', `name: "ws-${name}"`, 'repo: "https://gitlab.example.com/me/project.git"', 'dir: "."', 'ref: "dev"',
-      'kind: Task', 'image: "ghcr.io/', '@sha256:', '  goal:\n    text: |\n      Make the signer tests pass.\n      Explain what was wrong.', 'model: gemini-3.8-flash', '- name: "GEMINI_API_KEY"\n      value: "placeholder"',
+      'kind: Task', 'image: "ghcr.io/agentexecutor/antigravity@sha256:0ccd91d03f996c375d6d391dc20106102187f15210a0016212b6721cd8044078"', '  goal:\n    text: |\n      Make the signer tests pass.\n      Explain what was wrong.', '- name: "GEMINI_API_KEY"\n      value: "placeholder"', '- name: "AGY_RUNTIME_INSTALL"\n      value: "true"',
       `  workspace:\n    name: "ws-${name}"`, `  gateway:\n    name: "gw-${name}"`]);
-    never(y, ['debug:', 'sessionId:', 'sk-']);
+    never(y, ['debug:', 'sessionId:', 'sk-', 'config:', 'maxTurns:']);
     if (y.split('\n---\n').length !== 3) throw new Error('three files');
   });
   await check('Locked down reaches only the model and the repo; debug access and your own image show in the Task', () => {
     const d = Object.assign({}, L.draft, { network: 'locked', debug: true });
     const y = api.liveNewYAML(d, 'text', '');
-    need(y, ['hostnames: ["gitlab.example.com"]', '\n  debug: true']);
+    need(y, ['hostnames: ["storage.googleapis.com"]', 'hostnames: ["gitlab.example.com"]', '\n  debug: true']);
     never(y, ['pypi.org', 'registry.npmjs.org']);
     const own = api.liveNewYAML(Object.assign({}, L.draft, { agent: 'image', image: 'ghcr.io/me/agent@sha256:' + 'a'.repeat(64), repo: '', network: 'locked', nameEdited: true, name: 'my-agent' }), 'text', '');
     need(own, ['kind: Task', 'name: "my-agent"', 'image: "ghcr.io/me/agent@sha256:']);
-    never(own, ['kind: Gateway', 'kind: Workspace', 'config:', 'GEMINI_API_KEY']);
+    never(own, ['kind: Gateway', 'kind: Workspace', 'config:', 'GEMINI_API_KEY', 'AGY_RUNTIME_INSTALL', 'storage.googleapis.com']);
   });
   await check('More options: a custom size, a command, environment variables, and what each makes of the Task', () => {
     const base = Object.assign({}, L.draft, { files: [], mcp: [], repos: '', setup: '' });
