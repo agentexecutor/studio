@@ -425,6 +425,8 @@ function liveNewIssues(d) {
     if (creds.some((c) => !LIVE_SECRET_RE.test(c.secret) || c.secret.length > 253)) say('Give each credential its secret: lowercase letters, digits, dots and hyphens.');
     if (creds.some((c) => !LIVE_SECRET_KEY_RE.test(c.key))) say('Give each credential the key in its secret: letters, digits, dots, dashes and underscores.');
     if (creds.some((c, k) => creds.some((o, j) => j < k && o.host === c.host && o.header.toLowerCase() === c.header.toLowerCase()))) say('A host can get each header from one credential only.');
+    const pc = d.creds.find((c) => c.preset);
+    if (pc && !liveT(pc.value) && liveNewCredState(pc) === 'missing') say(`Add your ${pc.label || 'API key'}: it isn't stored on this computer yet.`);
     const both = creds.find((c) => tls.some((t) => t.host === c.host));
     if (both) say(`${both.host} can't both pass through and get a credential. Remove it from one of them.`);
   }
@@ -611,6 +613,7 @@ async function liveNewRun() {
       step(keys.length > 1 ? 'Storing the keys…' : 'Storing the key…');
       uris[c.i] = (await studioPost('/api/secrets/credential', { context: ctx, name: c.secret, key: c.key, value: c.value })).credentialUri || '';
       d.creds[c.i].value = '';
+      (LIVE.credStatus = LIVE.credStatus || {})[`${c.secret}/${c.key}`] = { state: 'stored', at: Date.now() };
     }
     step('Creating the task…');
     const made = [];
@@ -875,6 +878,40 @@ function liveNewGwExistingHTML(d) {
   }
   return `${selectHTML({ key: 'live-new-gw-pick', label: 'Gateway', value: d.gateway, options: liveNewGwOptions('Pick a Gateway'), btnClass: 'btn' })}<span class="prow-hint">${note}</span>`;
 }
+/* ---------- Is the agent's key already stored? ----------
+   A preset's Gateway rule reads its key from a secret on the cluster. Studio asks the server whether that secret and key
+   exist (key names only, never values), so a first task says up front when the key is still missing. */
+function liveNewCredState(c) {
+  const k = `${c.secret}/${c.key}`;
+  return ((LIVE.credStatus = LIVE.credStatus || {})[k] || {}).state || 'unknown';
+}
+async function liveNewCredCheck(d) {
+  if (!d || d.raw || d.net !== 'allow' || !LIVE.context) return;
+  const c = d.creds.find((x) => x.preset);
+  if (!c || !c.secret || !c.key) return;
+  const all = (LIVE.credStatus = LIVE.credStatus || {});
+  const k = `${c.secret}/${c.key}`;
+  const cur = all[k];
+  if (cur && (cur.state === 'loading' || Date.now() - cur.at < 30000)) return;
+  all[k] = { state: 'loading', at: Date.now() };
+  let state = 'unknown';
+  try { const r = await studioApi.credentialStatus(LIVE.context, c.secret, c.key); state = r && r.hasKey ? 'stored' : 'missing'; } catch (e) { state = 'unknown'; }
+  all[k] = { state, at: Date.now() };
+  if (LIVE.draft === d && liveRouteIs('new')) liveNewRefreshParts(d, 'creds');
+}
+function liveRouteIs(top) { return typeof parseRoute === 'function' && parseRoute().parts[0] === top; }
+function liveNewKeyPlaceholder(c) {
+  const st = liveNewCredState(c);
+  return st === 'stored' ? 'Already stored: leave empty to use it' : st === 'missing' ? `Paste your ${c.label || 'API key'}` : "Leave empty if it's already stored";
+}
+function liveNewKeyHintHTML(c) {
+  const where = `<span class="mono">${esc(c.secret)}/${esc(c.key)}</span>`;
+  const st = liveNewCredState(c);
+  if (c.value) return `${icon('lock', 'xs')} Create task stores it on the cluster as ${where}. The Gateway adds it outside the sandbox.`;
+  if (st === 'stored') return `${icon('checkCircle', 'xs')} Already stored on the cluster as ${where}. Leave this empty to use it, or type a new key to replace it.`;
+  if (st === 'missing') return `${icon('alert', 'xs')} Not stored on this computer yet. Paste it here: Studio stores it as ${where}, and the Gateway adds it outside the sandbox.`;
+  return `${icon('lock', 'xs')} Stored on the cluster as ${where} and injected outside the sandbox by the Gateway.`;
+}
 function liveNewAdvNetSummary(d) {
   const parts = [];
   if (d.creds.length) parts.push(plural(d.creds.length, 'credential rule'));
@@ -889,8 +926,8 @@ function liveNewNetworkHTML(d) {
     const picks = LIVE_HOST_PICKS.map((p) => `<button type="button" class="pill" data-action="live-new-host-pick" data-pick="${p.id}" aria-pressed="${p.hosts.every((h) => d.hosts.includes(h))}" title="${esc(p.hosts.join(', '))}">${icon('plus', 'xs')}${p.label}</button>`).join('');
     const pIdx = d.creds.findIndex((c) => c.preset);
     const pCred = pIdx >= 0 ? d.creds[pIdx] : null;
-    const presetKeyRow = pCred ? prow(esc(pCred.label || 'API key'), `<input class="input mono" type="password" id="live-new-preset-key" data-live-new-row="creds" data-i="${pIdx}" data-k="value" value="${esc(pCred.value)}" placeholder="Leave empty if it's already stored" aria-labelledby="nt-pkey-l" autocomplete="off" spellcheck="false">
-      <span class="prow-hint">${icon('lock', 'xs')} Stored on the cluster as <span class="mono">${esc(pCred.secret)}/${esc(pCred.key)}</span> and injected outside the sandbox by the Gateway.</span>`, { labelId: 'nt-pkey-l', sub: liveField('effects.replaceHeaders') }) : '';
+    const presetKeyRow = pCred ? prow(esc(pCred.label || 'API key'), `<input class="input mono" type="password" id="live-new-preset-key" data-live-new-row="creds" data-i="${pIdx}" data-k="value" value="${esc(pCred.value)}" placeholder="${esc(liveNewKeyPlaceholder(pCred))}" aria-labelledby="nt-pkey-l" aria-describedby="live-new-preset-key-hint" autocomplete="off" spellcheck="false">
+      <span class="prow-hint" id="live-new-preset-key-hint">${liveNewKeyHintHTML(pCred)}</span>`, { labelId: 'nt-pkey-l', sub: liveField('effects.replaceHeaders') }) : '';
     const hasCustomCreds = d.creds.some((c) => !c.preset);
     body = `<div class="panel nt-panel">
       ${presetKeyRow}
@@ -985,6 +1022,7 @@ function liveViewNew() {
   const d = LIVE.draft;
   d.envSig = liveNewEnvSig();
   liveNewLists();
+  liveNewCredCheck(d);
   const ready = !liveNewIssues(d).length;
   const head = `<div class="new-head nt-head">
       <div class="nt-title">${axo(ready ? 'wave' : 'idle', { decorative: true }).replace('<svg ', '<svg data-follow ')}<div><h1 tabindex="-1">New task</h1>
@@ -1052,6 +1090,8 @@ function liveNewRefreshParts(d, k) {
       if (u) u.innerHTML = `${icon('lock', 'xs')} A value you type is stored as that secret on the cluster. <span class="mono">${esc(liveCredUri({ secret: liveT(c.secret) || '<secret>', key: liveT(c.key) || '<key>' }))}</span>`;
       if (c.preset) {
         const pk = $('#live-new-preset-key'); if (pk && pk !== document.activeElement) pk.value = c.value;
+        if (pk) pk.placeholder = liveNewKeyPlaceholder(c);
+        const ph = $('#live-new-preset-key-hint'); if (ph) ph.innerHTML = liveNewKeyHintHTML(c);
         const ak = $(`#nt-creds-${i}-value`); if (ak && ak !== document.activeElement) ak.value = c.value;
       }
     });

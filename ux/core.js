@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-/* AX Studio prototype — core: helpers, icons, vocabulary, storyline, seed data. */
+/* AX Studio: shared helpers, icons, Axel's story, and the small UI pieces the pages use. */
 'use strict';
 
 /* ---------- Helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const MIN = 60 * 1000;
 const now = () => Date.now();
 const reducedMotion = () => (typeof state !== 'undefined' && state.reduceMotion) || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function fmtAgo(ts) {
   const s = Math.round((now() - ts) / 1000);
@@ -43,26 +41,8 @@ function fmtElapsed(ts) {
   if (m) return m + 'm ' + String(sec).padStart(2, '0') + 's';
   return sec + 's';
 }
-function fmtClock(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-function since(ts, fmt) {
-  return `<span data-since="${ts}" data-fmt="${fmt}">${fmt === 'elapsed' ? fmtElapsed(ts) : fmtAgo(ts)}</span>`;
-}
 function slug(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28) || 'task';
-}
-/** A task's branch name from its title, cut at a word boundary: "ax/clean-up-the-old", not "ax/clean-up-the-old-bui". */
-function branchFor(title, max = 20) {
-  let out = '';
-  for (const w of String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').split('-')) {
-    const next = out ? out + '-' + w : w;
-    if (next.length > max) break;
-    out = next;
-  }
-  /* Don't end on a joining word: "ax/add-rate-limiting", not "ax/add-rate-limiting-to". */
-  out = out.replace(/(-(to|the|a|an|of|for|and|in|on|with|from|by))+$/, '');
-  return 'ax/' + (out || slug(title).slice(0, max));
 }
 function copyText(text, msg) {
   try { navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {}); } catch (e) { /* ignore */ }
@@ -202,967 +182,122 @@ const AXEL_STORY = {
   ],
 };
 
-/* ---------- Guardrail Presets (zero allowlist fatigue, safe by default) ---------- */
-/* Two starting points. Sites you allow go on top of either one, so there's no separate "Custom" preset. */
-const GUARDRAIL_PRESETS = {
-  balanced: {
-    id: 'balanced',
-    cli: 'balanced',
-    name: 'Balanced',
-    badge: 'Default',
-    desc: 'GitHub, npm, PyPI and your model APIs work out of the box. Other sites ask you first.',
-  },
-  strict: {
-    id: 'strict',
-    cli: 'locked-down',
-    name: 'Locked down',
-    badge: '',
-    desc: 'Only your model APIs. Every other site asks you first, including package installs.',
-  },
+/* Agent tiles: a small mark for a task's image (live.js), Antigravity and Claude Code by their own glyph and colour,
+   anything else as a plain box. */
+const AGENT_TILES = {
+  antigravity: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 12 5l7 14" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 14.5c2.2-1.2 4.8-1.2 7 0" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
+  claude: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
 };
-
-/* ---------- Vocabulary ----------
-   Status families (V2): amber = needs a decision (Waiting, Blocked), red = broken (Failed) only,
-   neutral = transitional (Starting, Stopping, Paused). Every status pairs an icon with a word. */
-const STATUS = {
-  running: { label: 'Running', icon: 'loader', color: 'var(--run)' },
-  starting: { label: 'Starting', icon: 'loader', color: 'var(--faint)' },
-  stopping: { label: 'Stopping', icon: 'loader', color: 'var(--faint)' },
-  waiting: { label: 'Waiting for you', icon: 'hand', color: 'var(--wait)' },
-  blocked: { label: 'Blocked', icon: 'shield', color: 'var(--wait)' },
-  done: { label: 'Done', icon: 'checkCircle', color: 'var(--done)' },
-  failed: { label: 'Failed', icon: 'xCircle', color: 'var(--fail)' },
-};
-const NEEDS_YOU = ['blocked', 'waiting', 'failed'];
-const ACTIVE = ['running', 'starting', 'stopping'];
-function isPaused(t) { return !!(t && t.status === 'waiting' && t.needs && t.needs.type === 'paused'); }
-/** Paused on purpose (not a failed handoff, which does need you). A task you paused isn't waiting on you. */
-function pausedByYou(t) { return isPaused(t) && !t.handoffFailed; }
-/** One rule for "needs you", used by Home, the sidebar, the bell, the tab title and All tasks. */
-function needsYou(t) { return NEEDS_YOU.includes(t.status) && !pausedByYou(t) && !(typeof isFolded === 'function' && isFolded(t)); }
-/** A rate limit is a wait, not a failure: AX retries on its own when the provider's limit resets (retry-after). */
-const QUOTA_WAIT_MS = 120000;
-function quotaRetryAt(t) {
-  if (!t || t.status !== 'failed') return 0;
-  const f = typeof lastFail === 'function' && lastFail(t);
-  if (!f || f.e.code !== 'quota') return 0;
-  if (!t.retryAt) t.retryAt = (f.e.at || Date.now()) + QUOTA_WAIT_MS;
-  return t.retryAt;
-}
-function quotaWaiting(t) { const at = quotaRetryAt(t); return !!at && at > Date.now(); }
-function fmtCountdown(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
-/** A local task held while this computer sleeps (CUJ 3: "Paused while your computer slept"; it resumes on wake). */
-function asleepHeld(t) { return !!(t && t._held && t.env === 'local' && t.status === 'running' && state.env && state.env.health === 'asleep'); }
-
-/* Pre-built templates (CUJ 2: "Pick a pre-built template"). Antigravity, Google's agent, comes first and is the one
-   Studio picks for you (DEFAULT_AGENT). Each one is a harness with sensible defaults, the models
-   it can use (the first is the default; `fast` marks the lighter one offered when you hit a rate limit), and its latest
-   release (new releases reach templates fast, and each task can stay pinned). */
-const AGENTS = {
-  antigravity: {
-    id: 'antigravity', name: 'Antigravity', maker: 'Google', cli: 'antigravity', version: '1.2.0',
-    desc: 'Plans first, then works across editor, terminal and browser.',
-    auth: 'google', connected: true,
-    signIn: 'Sign in with Google', signInNote: 'Uses your Google account. Opens your browser once.', keyLabel: 'Gemini API key', keyPrefix: 'AIza',
-    models: [
-      { id: 'gemini-3-pro', name: 'Gemini 3 Pro', hint: 'Best for most tasks' },
-      { id: 'gemini-3-flash', name: 'Gemini 3 Flash', hint: 'Faster · lower cost', fast: true },
-    ],
-    glyph: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 12 5l7 14" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 14.5c2.2-1.2 4.8-1.2 7 0" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
-    rate: 0.005,
-  },
-  claude: {
-    id: 'claude', name: 'Claude Code', maker: 'Anthropic', cli: 'claude-code', version: '1.0.4', latest: '1.0.5', latestWhen: '2 days ago',
-    desc: 'Careful multi-file changes and refactors.',
-    auth: 'key', keyLabel: 'Anthropic API key', keyPrefix: 'sk-ant-', connected: true, keyHint: '••••3f2a',
-    signIn: 'Sign in with Claude', signInNote: 'Uses your Claude plan. Opens your browser once.',
-    models: [
-      { id: 'claude-sonnet', name: 'Claude Sonnet', hint: 'Best for most tasks' },
-      { id: 'claude-opus', name: 'Claude Opus', hint: 'Most capable · uses more of your quota' },
-      { id: 'claude-haiku', name: 'Claude Haiku', hint: 'Fastest · lowest cost', fast: true },
-    ],
-    glyph: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
-    rate: 0.008,
-  },
-  codex: {
-    id: 'codex', name: 'Codex', maker: 'OpenAI', cli: 'codex', version: '0.31.2',
-    desc: 'Quick iterations on tests, scripts and fixes.',
-    auth: 'key', keyLabel: 'OpenAI API key', keyPrefix: 'sk-', connected: false, keyProblem: 'Key was rejected',
-    signIn: 'Sign in with ChatGPT', signInNote: 'Uses your ChatGPT plan. Opens your browser once.',
-    models: [
-      { id: 'gpt-5-codex', name: 'GPT-5 Codex', hint: 'Best for most tasks' },
-      { id: 'gpt-5-mini', name: 'GPT-5 mini', hint: 'Faster · lower cost', fast: true },
-    ],
-    glyph: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 8 4 4-4 4M12.5 16H18" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    rate: 0.006,
-  },
-};
-/* The template Studio picks for you: the first download in setup, New task, Home and the CLI examples. People can pick
-   another one anytime, or bring their own agent. */
-const DEFAULT_AGENT = 'antigravity';
-/** The models a template can use (P0). Pre-built templates offer a few; added ones bring the one they were built for. */
-function modelsFor(a) { return (a && a.models) || (a && a.model ? [{ id: slug(a.model), name: a.model, hint: 'Set by this template' }] : []); }
-function modelOf(agentId, modelId) { const ms = modelsFor(AGENTS[agentId]); return ms.find((m) => m.id === modelId) || ms[0] || null; }
-function modelName(t) { const m = t && modelOf(t.agent, t.model); return m ? m.name : ''; }
-/** Rate-limit recovery (CUJ 2: "Wait, or switch key or model"): the lighter model, or the default if you're on it. */
-function altModel(agentId, modelId) {
-  const ms = modelsFor(AGENTS[agentId]);
-  const cur = modelOf(agentId, modelId);
-  if (ms.length < 2 || !cur) return null;
-  return cur.fast ? ms[0] : (ms.find((m) => m.fast) || ms.find((m) => m.id !== cur.id));
-}
-/** Plain-language description of how an agent is signed in (never shows a raw key). */
-function authLine(a) {
-  if (a.auth === 'google') return a.connected ? 'Google sign-in in your keychain' : (a.keyProblem || 'Sign in with Google to use it');
-  if (a.auth === 'account' && a.connected) return `${a.signIn.replace('Sign in with ', '')} sign-in in your keychain`;
-  if (a.connected) return `API key ${a.keyHint || '••••'} in your keychain${a.keyFrom && AGENTS[a.keyFrom] ? ` · shared with ${AGENTS[a.keyFrom].name}` : ''}`;
-  return a.keyProblem || 'Not connected yet';
-}
-/** The Google sign-in that Gemini-based templates share (Antigravity, your own agents). It's a template's credential in
-    the keychain, not a Studio login: AX Studio has no account. */
-function googleSignedIn() { return Object.values(AGENTS).some((a) => !a.removed && a.connected && a.signIn === 'Sign in with Google'); }
-function credLabel(a) { return a.auth === 'google' ? 'Google sign-in' : a.auth === 'account' ? a.signIn.replace('Sign in with ', '') + ' sign-in' : a.keyLabel; }
+const AGENT_GLYPHS = { custom: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19.5 7.4v9.2L12 20.8 4.5 16.6V7.4Z" stroke="currentColor" stroke-width="2.3" fill="none" stroke-linejoin="round"/><path d="M4.8 7.6 12 11.7l7.2-4.1M12 11.7v8.8" stroke="currentColor" stroke-width="2.1" fill="none" stroke-linejoin="round"/></svg>' };
 function agentTile(id, size) {
-  const a = AGENTS[id] || AGENT_CATALOG.find((c) => c.id === id) || AGENTS.claude;
-  /* Added agents carry their own tile colour; the three pre-built agents keep their CSS colours. */
-  return `<span class="agent-tile ${a.custom || a.source ? 'x-agent' : id} ${size || ''}" aria-hidden="true"${a.color ? ` style="--t:${a.color}"` : ''}>${a.glyph}</span>`;
-}
-
-/* ---------- Find or bring your own agent (CUJ 2) ----------
-   Pre-built agents ship with AX. Builders can also add an agent their team shared (org registry), one from the AX catalog
-   (verified or community), or one they built themselves (a folder, container image or Git repo). Added agents join AGENTS,
-   so every picker, the task page, handoff, compare and the manifest treat them exactly like the pre-built ones. */
-const AGENT_GLYPHS = {
-  review: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9.6 17 19 7.5" stroke="currentColor" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  upgrade: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5.5M6.2 11.3 12 5.5l5.8 5.8" stroke="currentColor" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  gemini: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8c.7 4.9 3.6 7.9 9.2 9.2-5.6 1.3-8.5 4.3-9.2 9.2-.7-4.9-3.6-7.9-9.2-9.2 5.6-1.3 8.5-4.3 9.2-9.2Z" fill="currentColor"/></svg>',
-  hands: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.6" stroke="currentColor" stroke-width="2.6" fill="none"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/></svg>',
-  pair: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4.5 12 9 17M15 7l4.5 5-4.5 5" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  custom: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19.5 7.4v9.2L12 20.8 4.5 16.6V7.4Z" stroke="currentColor" stroke-width="2.3" fill="none" stroke-linejoin="round"/><path d="M4.8 7.6 12 11.7l7.2-4.1M12 11.7v8.8" stroke="currentColor" stroke-width="2.1" fill="none" stroke-linejoin="round"/></svg>',
-};
-const AGENT_SOURCES = {
-  prebuilt: { label: 'Pre-built', long: 'Pre-built · maintained by AX' },
-  team: { label: 'Team', long: 'Shared by your team' },
-  verified: { label: 'Verified', long: 'Verified by AX' },
-  community: { label: 'Community', long: 'Community · not reviewed by AX' },
-  yours: { label: 'Yours', long: 'Built by you' },
-};
-const GOOGLE_SIGNIN = { signIn: 'Sign in with Google', signInNote: 'Uses your Google account. Opens your browser once.', keyLabel: 'Gemini API key', keyPrefix: 'AIza' };
-const AGENT_CATALOG = [
-  Object.assign({
-    id: 'review-bot', source: 'team', name: 'Review Bot', maker: 'acme', publisher: 'acme / platform-team', cli: 'acme/review-bot', version: '2.3.0',
-    image: 'registry.acme.dev/agents/review-bot:2.3.0', digest: 'sha256:4f9c…e21a', framework: 'ADK · Python',
-    desc: 'Reviews a branch against your team’s style guide, pushes small fix-up commits and posts a summary to Slack.',
-    auth: 'google', model: 'Gemini 3 Pro', modelApi: 'generativelanguage.googleapis.com', reach: ['api.github.com', 'hooks.slack.com'], tools: ['GitHub MCP server'],
-    users: '38 people on your team', updated: '3 days ago', color: '#BE185D', glyph: AGENT_GLYPHS.review, rate: 0.004,
-  }, GOOGLE_SIGNIN),
-  Object.assign({
-    id: 'dep-upgrader', source: 'team', name: 'Dependency Upgrader', maker: 'acme', publisher: 'acme / devex', cli: 'acme/dep-upgrader', version: '1.6.1',
-    image: 'registry.acme.dev/agents/dep-upgrader:1.6.1', digest: 'sha256:b71d…09c4', framework: 'ADK · Python',
-    desc: 'Upgrades one dependency at a time and runs your tests after each step.',
-    auth: 'google', model: 'Gemini 3 Flash', modelApi: 'generativelanguage.googleapis.com', reach: ['registry.npmjs.org', 'pypi.org'], tools: ['test-runner skill'],
-    users: '112 people on your team', updated: 'last week', color: '#4D7C0F', glyph: AGENT_GLYPHS.upgrade, rate: 0.003,
-  }, GOOGLE_SIGNIN),
-  Object.assign({
-    id: 'gemini-cli', source: 'verified', name: 'Gemini CLI', maker: 'Google', publisher: 'Google', cli: 'gemini-cli', version: '0.9.0',
-    image: 'ghcr.io/google/ax-gemini-cli:0.9.0', digest: 'sha256:2ac0…7d13', framework: 'Node.js',
-    desc: 'Large-context edits and questions about your whole codebase.',
-    auth: 'google', model: 'Gemini 3 Pro', modelApi: 'generativelanguage.googleapis.com', reach: [], tools: [],
-    users: '24k builders', updated: '2 days ago', color: '#1A73E8', glyph: AGENT_GLYPHS.gemini, rate: 0.004,
-  }, GOOGLE_SIGNIN),
-  {
-    id: 'openhands', source: 'community', name: 'OpenHands', maker: 'All Hands AI', publisher: 'All Hands AI · open source', cli: 'openhands', version: '0.52',
-    image: 'docker.all-hands.dev/all-hands-ai/openhands:0.52', framework: 'Python',
-    desc: 'Writes code, runs commands and reads docs until the goal is met.',
-    auth: 'key', keyFrom: 'claude', keyLabel: 'Anthropic API key', keyPrefix: 'sk-ant-', model: 'Claude Sonnet', modelApi: 'api.anthropic.com', reach: ['github.com', 'pypi.org'], tools: [],
-    users: '9.1k builders', updated: 'yesterday', color: '#B45309', glyph: AGENT_GLYPHS.hands, rate: 0.008,
-  },
-  {
-    id: 'aider', source: 'community', name: 'Aider', maker: 'Aider', publisher: 'Aider · open source', cli: 'aider', version: '0.86',
-    image: 'paulgauthier/aider:v0.86', framework: 'Python',
-    desc: 'Pair-programs in small steps and commits each change with a clear message.',
-    auth: 'key', keyFrom: 'claude', keyLabel: 'Anthropic API key', keyPrefix: 'sk-ant-', model: 'Claude Sonnet', modelApi: 'api.anthropic.com', reach: ['github.com'], tools: [],
-    users: '6.4k builders', updated: '5 days ago', color: '#475569', glyph: AGENT_GLYPHS.pair, rate: 0.007,
-  },
-];
-/** Agents you can pick right now: the pre-built ones plus any you added (removed ones stay defined for old tasks). */
-function agentList() { return Object.values(AGENTS).filter((a) => !a.removed); }
-function prebuiltAgents() { return Object.values(AGENTS).filter((a) => !a.custom); }
-function addedAgents() { return Object.values(AGENTS).filter((a) => a.custom && !a.removed); }
-/** "Antigravity, Claude Code and Codex": a plain-language list of names. */
-function andList(xs) { return xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`; }
-function agentSource(a) { return AGENT_SOURCES[(a && a.source) || 'prebuilt'] || AGENT_SOURCES.prebuilt; }
-/** "v1.0.4", or "local build" for an agent built from your folder or repo. */
-function agentVersionLabel(a) { return a.version === 'dev' ? 'local build' : 'v' + a.version; }
-/** The image a task runs: pre-built templates come from AX's registry; added ones bring their own. `pin` (per task) overrides the global "Pin pre-built image versions" setting. */
-function agentImage(a, pin) { const p = pin == null ? state.pinImages : pin; return a.image || `ghcr.io/google/ax-${a.cli}:${p ? a.version : 'latest'}`; }
-/* Every task runs on AX's default task runner image, maintained by AX alongside the pre-built templates. */
-const TASK_RUNNER = { name: 'ax-task-runner', image: 'ghcr.io/google/ax-task-runner', version: '0.9.2' };
-function runnerImage() { return `${TASK_RUNNER.image}:${TASK_RUNNER.version}`; }
-function runnerLabel() { return `${TASK_RUNNER.name} ${TASK_RUNNER.version}`; }
-/** Strip markup from anything a person typed before it becomes part of an agent's definition. */
-function cleanText(s, max) { return String(s || '').replace(/[<>&"'`]/g, '').replace(/\s+/g, ' ').trim().slice(0, max || 60); }
-/** Add a catalog or bring-your-own agent to your library (or bring a removed one back). Returns the agent. */
-function addAgent(def) {
-  const prev = AGENTS[def.id];
-  if (prev && prev.custom) { prev.removed = false; saveCustomAgents(); return prev; }
-  const a = Object.assign({ custom: true, rate: 0.005, connected: false, desc: '', version: 'dev' }, def, { custom: true, removed: false });
-  if (a.keyFrom && AGENTS[a.keyFrom]) { a.connected = !!AGENTS[a.keyFrom].connected; a.keyHint = AGENTS[a.keyFrom].keyHint; }
-  else if (a.auth === 'google') a.connected = googleSignedIn();
-  /* A connected agent's model API works out of the box, like the pre-built ones (Balanced preset). */
-  if (a.modelApi && !state.allow.some((x) => x.domain === a.modelApi)) state.allow.push({ domain: a.modelApi, scope: 'all', by: 'Balanced preset', note: `Model API for ${a.name} · key added outbound by Guardrails` });
-  AGENTS[a.id] = a;
-  saveCustomAgents();
-  return a;
-}
-function removeAgent(id) { const a = AGENTS[id]; if (a && a.custom) { a.removed = true; saveCustomAgents(); } return a; }
-function saveCustomAgents() {
-  try {
-    const keep = addedAgents().map((a) => {
-      const o = Object.assign({}, a);
-      delete o.connected; delete o.keyHint; delete o.keyProblem;
-      if (o.auth === 'account' && o.signIn === GOOGLE_SIGNIN.signIn) o.auth = 'google';   /* sign-in itself is never saved */
-      return o;
-    });
-    localStorage.setItem('ax.agents', JSON.stringify(keep));
-  } catch (e) { /* ignore */ }
-}
-function chip(status, t) {
-  /* Lost connection: never show a live pulse for news we aren't getting. Say how old the last update is instead. */
-  if (t && state.conn && state.conn.lost && ACTIVE.includes(status)) return `<span class="chip stale" title="Reconnecting. The task keeps running.">${icon('clock')}Last update <span data-since="${state.conn.since}" data-fmt="secs">${Math.round((Date.now() - state.conn.since) / 1000)} s</span> ago</span>`;
-  if (t && t.queued) return `<span class="chip paused" title="Waiting for room on this computer">${icon('clock')}Queued</span>`;
-  if (quotaWaiting(t)) return `<span class="chip waiting" title="Retrying automatically when the rate limit resets">${icon('clock')}Waiting</span>`;
-  if (isPaused(t)) return `<span class="chip paused">${icon('pause')}Paused</span>`;
-  if (asleepHeld(t)) return `<span class="chip paused" title="Paused while your computer slept">${icon('moon')}Paused</span>`;
-  const s = STATUS[status];
-  return `<span class="chip ${status}">${icon(s.icon)}${s.label}</span>`;
-}
-/* ---------- Per-task CPU and memory ----------
-   Each task's sandbox has a size (small, medium, large). While an agent works it uses part of it; while the task waits
-   for you the CPU is idle and the memory is held; once the task ends the sandbox is stopped. Simulated, steady per task. */
-const SIZES = { small: { cpu: 1, mem: 2, name: 'Small' }, medium: { cpu: 2, mem: 4, name: 'Medium' }, large: { cpu: 4, mem: 8, name: 'Large' } };
-function resourceFor(t) {
-  const lim = SIZES[t.size] || SIZES.medium;
-  /* A queued task hasn't started, and a task you paused is suspended: neither uses CPU or memory. */
-  const live = ['running', 'starting', 'stopping'].includes(t.status) && !t.queued, held = ['waiting', 'blocked'].includes(t.status) && !pausedByYou(t);
-  if (!live && !held) return { lim, on: false };
-  let h = 0; const key = t.id + ':' + (t.step || 0);
-  for (let k = 0; k < key.length; k++) h = (h * 31 + key.charCodeAt(k)) % 997;
-  const cpuF = live ? (t.status === 'starting' ? 0.25 : 0.35 + (h % 50) / 100) : 0.01;
-  const memF = 0.42 + ((h * 7) % 36) / 100;
-  return { lim, on: true, live, cpu: Math.round(lim.cpu * cpuF * 10) / 10, mem: Math.round(lim.mem * memF * 10) / 10, cpuF, memF };
-}
-function resourceHTML(t) {
-  const r = resourceFor(t);
-  /* Sandbox lifecycle (prototype default, see docs/backend-handoff.md): a task that isn't working is suspended. Its files
-     are kept and it uses no CPU or memory; a follow-up or the terminal starts it again in a few seconds. */
-  if (!r.on) return `<p class="xsmall muted res-off">${pausedByYou(t) ? 'Paused: suspended, files are kept and nothing is using CPU or memory. Resume starts it again.' : t.queued ? 'Queued: it starts when there is room on this computer.' : handedOff(t) ? 'The workspace moved to the current task. Nothing runs here.' : 'Suspended: files are kept, nothing is using CPU or memory. A follow-up or the terminal starts it again.'}</p>`;
-  const bar = (label, val, max, unit, f) => `<div class="res-row"><span class="res-k">${label}</span><span class="meter res-meter${f > 0.85 ? ' hot' : ''}" role="img" aria-label="${label}: ${val} of ${max} ${unit}"><span style="width:${Math.max(2, Math.round(f * 100))}%"></span></span><span class="res-v tnum">${val} of ${max} ${unit}</span></div>`;
-  return bar('CPU', r.cpu, r.lim.cpu, r.lim.cpu === 1 ? 'core' : 'cores', r.cpuF) + bar('Memory', r.mem, r.lim.mem, 'GB', r.memF)
-    + (r.live ? '' : '<p class="xsmall muted res-off">Waiting for you: the CPU is idle and the memory is held.</p>');
-}
-function envBadge(t) {
-  return t.env === 'cluster'
-    ? `<span class="env" title="${esc(t.cluster || '')}">${icon('cloud')}On a remote cluster</span>`
-    : `<span class="env">${icon('laptop')}On this computer</span>`;
+  const glyph = AGENT_TILES[id];
+  return glyph ? `<span class="agent-tile ${id} ${size || ''}" aria-hidden="true">${glyph}</span>` : byoTile(size);
 }
 function cliHint(cmd) {
   return `<div class="cli"><span class="prompt">$</span><code>${esc(cmd)}</code><button class="btn ghost sm icon" data-action="copy" data-text="${esc(cmd)}" aria-label="Copy command">${icon('copy', 'sm')}</button></div>`;
 }
 
-/* ---------- Diffs ---------- */
-function newFile(text) { return ['@@ -0,0 +1,' + text.split('\n').length + ' @@'].concat(text.split('\n').map((l) => '+' + l)); }
-function diffStats(lines) {
-  let a = 0, d = 0;
-  lines.forEach((l) => { if (l[0] === '+') a++; else if (l[0] === '-') d++; });
-  return { add: a, del: d };
-}
-function statHTML(f) {
-  const s = diffStats(f.lines);
-  return `<span class="diffstat"><span class="a">+${s.add}</span><span class="d">−${s.del}</span></span>`;
-}
-
-const FILES = {
-  rateLimit: { path: 'src/middleware/rateLimit.ts', kind: 'new', lines: newFile(
-`import rateLimit from "express-rate-limit";
-import type { Request } from "express";
-
-/**
- * Limits each client to 20 checkout attempts per minute.
- * Responds with 429 and a Retry-After header when exceeded.
- */
-export const checkoutLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 20,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  keyGenerator: (req: Request) => req.user?.id ?? req.ip ?? "anonymous",
-  handler: (req, res, _next, options) => {
-    res.setHeader("Retry-After", Math.ceil(options.windowMs / 1000));
-    res.status(429).json({
-      error: "too_many_requests",
-      message: "Too many checkout attempts. Try again in a minute.",
-    });
-  },
-});`) },
-  checkout: { path: 'src/routes/checkout.ts', kind: 'modified', lines: [
-    '@@ -1,9 +1,10 @@',
-    ' import { Router } from "express";',
-    ' import { createOrder } from "../services/orders";',
-    '+import { checkoutLimiter } from "../middleware/rateLimit";',
-    ' ',
-    ' export const checkout = Router();',
-    ' ',
-    '-checkout.post("/", async (req, res) => {',
-    '+checkout.post("/", checkoutLimiter, async (req, res) => {',
-    '   const order = await createOrder(req.user, req.body);',
-    '   res.status(201).json(order);',
-    ' });',
-  ] },
-  rateTest: { path: 'test/rateLimit.test.ts', kind: 'new', lines: newFile(
-`import request from "supertest";
-import { app } from "../src/app";
-
-describe("POST /checkout rate limit", () => {
-  it("allows 20 requests per minute", async () => {
-    for (let i = 0; i < 20; i++) {
-      await request(app).post("/checkout").send({}).expect(201);
-    }
-  });
-
-  it("returns 429 with Retry-After on the 21st", async () => {
-    const res = await request(app).post("/checkout").send({});
-    expect(res.status).toBe(429);
-    expect(res.headers["retry-after"]).toBe("60");
-  });
-});`) },
-  pkg: { path: 'package.json', kind: 'modified', lines: [
-    '@@ -14,6 +14,7 @@',
-    '   "dependencies": {',
-    '     "express": "^4.19.2",',
-    '+    "express-rate-limit": "^7.4.0",',
-    '     "zod": "^3.23.8"',
-    '   },',
-  ] },
-  pytestAuth: { path: 'tests/test_auth.py', kind: 'modified', lines: [
-    '@@ -1,14 +1,12 @@',
-    '-import unittest',
-    '+import pytest',
-    ' from app.auth import login, InvalidCredentials',
-    ' ',
-    ' ',
-    '-class LoginTests(unittest.TestCase):',
-    '-    def test_rejects_bad_password(self):',
-    '-        with self.assertRaises(InvalidCredentials):',
-    '-            login("rajitha", "wrong")',
-    '+def test_rejects_bad_password(user):',
-    '+    with pytest.raises(InvalidCredentials):',
-    '+        login(user.name, "wrong")',
-    ' ',
-    '-    def test_accepts_good_password(self):',
-    '-        self.assertTrue(login("rajitha", "s3cret"))',
-    '+def test_accepts_good_password(user):',
-    '+    assert login(user.name, user.password)',
-  ] },
-  conftest: { path: 'tests/conftest.py', kind: 'new', lines: newFile(
-`import pytest
-from app.models import User
-
-
-@pytest.fixture
-def user():
-    return User(name="rajitha", password="s3cret")`) },
-  webp: { path: 'pipeline/encode.py', kind: 'modified', lines: [
-    '@@ -8,7 +8,9 @@ def encode(image, quality=85):',
-    '     """Encode an image for the CDN."""',
-    '-    return image.save(buffer(), format="JPEG", quality=quality)',
-    '+    if supports_webp(image):',
-    '+        return image.save(buffer(), format="WEBP", quality=quality, method=6)',
-    '+    return image.save(buffer(), format="JPEG", quality=quality)',
-  ] },
-  readme: { path: 'cli/README.md', kind: 'new', lines: newFile(
-`# ax — the AX Studio command line
-
-Everything you can do in AX Studio, you can do with ax.
-
-## Quick start
-
-    ax run --agent antigravity "Fix the failing tests"
-    ax ls
-    ax ssh <task>
-
-## Output for scripts
-
-Add --json to any command for machine-readable output.`) },
-  cliRef: { path: 'cli/docs/reference.md', kind: 'new', lines: newFile(
-`# Command reference
-
-| Command      | What it does                              |
-| ------------ | ----------------------------------------- |
-| ax run       | Start a task with an agent                |
-| ax ls        | List tasks and their status               |
-| ax ssh       | Open a terminal in a task's sandbox       |
-| ax diff      | Show a task's changes                     |
-| ax handoff   | Continue a task with another agent        |
-| ax promote   | Run a task on a remote cluster            |`) },
-  readmeAlt: { path: 'cli/README.md', kind: 'new', lines: newFile(
-`# ax CLI
-
-Run, watch, and steer coding agents safely from your terminal.
-
-## Install & verify
-
-    ax doctor
-    ax run --agent antigravity --repo . "Fix the failing tests"
-    ax diff <task> && ax push <task>
-
-## Automation & CI
-
-Every command accepts --json and exits non-zero on policy blocks.`) },
-  examplesAlt: { path: 'cli/docs/examples.md', kind: 'new', lines: newFile(
-`# Common workflows
-
-## Compare two agents in isolated sandboxes
-
-    ax run --compare antigravity,claude-code "Refactor auth middleware"
-
-## Run a long build on a remote cluster
-
-    ax promote t1 --cluster ax-dev-us-central`) },
-  tokens: { path: 'web/styles/tokens.css', kind: 'modified', lines: [
-    '@@ -1,6 +1,14 @@',
-    ' :root {',
-    '   --bg: #ffffff;',
-    '   --text: #17181a;',
-    ' }',
-    '+',
-    '+@media (prefers-color-scheme: dark) {',
-    '+  :root {',
-    '+    --bg: #0a0f15;',
-    '+    --text: #eef4f9;',
-    '+  }',
-    '+}',
-  ] },
-};
-function genericFiles(task) {
-  const s = slug(task.title);
-  return [
-    { path: `src/${s}.ts`, kind: 'new', lines: newFile(`// ${task.title}\nexport function run() {\n  // Implemented by ${AGENTS[task.agent].name}\n  return true;\n}`) },
-    { path: 'README.md', kind: 'modified', lines: ['@@ -3,3 +3,5 @@', ' ## Features', ' ', `+- ${task.title}`, '+'] },
-  ];
-}
-
-/* ---------- Seed state ---------- */
-const T0 = now();
-function ev(type, minsAgo, extra) { return Object.assign({ type, at: T0 - minsAgo * MIN }, extra || {}); }
-
+/* What the page keeps between renders. The data itself comes from AX (LIVE, in live.js). */
 const state = {
-  /* AX Studio has no account and no login. The first name comes from this computer's user account (the greeting). */
-  user: { first: 'Rajitha', handle: 'rajitha' },
-  org: { admin: 'platform-team@example.com' },
-  /* Your team's template registry (Add a template → Your team). There's no login, so it's an address you add once. */
-  teamRegistry: null,
-  /* Repo keys are set up once, like a template's sign-in. GitHub covers private repos, pushes and the GitHub
-     MCP server; the token stays in the keychain and is added outside the sandbox. A first run starts without it. */
-  github: { connected: true, user: 'rajitha' },
-  showInfra: false,
-  pinImages: true,
-  guardrailPreset: 'balanced',
-  permMode: 'auto',
-  singleKeys: true,
-  homeFilter: 'all',
-  notify: { needs: true, done: true, party: true, desktop: false },
-  privacy: { retention: '30' },
-  skills: { claude: true, codex: false, antigravity: false },
-  /* Environment lifecycle (F19): mode = local | cluster (connected only) | none (setup skipped). */
-  /* clusterConnected: a remote cluster has been chosen and connected (setup, New task or Where agents run). */
-  env: { mode: 'local', health: 'healthy', issue: null, startsIn: 0, cluster: 'ax-dev-us-central', clusterConnected: true },
-  /* Prototype-only toggles set by review scenarios (#/review, ?scenario=<id>) for usability studies. */
-  flags: {},
-  bellSeen: 0,
-  nextId: 8,
-  draft: null,
-  /* Templates still downloading in the background after setup: { id: { start, ms } }. */
-  downloads: {},
-  /* Workspace setups you saved from New task, to reuse for the next task. */
-  savedSetups: [],
-  diffSel: {},
-  term: {},
-  allow: [
-    { domain: 'generativelanguage.googleapis.com', scope: 'all', by: 'Balanced preset', note: 'Key added outbound by Guardrails' },
-    { domain: 'github.com', scope: 'all', by: 'Balanced preset' },
-    { domain: 'registry.npmjs.org', scope: 'all', by: 'Balanced preset' },
-    { domain: 'pypi.org', scope: 'all', by: 'Balanced preset' },
-    { domain: 'files.pythonhosted.org', scope: 'all', by: 'Balanced preset' },
-    { domain: 'api.anthropic.com', scope: 'all', by: 'Balanced preset', note: 'Key added outbound by Guardrails' },
-    { domain: 'api.openai.com', scope: 'all', by: 'Balanced preset', note: 'Key added outbound by Guardrails' },
-    { domain: 'docs.stripe.com', scope: 'shop-api', by: 'You' },
-    { domain: '*.corp.example.com', scope: 'org', by: 'Your organization' },
-  ],
-  orgBlocked: ['pastebin.com', 'transfer.sh'],
-  blockedLog: [
-    { at: T0 - 38 * MIN, task: 't3', domain: 'pastebin.com', reason: 'org', cmd: 'curl -F "file=@reports/sizes.txt" https://pastebin.com/api/api_post.php', purpose: 'Upload a size report to share' },
-    { at: T0 - 26 * MIN, task: 't6', domain: 'unpkg.com', reason: 'list', cmd: 'curl -sL https://unpkg.com/markdown-table@3.0.3/index.js', purpose: 'Load a Markdown table formatter' },
-  ],
-  tasks: [
-    {
-      id: 't1', title: 'Add rate limiting to the checkout API', agent: 'claude', status: 'running', env: 'local',
-      repo: 'shop-api', folder: '~/code/shop-api', branch: 'ax/rate-limit', startedAt: T0 - 3 * MIN, tokens: 41200, files: [], script: 't1', step: 0,
-      events: [
-        ev('user', 3, { text: 'Add rate limiting to the checkout API. 20 requests per minute per user, return 429 with Retry-After.' }),
-        ev('thought', 2.8, { text: "I'll find where the checkout route is defined and check whether the app already has middleware I can reuse." }),
-        ev('tool', 2.5, { title: 'searched the code', cmd: 'rg -n "checkout" src', out: 'src/routes/checkout.ts:4:export const checkout = Router();\nsrc/app.ts:12:app.use("/checkout", checkout);', ok: true }),
-      ],
-    },
-    {
-      id: 't2', title: 'Migrate auth tests to pytest', agent: 'claude', status: 'waiting', env: 'local',
-      repo: 'accounts', folder: '~/code/accounts', branch: 'ax/pytest-auth', startedAt: T0 - 22 * MIN, tokens: 96400,
-      files: [FILES.pytestAuth, FILES.conftest], script: 'answer', step: 0,
-      needs: { type: 'question' },
-      events: [
-        ev('user', 22, { text: 'Migrate the auth test suite from unittest to pytest. Keep coverage the same.' }),
-        ev('thought', 21, { text: 'There are 14 unittest classes under tests/. I will convert them one file at a time and run the suite after each.' }),
-        ev('tool', 19, { title: 'ran a command', cmd: 'pytest --collect-only -q', out: '42 tests collected in 0.61s', ok: true }),
-        ev('edit', 9, { paths: ['tests/test_auth.py', 'tests/conftest.py'] }),
-        ev('question', 6, { text: 'tests/legacy_fixtures.py has 6 fixtures that nothing imports anymore. Should I delete them, or keep them for now?', options: ['Delete them', 'Keep for now'] }),
-      ],
-    },
-    {
-      id: 't3', title: 'Convert the image pipeline to WebP', agent: 'antigravity', status: 'running', env: 'cluster', cluster: 'ax-dev-us-central',
-      repo: 'media-pipeline', folder: '~/code/media-pipeline', branch: 'ax/webp', startedAt: T0 - 48 * MIN, tokens: 233800,
-      files: [FILES.webp], script: 't3', step: 0,
-      events: [
-        ev('user', 48, { text: 'Serve WebP where the browser supports it, fall back to JPEG. Re-encode the sample set and compare sizes.' }),
-        ev('thought', 47, { text: 'Plan: 1) add format detection, 2) update the encoder, 3) re-encode 2,400 sample images and report savings.' }),
-        ev('moved', 41, { cluster: 'ax-dev-us-central', from: 'ax/webp' }),
-        ev('thought', 40, { text: "New session on ax-dev-us-central. I don't have the earlier conversation, so I'm re-reading the goal and the code on ax/webp before I pick the next step." }),
-        ev('blocked', 38, { domain: 'pastebin.com', cmd: 'curl -F "file=@reports/sizes.txt" https://pastebin.com/api/api_post.php', purpose: 'Upload a size report to share', policy: true, resolved: 'policy' }),
-        ev('thought', 37, { text: "That site is blocked by your organization, so I'll write the report to reports/webp.md in the workspace instead." }),
-        ev('edit', 30, { paths: ['pipeline/encode.py'] }),
-        ev('tool', 12, { title: 'ran a command', cmd: 'python -m pipeline.reencode samples/ --format webp', out: 'Re-encoding 2,400 images…\n  1,488 / 2,400 done (62%)\n  Average size: −31% vs JPEG', ok: true }),
-      ],
-    },
-    {
-      id: 't4', title: 'Upgrade web-app to Node 22', agent: 'codex', status: 'failed', env: 'local',
-      repo: 'web-app', folder: '~/code/web-app', branch: 'ax/node-22', startedAt: T0 - 14 * MIN, tokens: 0, files: [], script: 'generic', step: 0,
-      events: [
-        ev('user', 14, { text: 'Upgrade web-app to Node 22 and fix anything that breaks.' }),
-        ev('tool', 13.9, { title: 'started the agent', cmd: 'Starting Codex in a secure sandbox', out: 'Sandbox ready in 3.1s\nWorkspace copied: web-app (1,204 files)', ok: true }),
-        ev('fail', 13.8, {
-          code: 'key-rejected',
-          title: "Codex couldn't start: your OpenAI key was rejected",
-          cause: 'OpenAI answered “401 Unauthorized”. The key may have been revoked, or it expired.',
-          fix: 'Add a new OpenAI key, then retry. Your workspace and goal are saved. Or try another agent.',
-          log: '[13:02:11] guardrails: egress api.openai.com:443 → 401 Unauthorized\n[13:02:11] agent: auth failed (Authorization: Bearer sk-••••••••[redacted])\n[13:02:11] task: stopped, workspace kept',
-        }),
-      ],
-    },
-    {
-      id: 't5', title: 'Write a README for the ax CLI', agent: 'antigravity', status: 'done', env: 'local', parent: 't6',
-      repo: 'ax', folder: '~/code/ax', branch: 'ax/cli-readme', startedAt: T0 - 95 * MIN, finishedAt: T0 - 70 * MIN, tokens: 58100,
-      files: [FILES.readme, FILES.cliRef], script: 'followup', step: 0,
-      altRun: {
-        agent: 'claude',
-        tokens: 68400,
-        durationLabel: '31m',
-        tests: 'Markdown lint passed',
-        summary: 'Adds CI exit-code notes and a separate examples.md workflow guide.',
-        files: [FILES.readmeAlt, FILES.cliRef, FILES.examplesAlt],
-      },
-      events: [
-        ev('handoff', 95, { from: 't6', fromAgent: 'claude', note: 'Reference table is drafted in cli/docs/reference.md. Please write a friendly README that links to it, with a 3-command quick start.' }),
-        ev('thought', 94, { text: 'I will keep the README short: what ax is, a quick start, and how to get JSON output for scripts.' }),
-        ev('edit', 80, { paths: ['cli/README.md'] }),
-        ev('done', 70, { text: 'README added with a quick start and a link to the reference. 2 files changed.' }),
-      ],
-    },
-    {
-      id: 't6', title: 'Draft a CLI reference from --help output', agent: 'claude', status: 'done', env: 'local',
-      repo: 'ax', folder: '~/code/ax', branch: 'ax/cli-readme', startedAt: T0 - 130 * MIN, finishedAt: T0 - 96 * MIN, tokens: 71900,
-      files: [FILES.cliRef], script: 'followup', step: 0, child: 't5',
-      events: [
-        ev('user', 130, { text: 'Generate a command reference for ax from the --help output of every subcommand.' }),
-        ev('tool', 128, { title: 'ran a command', cmd: 'for c in run ls ssh diff handoff promote; do ax $c --help; done', out: '6 commands, 31 flags found', ok: true }),
-        ev('blocked', 126, { domain: 'unpkg.com', cmd: 'curl -sL https://unpkg.com/markdown-table@3.0.3/index.js', purpose: 'Load a Markdown table formatter', resolved: 'denied' }),
-        ev('edit', 110, { paths: ['cli/docs/reference.md'] }),
-        ev('done', 96, { text: 'Reference drafted for 6 commands. Handed off to Antigravity for the README.' }),
-      ],
-    },
-    {
-      id: 't7', title: 'Add dark-mode design tokens', agent: 'claude', status: 'done', env: 'cluster', cluster: 'ax-dev-us-central',
-      repo: 'web-app', folder: '~/code/web-app', branch: 'ax/dark-tokens', startedAt: T0 - 26 * 60 * MIN, finishedAt: T0 - 25 * 60 * MIN, tokens: 38800,
-      files: [FILES.tokens], pushed: true, script: 'followup', step: 0,
-      events: [
-        ev('user', 26 * 60, { text: 'Add dark-mode values for our color tokens using prefers-color-scheme.' }),
-        ev('edit', 25.5 * 60, { paths: ['web/styles/tokens.css'] }),
-        ev('done', 25 * 60, { text: 'Dark-mode tokens added. Contrast checked at 4.5:1 or better.' }),
-        ev('pushed', 24.8 * 60, { branch: 'ax/dark-tokens' }),
-      ],
-    },
-  ],
+  route: null,
+  openSelect: null,      // the dropdown that is open: { key, active }
+  singleKeys: true,      // single-key shortcuts (Settings, Accessibility)
+  reduceMotion: false,
+  docTitle: '',
+  settingsFocus: false,
 };
-
-function getTask(id) { return state.tasks.find((t) => t.id === id); }
-function filesFor(t) { return t.files || []; }
-function totalDiff(files) {
-  return (files || []).reduce((acc, f) => {
-    const s = diffStats(f.lines);
-    return { add: acc.add + s.add, del: acc.del + s.del };
-  }, { add: 0, del: 0 });
-}
-function costFor(t) { return (t.tokens / 1000) * AGENTS[t.agent].rate; }
-function fmtTokens(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n); }
-/** A failed handoff attempt is folded into its source task (the source card explains it), so it never double-counts. */
-function isFolded(t) { return !!(t && t.foldedInto && t.status === 'failed'); }
-/** CUJ 4: a task another agent continued. Its workspace moved to the new task (only one agent is active at a time),
-    so there's nothing left to review or ship here; its Activity stays for reference. */
-function handedOff(t) { return !!(t && t.status === 'done' && t.child && !t.handoffFailed && getTask(t.child)); }
-/** CUJ 5: on a remote cluster the organization's budget cap applies; on this computer AX checks in at the task's budget. */
-const ORG_BUDGET = 50;
-function budgetFor(t) { return t.env === 'cluster' ? ORG_BUDGET : (t.budget || 5); }
-function needsCount() { return state.tasks.filter(needsYou).length; }
-function openBlock(t) { for (let i = t.events.length - 1; i >= 0; i--) { const e = t.events[i]; if (e.type === 'blocked' && !e.resolved) return { e, i }; } return null; }
-function openQuestion(t) { for (let i = t.events.length - 1; i >= 0; i--) { const e = t.events[i]; if (e.type === 'question' && !e.answer && !e.superseded) return { e, i }; } return null; }
-function lastFail(t) { for (let i = t.events.length - 1; i >= 0; i--) { if (t.events[i].type === 'fail') return { e: t.events[i], i }; } return null; }
-/** Sites a preset includes on its own: Balanced has the common package hosts and the model APIs; Locked down keeps
-    only the model APIs (the rows with a key note). */
-function presetSites(p) {
-  const base = state.allow.filter((a) => /preset/.test(a.by || ''));
-  return (p || state.guardrailPreset) === 'strict' ? base.filter((a) => a.note) : base;
-}
-/** Sites you allowed yourself, on top of the preset (for one workspace or for all of them). */
-function mySites() { return state.allow.filter((a) => a.by === 'You'); }
-/** Can an agent in this workspace reach this site under the current preset, your sites and your organization's rules? */
-function siteAllowed(domain, repo) {
-  return presetSites().some((a) => a.domain === domain)
-    || state.allow.some((a) => a.domain === domain && (a.scope === 'org' || (a.by === 'You' && (a.scope === 'all' || a.scope === repo))));
-}
-function reachFor(t) {
-  const mine = (a) => a.by === 'You' && (a.scope === 'all' || a.scope === t.repo);
-  if (state.guardrailPreset === 'strict') {
-    const allowedApi = t.agent === 'antigravity' ? 'generativelanguage.googleapis.com' : t.agent === 'claude' ? 'api.anthropic.com' : t.agent === 'codex' ? 'api.openai.com' : '*.corp.example.com';
-    return state.allow.filter((a) => a.domain === allowedApi || mine(a) || a.scope === 'org');
-  }
-  return state.allow.filter((a) => a.scope === 'all' || a.scope === t.repo || a.scope === 'org');
-}
-
-/* Workspace recipe catalogs (F8) — skills and MCP servers an agent builder can add without editing YAML. */
-const SKILLS = [
-  { id: 'ax-task', name: 'ax-task', desc: 'Run, inspect and hand off tasks with ax (bundled)', locked: true },
-  { id: 'test-runner', name: 'test-runner', desc: 'Find and run the right tests after each change' },
-  { id: 'security-review', name: 'security-review', desc: 'Check diffs for secrets and risky patterns' },
-  { id: 'frontend-design', name: 'frontend-design', desc: 'Accessible, consistent UI changes. Uses the Playwright browser to check pages.', needs: 'playwright' },
-];
-const MCP_SERVERS = [
-  { id: 'github', name: 'GitHub', desc: 'Issues and pull requests', auth: 'Connected · through Guardrails' },
-  { id: 'linear', name: 'Linear', desc: 'Read and update issues', auth: 'Sign-in needed' },
-  { id: 'postgres', name: 'Postgres (read-only)', desc: 'Query a dev database', auth: 'Uses a keychain entry' },
-  { id: 'playwright', name: 'Playwright browser', desc: 'Open and test web pages', auth: 'Runs inside the sandbox' },
-];
-function mcpName(id) { return (MCP_SERVERS.find((m) => m.id === id) || { name: id }).name; }
-/** An MCP server that signs in (GitHub, Linear) can't start until you connect it once. */
-function mcpNeedsSignIn(id) { return (id === 'github' && !state.github.connected) || (id === 'linear' && !state.mcpConnected); }
-function mcpAuthLabel(m) {
-  if (m.id === 'github') return state.github.connected ? `Connected as ${state.github.user} · through Guardrails` : 'Sign-in needed';
-  if (m.id === 'linear') return state.mcpConnected ? 'Connected · through Guardrails' : 'Sign-in needed';
-  return m.auth;
-}
-/** New workspaces start with the GitHub MCP server once GitHub is connected (it can't start without a sign-in). */
-function defaultMcp() { return state.github.connected ? ['github'] : []; }
-function connectGithub() { state.github.connected = true; }
-/** A skill that needs an MCP server the workspace doesn't have can't load (CUJ 2: "An MCP server / skill fails to start"). */
-function skillGaps(skills, mcp) { return (skills || []).map((id) => SKILLS.find((s) => s.id === id)).filter((s) => s && s.needs && !(mcp || []).includes(s.needs)); }
-/* Inline files are written into the workspace before the agent starts. Like env vars, a file that looks like it
-   holds a secret is kept out of the sandbox (keys belong in Settings → Agents & keys). */
-function cleanFiles(list) { return (list || []).filter((f) => f && String(f.path || '').trim()); }
-function fileHasSecret(f) {
-  const c = String((f && f.content) || '');
-  return /\b(sk-[A-Za-z0-9-]{6,}|ghp_[A-Za-z0-9]{6,}|gho_[A-Za-z0-9]{6,}|AKIA[A-Z0-9]{8,}|xox[abp]-[A-Za-z0-9-]{6,}|AIza[0-9A-Za-z_-]{10,})/.test(c)
-    || parseEnvVars(c).some((x) => x.secret && x.v);
-}
-/** Parse "NAME=value" lines; anything that looks like a secret is flagged and never written to YAML. */
-function parseEnvVars(text) {
-  return String(text || '').split('\n').map((l) => l.trim()).filter((l) => l && l.includes('=')).map((l) => {
-    const k = l.slice(0, l.indexOf('=')).trim(), v = l.slice(l.indexOf('=') + 1).trim();
-    const secret = /(key|secret|token|passw|credential|auth)/i.test(k) || /^(sk-|ghp_|gho_|AKIA|xox[abp]-|AIza)/.test(v);
-    return { k, v, secret };
-  }).filter((x) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(x.k));
-}
-
-/* Portable YAML builders (Agent Substrate CRD + OCI Sandbox Kit compatibility, zero raw secrets) */
-function manifestYAML(spec, format) {
-  const a = AGENTS[spec.agent || DEFAULT_AGENT];
-  /* Added templates bring their own image (team registry, catalog, or built in the sandbox from your folder).
-     Pre-built ones are pinned per task, or follow the latest release. */
-  const pinned = spec.pin ? spec.pin !== 'latest' : state.pinImages;
-  const img = agentImage(a, pinned);
-  const imgNote = a.image ? '' : pinned ? ' # pinned for this task' : ` # ${a.latest || a.version} today`;
-  const m = modelOf(a.id, spec.model);
-  const setup = String(spec.setup || 'npm ci');
-  const setupLine = setup === 'auto' ? '  setup: auto # detected from the repo after cloning' : `  setup: "${setup.replace(/"/g, "'")}"${spec.setupFrom ? ` # detected from ${spec.setupFrom}` : ''}`;
-  const goal = (spec.goal || spec.title || 'Describe the goal').replace(/"/g, "'").replace(/\s*\n+\s*/g, ' · ');
-  const repo = spec.repo || 'workspace';
-  const source = spec.folder || '~/code/' + repo;
-  const cred = a.keyFrom ? AGENTS[a.keyFrom].maker.toLowerCase() + '-key' : a.auth === 'google' || (a.custom && a.auth === 'account') ? 'google-oauth' : a.auth === 'account' ? a.maker.toLowerCase() + '-account' : a.maker.toLowerCase() + '-key';
-  const preset = spec.preset || state.guardrailPreset;
-  const domains = state.allow.filter((x) => x.scope === 'all' || x.scope === repo).map((x) => x.domain);
-  const skills = spec.skills || ['ax-task'];
-  const mcp = spec.mcp || [];
-  const vars = parseEnvVars(spec.envVars);
-  const files = cleanFiles(spec.files);
-  /* Inline files show their first lines; the header comment says how long each one is. */
-  const fileLines = (f) => {
-    if (fileHasSecret(f)) return [`    # ${f.path.trim()} removed: looks like it has a secret. Add keys in Settings → Agents & keys.`];
-    const lines = String(f.content || '').split('\n');
-    return [`    - path: ${f.path.trim()}`, `      content: | # ${plural(lines.length, 'line')}${lines.length > 3 ? ', first 3 shown' : ''}`, ...lines.slice(0, 3).map((l) => `        ${l}`)];
-  };
-  const budget = Number(spec.budget) > 0 ? Number(spec.budget) : 5;
-  const recipe = [
-    ...(spec.branch ? [`  branch: ${spec.branch}`] : []),
-    ...(spec.includeUncommitted != null ? [`  includeUncommitted: ${spec.includeUncommitted ? 'true # copied into the sandbox snapshot' : 'false # starts from the last commit'}`] : []),
-    ...((spec.extraRepos || []).length ? ['  extraRepos: # read-only copies for context', ...spec.extraRepos.map((p) => `    - { source: "${p}", mode: read-only }`)] : []),
-    ...(spec.useAgentsMd !== false || (spec.instructions || '').trim() ? ['  instructions:'] : []),
-    ...(spec.useAgentsMd !== false ? ['    - file: AGENTS.md'] : []),
-    ...((spec.instructions || '').trim() ? [`    - inline: "${spec.instructions.trim().replace(/"/g, "'").replace(/\s+/g, ' ').slice(0, 60)}${spec.instructions.trim().length > 60 ? '…' : ''}"`] : []),
-    ...(files.length ? ['  files: # written into the workspace before the agent starts', ...files.flatMap(fileLines)] : []),
-    `  skills: [${skills.join(', ')}]`,
-    ...(mcp.length ? [`  mcpServers: [${mcp.join(', ')}] # credentials injected by Guardrails`] : []),
-    ...(vars.length ? ['  env:'] : []),
-    ...vars.map((x) => (x.secret ? `    # ${x.k} removed: looks like a secret. Add it in Settings → Agents & keys.` : `    ${x.k}: "${x.v.replace(/"/g, "'")}"`)),
-  ];
-  if (format === 'kit') {
-    return [
-      '# sbxenv.yaml — Portable OCI Sandbox Kit (compatible with ax & OCI registries)',
-      '# Zero secrets in this file: credentials are injected outbound by Guardrails.',
-      'schemaVersion: 1',
-      `name: ${repo}-kit`,
-      'runtime:',
-      '  isolation: microvm',
-      `  harness: ${a.cli}`,
-      `  runner: ${runnerImage()} # default task runner, maintained by AX`,
-      ...(m ? [`  model: ${m.id}`] : []),
-      `  image: ${img}`,
-      `  resources: ${spec.size || 'medium'} # ${{ small: '1 CPU, 2 GB', medium: '2 CPU, 4 GB', large: '4 CPU, 8 GB' }[spec.size || 'medium']}`,
-      'workspace:',
-      '  mount: copy-on-write # host folder untouched until you apply or push',
-      setupLine,
-      ...recipe,
-      'network:',
-      `  preset: ${preset}`,
-      '  allow:',
-      ...domains.map((d) => `    - ${d}`),
-      'credentials:',
-      `  - ref: ${cred}`,
-      '    mode: proxy-inject # never mounted into sandbox env or filesystem',
-    ].join('\n');
-  }
-  return [
-    '# ax.yaml — Portable Agent Substrate manifest (CNCF-aligned)',
-    '# Runs unchanged on this computer or on your own Kubernetes / GKE cluster.',
-    'apiVersion: agents.x-k8s.io/v1alpha1',
-    'kind: Workspace',
-    'metadata:',
-    `  name: ${slug(repo)}`,
-    'spec:',
-    `  source: "${source}"`,
-    ...recipe,
-    '  isolation: microvm-copy # host files untouched',
-    setupLine,
-    `  resources: ${spec.size || 'medium'}`,
-    '  guardrails:',
-    `    preset: ${preset}`,
-    `    insideSandbox: ${state.permMode === 'ask' ? 'ask-before-risky-commands' : 'run-without-asking'}`,
-    `    allow: [${domains.slice(0, 4).join(', ')}${domains.length > 4 ? ', …' : ''}]`,
-    `    credentials: [${cred}] # injected at egress, 0 raw secrets in sandbox`,
-    '---',
-    'apiVersion: ax.studio/v1alpha1',
-    'kind: Task',
-    'spec:',
-    `  workspaceRef: ${slug(repo)}`,
-    `  harness: ${a.cli}${a.custom ? '' : ' # one-line swap: antigravity, claude-code or codex'}`,
-    ...(m ? [`  model: ${m.id}`] : []),
-    `  image: ${img}${imgNote}`,
-    `  runner: ${runnerImage()} # default task runner, maintained by AX`,
-    `  target: ${spec.env === 'cluster' ? (spec.cluster || 'ax-dev-us-central') : 'local'}`,
-    `  budget: { checkInUSD: ${budget} }`,
-    `  goal: "${goal.length > 72 ? goal.slice(0, 69) + '…' : goal}"`,
-  ].join('\n');
-}
 
 /* Persisted preferences */
 (function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem('ax.prefs') || '{}');
-    if (typeof p.showInfra === 'boolean') state.showInfra = p.showInfra;
-    if (typeof p.pinImages === 'boolean') state.pinImages = p.pinImages;
-    if (p.guardrailPreset && GUARDRAIL_PRESETS[p.guardrailPreset]) state.guardrailPreset = p.guardrailPreset;
-    if (p.permMode === 'auto' || p.permMode === 'ask') state.permMode = p.permMode;
     if (typeof p.singleKeys === 'boolean') state.singleKeys = p.singleKeys;
     if (typeof p.reduceMotion === 'boolean') state.reduceMotion = p.reduceMotion;
-    if (p.notify) state.notify = Object.assign(state.notify, p.notify);
-    if (p.privacy && typeof p.privacy.retention === 'string') state.privacy.retention = p.privacy.retention;
-    if (p.skills) state.skills = Object.assign(state.skills, p.skills);
-    const mode = localStorage.getItem('ax.env');
-    if (mode === 'local' || mode === 'cluster' || mode === 'none') state.env.mode = mode;
-    const reg = localStorage.getItem('ax.registry'); if (reg) state.teamRegistry = reg;
-  } catch (e) { /* ignore */ }
-})();
-/* Agents you added (CUJ 2) stay in your library across visits; ?reset clears them with the rest of AX's saved state. */
-(function loadCustomAgents() {
-  try {
-    const list = JSON.parse(localStorage.getItem('ax.agents') || '[]');
-    if (!Array.isArray(list)) return;
-    list.forEach((d) => {
-      if (!d || !d.id || AGENTS[d.id] && !AGENTS[d.id].custom) return;
-      const cat = AGENT_CATALOG.find((c) => c.id === d.id);
-      const def = Object.assign({}, cat || {}, d, { glyph: (cat && cat.glyph) || AGENT_GLYPHS.custom });
-      ['name', 'desc', 'publisher', 'cli', 'version', 'image', 'framework'].forEach((k) => { if (def[k] != null) def[k] = cleanText(def[k], k === 'desc' ? 140 : 80); });
-      /* A folder template saved as ./name before v27 is run by its name now, so its commands work from any folder. */
-      if (def.source === 'yours' && /^\.\//.test(def.cli || '')) def.cli = def.id;
-      def.color = /^#[0-9a-f]{3,8}$/i.test(def.color || '') ? def.color : '#0E7490';
-      def.reach = (Array.isArray(def.reach) ? def.reach : []).map((x) => cleanText(x, 80)).filter(Boolean);
-      def.tools = (Array.isArray(def.tools) ? def.tools : []).map((x) => cleanText(x, 60)).filter(Boolean);
-      if (def.modelApi) def.modelApi = cleanText(def.modelApi, 80);
-      addAgent(def);
-    });
   } catch (e) { /* ignore */ }
 })();
 function savePrefs() {
-  try {
-    localStorage.setItem('ax.prefs', JSON.stringify({
-      showInfra: state.showInfra,
-      pinImages: state.pinImages,
-      guardrailPreset: state.guardrailPreset,
-      permMode: state.permMode,
-      singleKeys: state.singleKeys,
-      reduceMotion: !!state.reduceMotion,
-      notify: state.notify,
-      privacy: state.privacy,
-      skills: state.skills,
-    }));
-  } catch (e) { /* ignore */ }
+  try { localStorage.setItem('ax.prefs', JSON.stringify({ singleKeys: state.singleKeys, reduceMotion: !!state.reduceMotion })); } catch (e) { /* ignore */ }
 }
-/* CUJ 2 review mode (…?cuj=2): a true first run, right where CUJ 1 ends. Setup is done, nothing has run yet, no
-   template is signed in, and the templates you didn't pick first are still downloading. ?reset goes back to the demo. */
-(function applyFirstRun() {
-  let on = false;
-  try { on = localStorage.getItem('ax.firstrun') === '1'; } catch (e) { /* ignore */ }
-  if (!on) return;
-  state.firstRun = true;
-  state.tasks = [];
-  state.blockedLog = [];
-  state.nextId = 1;
-  state.allow = state.allow.filter((a) => /preset/.test(a.by));
-  /* Keep where setup left you (this computer, a remote cluster, or skipped); the CUJ 2 link stores "local". */
-  let mode = null;
-  try { mode = localStorage.getItem('ax.env'); } catch (e) { /* ignore */ }
-  if (!['local', 'cluster', 'none'].includes(mode)) state.env.mode = 'local';
-  /* A remote cluster is connected only if you chose one (setup, New task or Where agents run). */
-  let cl = null;
-  try { cl = localStorage.getItem('ax.cluster'); } catch (e) { /* ignore */ }
-  state.env.clusterConnected = !!cl || state.env.mode === 'cluster';
-  if (cl) state.env.cluster = cl;
-  state.github.connected = false;
-  Object.values(AGENTS).forEach((a) => { if (!a.custom) { a.connected = false; delete a.keyProblem; delete a.keyHint; } });
-})();
-/* Saved workspace setups survive a reload (sign-ins and tasks don't; this is a prototype). */
-(function loadSavedSetups() {
-  try {
-    const list = JSON.parse(localStorage.getItem('ax.setups') || '[]');
-    if (Array.isArray(list)) state.savedSetups = list.filter((x) => x && x.name).slice(0, 6).map((x) => Object.assign({}, x, { name: cleanText(x.name, 40) }));
-  } catch (e) { /* ignore */ }
-})();
-function saveSetups() { try { localStorage.setItem('ax.setups', JSON.stringify(state.savedSetups)); } catch (e) { /* ignore */ } }
-
-/* ---------- Template downloads ----------
-   Setup downloads the template you picked first; the others keep downloading in the background. Their status follows
-   you to New task, and a task you start with one of them waits for its download instead of failing. */
-function startDownloads(ids, ms) {
-  state.downloads = state.downloads || {};
-  ids.forEach((id) => { if (AGENTS[id]) state.downloads[id] = { start: now(), ms: Math.max(1000, ms || 45000) }; });
-  /* Downloads keep going across reloads (the image store owns them); they never restart from 0%. */
-  saveDownloads();
-}
-function saveDownloads() { try { localStorage.setItem('ax.downloads', JSON.stringify(state.downloads || {})); } catch (e) { /* ignore */ } }
-(function loadDownloads() {
-  try {
-    const d = JSON.parse(localStorage.getItem('ax.downloads') || 'null');
-    if (d && typeof d === 'object') { Object.keys(d).forEach((id) => { if (Date.now() - d[id].start >= d[id].ms) delete d[id]; }); state.downloads = d; }
-  } catch (e) { /* ignore */ }
-})();
-function downloadsSaved() { try { return !!localStorage.getItem('ax.downloads'); } catch (e) { return false; } }
-/** Connect a remote cluster as the default for new tasks (setup, New task, Where agents run). */
-function connectCluster(name) {
-  state.env.cluster = name;
-  state.env.clusterConnected = true;
-  try { localStorage.setItem('ax.cluster', name); } catch (e) { /* ignore */ }
-}
-function disconnectCluster() {
-  state.env.clusterConnected = false;
-  try { localStorage.removeItem('ax.cluster'); } catch (e) { /* ignore */ }
-}
-/** Review state: which kept files were applied to your folder, and whether that is all of them. */
-function appliedPaths(t) { return (t && t.applied && t.applied.paths) || []; }
-function keptFiles(t) { const sel = state.diffSel[t.id]; return filesFor(t).filter((f) => !(sel && sel.discarded && sel.discarded[f.path])); }
-function appliedAll(t) { const k = keptFiles(t); return k.length > 0 && k.every((f) => appliedPaths(t).includes(f.path)); }
-/** Finished work that still waits for you to review it (not shipped, not applied in full, not handed off). */
-function awaitingReview(t) { return t.status === 'done' && !t.pushed && !t.notKept && !handedOff(t) && filesFor(t).length > 0 && !appliedAll(t); }
-/** The guardrails policy as portable YAML (preset, inside-sandbox mode, allowed and blocked sites). */
-function policyYAML() {
-  const preset = GUARDRAIL_PRESETS[state.guardrailPreset] || GUARDRAIL_PRESETS.balanced;
-  const rows = state.allow.map((a) => `    - domain: ${a.domain}\n      scope: ${a.scope}\n      addedBy: ${JSON.stringify(a.by || 'you')}`).join('\n');
-  const blocked = (state.orgBlocked || []).map((b) => `    - ${typeof b === 'string' ? b : b.domain}`).join('\n');
-  return [
-    '# guardrails.yaml · AX Guardrails policy (no secrets: keys are added outside the sandbox)',
-    'apiVersion: ax.dev/v1alpha1',
-    'kind: GuardrailsPolicy',
-    'metadata:',
-    `  name: ${state.user.handle}-local`,
-    'spec:',
-    `  preset: ${preset.cli}   # ${preset.name}`,
-    `  insideSandbox: ${state.permMode === 'ask' ? 'ask-before-risky' : 'run-without-asking'}`,
-    '  unknownSites: ask',
-    '  allow:',
-    rows || '    []',
-    '  orgBlocked:',
-    blocked || '    []',
-  ].join('\n');
-}
-function isDownloading(id) { const d = state.downloads && state.downloads[id]; return !!d && now() - d.start < d.ms; }
-function dlPct(id) {
-  const d = state.downloads && state.downloads[id];
-  if (!d) return 100;
-  return Math.max(1, Math.min(99, Math.floor(((now() - d.start) / d.ms) * 100)));
-}
-function dlSecsLeft(id) { const d = state.downloads && state.downloads[id]; return d ? Math.max(1, Math.ceil((d.ms - (now() - d.start)) / 1000)) : 0; }
-/** "Downloading · 62%", kept live by the 1-second download ticker (data-dl). */
-function dlLabel(id) { return `Downloading · <span data-dl="${id}">${dlPct(id)}%</span>`; }
-function setEnvMode(mode) {
-  state.env.mode = mode;
-  try { localStorage.setItem('ax.env', mode); } catch (e) { /* ignore */ }
-}
-
-/* ---------- Stable event IDs ----------
-   Decisions address an event by its id, never by its position, so a server stream that trims, reorders or replays
-   events can't resolve the wrong one. Ids are assigned on first use (seed data, pushEvent, events built inline). */
-let evSeq = 0;
-function evId(e) { if (!e.id) e.id = 'e' + (++evSeq).toString(36); return e.id; }
-function evIdx(t, el) {
-  if (!t) return -1;
-  const id = el && el.dataset && el.dataset.eid;
-  if (id) { const k = t.events.findIndex((e) => e.id === id); if (k >= 0) return k; }
-  return +((el && el.dataset && el.dataset.ev) || -1);
-}
-
-/* ---------- Capacity on this computer (queue) ----------
-   Sandboxes on this computer share 12 GB of its memory. A new task that doesn't fit waits in line ("Queued") and
-   starts on its own when a task finishes or you pause one. Run on a remote cluster is the way out of the line. */
-const LOCAL_MEM_GB = 12;
-function localMemInUse(except) {
-  return state.tasks.filter((x) => x !== except && x.env === 'local').reduce((n, x) => n + (resourceFor(x).on ? (SIZES[x.size] || SIZES.medium).mem : 0), 0);
-}
-function localFull(t) { return localMemInUse(t) + (SIZES[t.size] || SIZES.medium).mem > LOCAL_MEM_GB; }
-function queuedAhead(t) { return state.tasks.filter((x) => x.queued && x !== t && x.queued < t.queued).length; }
 
 /* ---------- Connection to AX (the local daemon or the cluster) ---------- */
-state.conn = { lost: false, since: 0, attempts: 0 };
+
+/* ---------- Shared UI pieces ---------- */
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
+
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+/* ---------- Dropdown select (works like a regular select) ----------
+   Click it, or press Down, Up, Enter or Space, to open the list. Arrow keys, Home, End or typing a name move through
+   it; Enter, Space, Tab or a click picks; Escape or a click outside closes without a change. ARIA select-only combobox:
+   focus stays on the box and aria-activedescendant points at the highlighted option. The open list lives in state.openSelect, so a background redraw keeps it
+   open. Behaviour: openSelect, pickSelect and selKeydown in app.js. */
+function selectHTML({ key, label, value, options, btnClass }) {
+  const id = 'sel-' + key;
+  const open = !!(state.openSelect && state.openSelect.key === key);
+  const cur = options.find((o) => o.value === value) || options[0];
+  if (!cur) return '';
+  const active = open && options.some((o) => o.value === state.openSelect.active) ? state.openSelect.active : cur.value;
+  return `<div class="sel${open ? ' open' : ''}" data-sel="${key}">
+    <div class="sel-btn ${btnClass || ''}" id="${id}" role="combobox" tabindex="0" aria-label="${esc(label)}" aria-haspopup="listbox" aria-controls="${id}-list" aria-expanded="${open}"${open ? ` aria-activedescendant="${id}-${active}"` : ''} data-action="sel-toggle" data-key="${key}">${cur.lead || ''}<span class="sel-val">${esc(cur.name)}</span>${icon('chevDown', 'xs')}</div>
+    <ul class="sel-list" id="${id}-list" role="listbox" aria-label="${esc(label)}"${open ? '' : ' hidden'}>${options.map((o) => `
+      <li class="sel-opt${o.value === active ? ' is-active' : ''}" role="option" id="${id}-${o.value}" aria-selected="${o.value === cur.value}" data-action="sel-pick" data-key="${key}" data-value="${o.value}">${o.lead || ''}<span class="sel-txt"><b>${esc(o.name)}</b>${o.sub ? `<small>${o.sub}</small>` : ''}</span>${icon('check', 'sm')}</li>`).join('')}
+    </ul>
+  </div>`;
+}
+/* The tile for an image that isn't a known agent. */
+function byoTile(size) { return `<span class="agent-tile byo ${size || ''}" aria-hidden="true">${AGENT_GLYPHS.custom}</span>`; }
+
+/** One labelled row in a panel (style guide §18): a label (and a short line about it), its content, an optional action. */
+function prow(label, body, o) {
+  o = o || {};
+  return `<div class="prow${o.act ? ' has-act' : ''}${o.cls ? ' ' + o.cls : ''}"${o.id ? ` id="${o.id}"` : ''}>
+    <div class="prow-k"${o.labelId ? ` id="${o.labelId}"` : ''}>${label}${o.sub ? `<span class="prow-sub"${o.subId ? ` id="${o.subId}"` : ''}>${o.sub}</span>` : ''}</div>
+    <div class="prow-v">${body}</div>${o.act ? `<div class="prow-act">${o.act}</div>` : ''}
+  </div>`;
+}
+
+function setupStonesHTML(s, steps, failAt) {
+  const cur = steps[Math.min(s.step, steps.length - 1)];
+  const sp = typeof s.progress === 'number' ? s.progress : Math.min(1, s.step / Math.max(1, steps.length - 1));
+  return `<div class="stones ${failAt != null ? 'has-fail' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${s.step}" aria-valuetext="Step ${Math.min(s.step + 1, 4)} of 4: ${esc(cur.title)}" style="--sp:${sp}">
+    <span class="fillbar"></span>
+    ${steps.map((st, k) => `<div class="stone ${k < s.step ? 'ok' : k === failAt ? 'fail' : k === s.step ? 'now' : ''}"><span class="sb">${icon(k < s.step ? 'check' : k === failAt ? 'alert' : k === s.step ? 'loader' : st.ic)}</span><span class="sl">${esc(st.short)}</span></div>`).join('')}
+  </div>`;
+}
+function setupCheckItem(cls, ic, title, desc) {
+  return `<li class="check-item ${cls}"><span class="ci-icon">${icon(ic)}</span><div><div class="ci-title">${title}</div><div class="ci-desc">${desc}</div></div></li>`;
+}
+
+/* ---------- Gate map: the sandbox, its Gateway, and the sites it can reach (a task's side panel) ---------- */
+function trunc(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function gateMap(allowed, blocked, max) {
+  max = max || 4;
+  blocked = blocked.filter((b) => !allowed.includes(b.domain));
+  const rows = allowed.slice(0, max).map((d) => ({ d, ok: true })).concat(blocked.slice(0, 2).map((b) => ({ d: b.domain, ok: false })));
+  const extra = Math.max(0, allowed.length - max);
+  const rowH = 26, W = 312;
+  const H = Math.max(122, rows.length * rowH + 24 + (extra ? 16 : 0));
+  const cy = (H - (extra ? 16 : 0)) / 2;
+  const gx = 92, bx = 146;
+  const y0 = rows.length ? cy - ((rows.length - 1) * rowH) / 2 : cy;
+  const parts = rows.map((r, k) => {
+    const y = y0 + k * rowH;
+    const p = `M${gx + 13} ${cy.toFixed(1)} C${gx + 34} ${cy.toFixed(1)} ${gx + 28} ${y.toFixed(1)} ${bx - 8} ${y.toFixed(1)}`;
+    return r.ok
+      ? `<g><path d="${p}" class="gm-link"/><circle r="2.3" class="rm-packet"><animateMotion dur="${(1.9 + k * 0.4).toFixed(1)}s" repeatCount="indefinite" path="M48 ${cy.toFixed(1)} L${gx - 13} ${cy.toFixed(1)} ${p.replace('M', 'L')}"/></circle>
+        <circle cx="${bx}" cy="${y.toFixed(1)}" r="6.5" class="gm-bead ok"/><path d="M${bx - 3.2} ${y.toFixed(1)} l2.1 2.2 l4.1 -4.3" class="gm-mark ok"/><text x="${bx + 12}" y="${(y + 4).toFixed(1)}" class="gm-text">${esc(trunc(r.d, 20))}</text></g>`
+      : `<g><path d="${p}" class="gm-link no"/><circle cx="${bx}" cy="${y.toFixed(1)}" r="6.5" class="gm-bead no"/><path d="M${bx - 2.6} ${(y - 2.6).toFixed(1)} l5.2 5.2 M${bx + 2.6} ${(y - 2.6).toFixed(1)} l-5.2 5.2" class="gm-mark no"/><text x="${bx + 12}" y="${(y + 4).toFixed(1)}" class="gm-text no">${esc(trunc(r.d, 20))}</text></g>`;
+  }).join('');
+  return `<svg class="gate-map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Traffic from the isolated sandbox passes through Guardrails. ${allowed.length} sites allowed${blocked.length ? `, ${blocked.length} blocked` : ''}.">
+    <line x1="48" y1="${cy.toFixed(1)}" x2="${gx - 12}" y2="${cy.toFixed(1)}" class="gm-link"/>
+    ${parts}
+    <circle cx="26" cy="${cy.toFixed(1)}" r="21" class="gm-core"/>
+    <circle cx="26" cy="${cy.toFixed(1)}" r="15" class="gm-inner-ring"/>
+    <path d="M26 ${(cy - 8.5).toFixed(1)} C21 ${(cy - 2).toFixed(1)} 19.5 ${(cy + 1).toFixed(1)} 19.5 ${(cy + 4).toFixed(1)} a6.5 6.5 0 0 0 13 0 c0 -3 -1.5 -6 -6.5 -12.5 z" class="gm-drop"/>
+    <text x="26" y="${(cy + 34).toFixed(1)}" text-anchor="middle" class="gm-cap">Sandbox</text>
+    <path d="M${gx - 11} ${(cy - 13).toFixed(1)} h22 v10.5 c0 10 -11 15.5 -11 15.5 c0 0 -11 -5.5 -11 -15.5 z" class="gm-shield"/>
+    <path d="M${gx - 4.5} ${(cy - 1).toFixed(1)} l3.4 3.4 l6 -6.6" class="gm-shield-mark"/>
+    <text x="${gx}" y="${(cy + 27).toFixed(1)}" text-anchor="middle" class="gm-cap">Guardrails</text>
+    ${extra ? `<text x="${bx + 12}" y="${(H - 6).toFixed(1)}" class="gm-more">+${extra} more allowed</text>` : ''}
+  </svg>`;
+}

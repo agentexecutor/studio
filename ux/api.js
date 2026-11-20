@@ -173,6 +173,9 @@ const studioApi = {
     } catch (e) { /* the page is going anyway */ }
   },
 
+  /** Whether a credential secret exists and has a key: { exists, hasKey }. Key names only; values stay on the cluster. */
+  credentialStatus: (context, name, key) => studioGet('/api/secrets/credential/status' + studioQuery({ context, name, key })),
+
   /** Runs one of the ax subcommands the server allows. Answers { status, stdout, stderr }. */
   ax: (args, stdin) => studioPost('/api/ax/exec', { program: 'ax', args, stdin: stdin || '' }),
 };

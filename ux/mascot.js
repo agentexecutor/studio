@@ -162,18 +162,6 @@ function axo(state, opts) {
   </svg>`;
 }
 
-/** Map a task's status to Axel's mood. */
-function axoStateFor(t) {
-  if (!t) return 'idle';
-  if (t.status === 'running') return 'working';
-  if (t.status === 'starting') return 'thinking';
-  if (t.status === 'blocked') return 'blocked';
-  if (t.status === 'failed') return 'failed';
-  if (t.status === 'done') return 'done';
-  if (t.status === 'waiting') return t.needs && t.needs.type === 'paused' ? 'sleeping' : 'waiting';
-  return 'idle';
-}
-
 /** Morph an existing <svg class="axo"> in place to a new mood without destroying the DOM node or resetting its float/tail animations. */
 function updateAxoInPlace(svg, state) {
   if (!svg) return;
@@ -268,8 +256,6 @@ const AXO_TRICK_FX = {
   flip: { over: '<g class="tf-happy"><path d="M158 193 Q190 154 221 195" class="axo-ink-arc"/><path d="M316 201 Q348 162 379 203" class="axo-ink-arc"/></g>' },
   nap: { over: '<g class="tf-sleep"><path d="M158 183 Q190 212 221 185" class="axo-ink-arc"/><path d="M316 191 Q348 220 379 193" class="axo-ink-arc"/></g><g class="tf-z"><text x="392" y="84">z</text><text x="418" y="50" class="z2">z</text><text x="448" y="14" class="z3">Z</text></g>' },
 };
-/** True while Axel is mid-wag, mid-trick or has a trick lined up. Background re-renders wait for him. */
-function axoBusy() { return Date.now() < axoStreak.animUntil; }
 /** The person did something else: stop holding back re-renders for Axel. */
 function axoYield() { axoStreak.animUntil = 0; }
 /**
@@ -341,27 +327,3 @@ function axoClearTrick(svg) {
   svg.querySelectorAll('.axo-tfx, .axo-tfx-under').forEach((g) => { g.innerHTML = ''; });
 }
 
-/** Crisp celebratory confetti burst (respects reduced motion). */
-function confetti(x, y, n) {
-  if (reducedMotion()) return;
-  const colors = ['#e4769d', '#eea0bb', '#34d399', '#60a5fa', '#fbbf24', '#f5dce2'];
-  const layer = document.createElement('div');
-  layer.className = 'confetti-layer';
-  layer.setAttribute('aria-hidden', 'true');
-  n = n || 24;
-  for (let i = 0; i < n; i++) {
-    const p = document.createElement('i');
-    const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
-    const v = 85 + Math.random() * 115;
-    p.style.left = x + 'px';
-    p.style.top = y + 'px';
-    p.style.background = colors[i % colors.length];
-    p.style.setProperty('--dx', Math.cos(a) * v + 'px');
-    p.style.setProperty('--dy', Math.sin(a) * v - 75 + 'px');
-    p.style.setProperty('--r', Math.round(Math.random() * 540 - 270) + 'deg');
-    if (i % 3 === 0) p.style.borderRadius = '50%';
-    layer.appendChild(p);
-  }
-  document.body.appendChild(layer);
-  setTimeout(() => layer.remove(), 1400);
-}

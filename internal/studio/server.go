@@ -247,6 +247,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/env/local/delete", s.requireMutatingAuth(s.handleLocalAction("delete")))
 	mux.HandleFunc("/api/env/cancel", s.requireMutatingAuth(s.handleEnvCancel))
 	mux.HandleFunc("/api/secrets/credential", s.requireMutatingAuth(s.handleCreateCredentialSecret))
+	mux.HandleFunc("/api/secrets/credential/status", s.requireSession(s.handleCredentialSecretStatus))
 	mux.HandleFunc("/api/tasks", s.requireSession(s.handleListTasks))
 	mux.HandleFunc("/api/tasks/get", s.requireSession(s.handleGetTask))
 	mux.HandleFunc("/api/gateways/get", s.requireSession(s.handleGetGateway))
@@ -522,7 +523,7 @@ func (s *Server) serveUX() http.Handler {
 
 // handleEnvJS serves /env.js, the script that tells the web UI a Studio
 // server is behind the page. Without it (the copy in the ux directory, sent
-// by a plain web server) the UI runs on demo data.
+// by a plain web server) the UI only says how to start Studio.
 func (s *Server) handleEnvJS(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

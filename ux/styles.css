@@ -13,17 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/* =========================================================================
-   AX Studio — Clear Spring & Moonlit Cenote design system (v4)
-   Google Sans for UI text (Geist as the fallback) + Geist Mono for code,
-   shadow-free architectural hairlines,
-   Xochimilco spring cerulean + Axel gill-rose accents, zero purple in dark.
-   ========================================================================= */
-
-/* Fonts aren't bundled yet. The font stack below names Google Sans and Geist, so a copy installed on this
-   computer is used; otherwise text falls back to the system font, and code to the system monospace font. */
-
 /* ---------- 1. Sanctuary Tokens ---------- */
 :root {
   color-scheme: light;
@@ -45,7 +34,7 @@
   --muted: #3E4F61;
   --faint: #526375;
 
-  /* Primary actions are black ink (v15, by choice). White text, 13:1+. The one definition is .btn.primary in §4. */
+  /* Primary actions are black ink, by choice. White text, 13:1+. The one definition is .btn.primary in §4. */
   --primary: #223142;
   --primary-2: #0B1219;
   --primary-ink: #FFFFFF;
@@ -235,16 +224,13 @@ kbd {
 }
 ::selection { background: var(--key-soft); color: var(--ink); }
 :focus-visible { outline: none; box-shadow: var(--ring) !important; border-radius: var(--r-xs); }
-[tabindex="-1"]:not(.dialog):not(.palette):focus, [tabindex="-1"]:not(.dialog):not(.palette):focus-visible,
-.palette-input input:focus-visible, .quick input:focus-visible,
-.goal textarea:focus-visible, .steer textarea:focus-visible, .term-input:focus-visible { outline: none; box-shadow: none !important; }
-.dialog[tabindex="-1"]:focus, .dialog[tabindex="-1"]:focus-visible,
-.palette[tabindex="-1"]:focus, .palette[tabindex="-1"]:focus-visible { outline: none; box-shadow: var(--float) !important; }
+[tabindex="-1"]:not(.dialog):not(.palette):focus, [tabindex="-1"]:not(.dialog):not(.palette):focus-visible, .palette-input input:focus-visible, .goal textarea:focus-visible, .steer textarea:focus-visible, .term-input:focus-visible { outline: none; box-shadow: none !important; }
+.dialog[tabindex="-1"]:focus, .dialog[tabindex="-1"]:focus-visible, .palette[tabindex="-1"]:focus, .palette[tabindex="-1"]:focus-visible { outline: none; box-shadow: var(--float) !important; }
 [hidden] { display: none !important; }
 .svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .svg.sm { width: 14px; height: 14px; }
 .svg.xs { width: 12px; height: 12px; }
-.svg.lg { width: 20px; height: 20px; }
+
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .skip-link { position: absolute; left: 14px; top: -60px; z-index: 1000; padding: 8px 14px; background: var(--ink); color: var(--bg); border-radius: var(--r-s); transition: top var(--dur-2); }
 .skip-link:focus { top: 12px; }
@@ -363,8 +349,7 @@ html[data-theme="dark"] .nav a .count.attn { color: #1E0B13; background: var(--c
 .health-card.attn .hc-sub { font-weight: 600; }
 .health-card.muted .hc-sub { color: var(--faint); }
 .health-card > .svg.spin { animation: spin 1.3s linear infinite; }
-.heartbeat { width: 46px; height: 18px; margin-left: auto; flex: none; opacity: .85; }
-.heartbeat path { fill: none; stroke: var(--done); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 90; animation: beat 2.6s linear infinite; }
+
 @keyframes beat { from { stroke-dashoffset: 180; } to { stroke-dashoffset: 0; } }
 .avatar {
   width: 24px; height: 24px; border-radius: 50%;
@@ -440,15 +425,13 @@ html[data-theme="dark"] .nav a .count.attn { color: #1E0B13; background: var(--c
   box-shadow: none;
 }
 .card-pad { padding: 18px 20px; }
-.well { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: var(--r-m); }
-.glaze { background: var(--bg-subtle); border: 1px solid var(--line); border-radius: var(--r-l); }
+
 .panel-title {
   display: flex; align-items: center; gap: 7px;
   font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
   color: var(--faint);
 }
 .panel-title .svg { color: var(--muted); }
-.divider { height: 1px; background: var(--line); border: 0; margin: 16px 0; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
@@ -475,7 +458,7 @@ html[data-theme="dark"] .nav a .count.attn { color: #1E0B13; background: var(--c
 .btn.ghost:hover { color: var(--ink); background: var(--surface); }
 .btn.danger { color: var(--fail); border-color: color-mix(in srgb, var(--fail) 30%, var(--line)); }
 .btn.danger:hover { background: var(--fail-soft); }
-.btn.lg { height: 40px; padding: 0 18px; font-size: 13.5px; border-radius: var(--r-m); }
+
 .btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; gap: 5px; border-radius: 7px; }
 .btn.icon { width: 34px; padding: 0; }
 .btn.sm.icon { width: 28px; padding: 0; }
@@ -528,17 +511,13 @@ html[data-theme="dark"] .btn.primary .kbd-hint { background: rgba(8, 13, 19, .1)
 }
 .agent-tile svg { width: 58%; height: 58%; }
 .agent-tile.sm { width: 18px; height: 18px; border-radius: 5px; }
-.agent-tile.lg { width: 38px; height: 38px; border-radius: 9px; }
+
 .agent-tile.claude { --t: #D4714E; }
-.agent-tile.codex { --t: #0F766E; }
-html[data-theme="dark"] .agent-tile.codex { --t: #14B8A6; }
+
 .agent-tile.antigravity { --t: #0284C7; }
-.stack { display: inline-flex; vertical-align: middle; }
-.stack .agent-tile { margin-left: -5px; box-shadow: 0 0 0 2px var(--bg); }
-.stack .agent-tile:first-child { margin-left: 0; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field > label, .field-label { font-size: 13px; font-weight: 550; color: var(--ink); }
+.field > label { font-size: 13px; font-weight: 550; color: var(--ink); }
 .hint { font-size: 12px; color: var(--faint); }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .input, .textarea {
@@ -552,13 +531,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .input::placeholder, .textarea::placeholder { color: var(--faint); opacity: .85; }
 .input:focus, .textarea:focus { outline: none; border-color: var(--key); box-shadow: 0 0 0 3px var(--key-soft); }
 .input.mono { font-family: var(--font-mono); font-size: 12.5px; }
-.input-group { display: flex; gap: 8px; }
-.input-group .input { flex: 1; }
-.field-status { display: flex; align-items: center; gap: 6px; min-height: 18px; font-size: 12.5px; font-weight: 500; }
-.field-status.ok { color: var(--done); }
-.field-status.err { color: var(--fail); }
-.field-status.busy { color: var(--faint); }
-.field-status.busy .svg { animation: spin 1s linear infinite; }
 
 .seg {
   display: inline-flex; gap: 2px; padding: 3px;
@@ -606,8 +578,7 @@ html[data-theme="dark"] .switch input:checked ~ .thumb { background: var(--accen
 .kv.xsmall { font-size: 12px; gap: 5px 12px; }
 .kv dt { color: var(--faint); }
 .kv dd { margin: 0; font-weight: 500; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-.meter { height: 6px; border-radius: var(--r-full); background: var(--surface-2); overflow: hidden; }
-.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--key); transition: width var(--dur-3) var(--ease); }
+
 .cli {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 5px 5px 12px;
@@ -630,28 +601,10 @@ html[data-theme="dark"] .switch input:checked ~ .thumb { background: var(--accen
 .callout strong { color: var(--ink); font-weight: 600; }
 .callout.warn { background: var(--wait-soft); color: var(--ink); border-color: transparent; }
 .callout.warn .svg { color: var(--wait); }
-.skeleton { position: relative; overflow: hidden; background: var(--surface); border-radius: 4px; }
-.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, var(--surface-2), transparent); animation: shimmer 1.4s infinite; }
+
 @keyframes shimmer { to { transform: translateX(100%); } }
 
 .section { margin-top: 28px; }
-.section-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-.section-head h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
-.section-head .count {
-  min-width: 20px; height: 20px; padding: 0 6px;
-  display: inline-grid; place-items: center;
-  font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
-  border-radius: var(--r-full);
-  color: var(--faint); background: var(--surface);
-}
-.section-head .right { margin-left: auto; }
-.section-head .h-icon {
-  width: 24px; height: 24px;
-  display: grid; place-items: center;
-  border-radius: 6px;
-  color: var(--c, var(--muted));
-  background: var(--cs, var(--surface));
-}
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th {
@@ -665,13 +618,5 @@ html[data-theme="dark"] .switch input:checked ~ .thumb { background: var(--accen
 .table td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .scope { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .scope.org { color: var(--faint); }
-.favicon {
-  width: 24px; height: 24px; flex: none;
-  display: inline-grid; place-items: center;
-  border-radius: 6px;
-  font: 600 11px/1 var(--font-sans);
-  color: var(--muted);
-  background: var(--surface);
-  text-transform: uppercase;
-}
+
 .site { display: flex; align-items: center; gap: 10px; }

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /* =========================================================================
    Axel (official AX mascot) — state-reactive animations + confetti
    Coordinates match axel.svg's 550×600 viewBox (transform-box: view-box).
@@ -151,8 +150,6 @@
 
 /* Click poke */
 .axo.axo-poke .axo-root { transform-origin: 275px 520px; animation: axelHop .78s cubic-bezier(.34, 1.36, .5, 1) 1; }
-button.axo-btn { display: inline-flex; padding: 0; border-radius: 50%; cursor: pointer; background: none; }
-button.axo-btn:focus-visible { box-shadow: var(--ring); }
 
 /* Tail wag. The tail is the official art clipped to its outline and pivots at the hip, behind the body.
    Idle: a quick swish rides along with the 3rd and 9th blink of every 10 (blinks are 5.4 s apart), so it
@@ -303,12 +300,7 @@ button.axo-btn:focus-visible { box-shadow: var(--ring); }
 }
 
 /* Confetti burst */
-.confetti-layer { position: fixed; inset: 0; pointer-events: none; z-index: 200; overflow: hidden; }
-.confetti-layer i {
-  position: absolute; width: 8px; height: 5px; border-radius: 2px;
-  transform: translate(-50%, -50%);
-  animation: confettiFly 1.25s cubic-bezier(.2, .7, .3, 1) forwards;
-}
+
 @keyframes confettiFly {
   0% { transform: translate(-50%, -50%) scale(.6) rotate(0); opacity: 1; }
   70% { opacity: 1; }
