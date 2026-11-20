@@ -1637,20 +1637,11 @@ a.byo-card, a.byo-card:hover { color: inherit; text-decoration: none; }
 .where-pills { margin-top: 10px; }
 .ready-list .rt .mono { font-weight: 500; font-size: 12px; }
 
-/* A task's page (live): Details under Activity, the turns of its session, and the dark terminal's input row. */
+/* A task's page (live): Details under Activity, and the turns of its session. */
 .live-details { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .live-turns li { min-width: 0; }
 .live-turns .lt-goal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-turns .r-val .chip { font-weight: 550; }
-.live-terminal .term-body { height: auto; min-height: 240px; max-height: 420px; margin: 0; }
-.live-terminal .term-body .m { color: #8498AD; }
-.live-term-row { padding: 10px 14px; border-top: 1px solid rgba(214, 232, 248, .08); font: 450 12.5px/1.7 var(--font-mono); }
-.live-term-row .p { color: #5CCBF9; }
-.live-term-row .btn { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
-.live-term-row .btn:hover { color: #FFFFFF; background: rgba(214, 232, 248, .14); }
-.live-term-row:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--key) 60%, transparent); border-radius: 0 0 var(--r-l) var(--r-l); }
-.live-term-row .btn:not(.primary):not(.ghost):not(.danger) { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .18); box-shadow: none; }
-.live-term-row .btn:not(.primary):not(.ghost):not(.danger):hover { color: #FFFFFF; background: rgba(214, 232, 248, .16); border-color: rgba(214, 232, 248, .28); }
 
 /* The task's inspector: What it can reach is the map New task showed (the sites its Gateway allows), then one fact per
    line. Where it runs shows the image by its short name; the full address is in its tooltip and its copy button. */
@@ -1873,7 +1864,34 @@ button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
 .live-compact .task-row .t-meta { margin-top: 1px; font-size: 11.5px; }
 .live-compact .live-sec { margin-top: 12px; }
 
-/* The sandbox shell: tabs for several shells, colors programs print, and the keys it knows. */
+/* The Terminal tab: shells drawn by xterm.js, as tabs, in the theme's terminal well. xterm reads its colors from these
+   variables (live.js) and follows the theme when it changes. */
+:root, html[data-theme="dark"] {
+  --term-cursor: #5CCBF9;
+  --term-selection: rgba(92, 203, 249, .30);
+  --term-black: #2A3746;      --term-bright-black: #8498AD;
+  --term-red: #FF8FA6;        --term-bright-red: #FFB3C3;
+  --term-green: #5EE0A6;      --term-bright-green: #8DF0C4;
+  --term-yellow: #F5C26B;     --term-bright-yellow: #FFD991;
+  --term-blue: #8AB4FF;       --term-bright-blue: #B0CCFF;
+  --term-magenta: #E4A3F5;    --term-bright-magenta: #EFC2FA;
+  --term-cyan: #7CC8FF;       --term-bright-cyan: #A6DBFF;
+  --term-white: #DCE6F0;      --term-bright-white: #FFFFFF;
+}
+.live-terminal:focus-within { border-color: color-mix(in srgb, var(--key) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--key) 40%, transparent); }
+.term-screen { height: clamp(300px, 56vh, 640px); padding: 10px 4px 6px 14px; background: var(--term-bg); }
+.term-screen .term-xterm { width: 100%; height: 100%; }
+/* xterm's element has the class "terminal" too: it isn't the app's terminal frame. */
+.term-screen .terminal.xterm { border: 0; border-radius: 0; overflow: visible; background: transparent; }
+.term-screen .xterm-viewport { scrollbar-width: thin; scrollbar-color: rgba(214, 232, 248, .22) transparent; }
+.term-screen.empty { display: grid; place-items: center; height: auto; min-height: 240px; padding: 24px; }
+.term-empty { display: grid; justify-items: center; gap: 12px; color: #A9BACB; font-size: 13px; }
+.term-empty .btn:not(.primary):not(.ghost):not(.danger) { color: #DCE6F0; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .18); box-shadow: none; }
+.term-empty .btn:not(.primary):not(.ghost):not(.danger):hover { color: #FFFFFF; background: rgba(214, 232, 248, .16); border-color: rgba(214, 232, 248, .28); }
+.term-why p { margin: 0; }
+#live-term-err .callout { margin-bottom: 10px; }
+.live-terminal .term-body { height: auto; min-height: 240px; max-height: 420px; margin: 0; }
+.live-terminal .term-body .m { color: #8498AD; }
 .term-tabs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; }
 .term-tabs .tt-item { display: inline-flex; align-items: center; border-radius: 6px; }
 .term-tabs .tt-item.on { background: rgba(214, 232, 248, .10); }
@@ -1882,10 +1900,11 @@ button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
 .term-tabs button:hover { color: #FFFFFF; }
 .term-tabs button:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--key) 70%, transparent); outline: none; }
 .term-tabs .tt-x { padding: 0 6px; }
-.term-tabs .tt-new { color: #7CC8FF; }
+.term-tabs .tt-new { color: #7CC8FF; padding: 0 7px; }
 .term-tabs .tt-dot { width: 6px; height: 6px; border-radius: 50%; background: #5EE0A6; }
-.term-keys { padding: 0 14px 10px; font-size: 11px; color: #8498AD; }
-.term-keys kbd { font-size: 10.5px; }
+.term-keys { padding: 6px 14px 8px; font-size: 11px; color: #8498AD; border-top: 1px solid rgba(214, 232, 248, .06); }
+.term-keys kbd { font-size: 10.5px; color: #C9D6E3; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
+/* Without xterm.js, what a shell printed shows as text, with its colors. */
 .live-terminal .term-body .a-bold { font-weight: 700; }
 .live-terminal .term-body .a-k { color: #8498AD; }
 .live-terminal .term-body .a-r { color: #FF9DB0; }
@@ -1895,7 +1914,6 @@ button.health-card:focus-visible { box-shadow: var(--ring); outline: none; }
 .live-terminal .term-body .a-m { color: #E4A3F5; }
 .live-terminal .term-body .a-c { color: #7CC8FF; }
 .live-terminal .term-body .a-w { color: #EEF4F9; }
-.term-keys kbd { color: #C9D6E3; background: rgba(214, 232, 248, .08); border-color: rgba(214, 232, 248, .16); box-shadow: none; }
 
 /* ---------- Polished Setup & Accordion cards ---------- */
 .setup-hero { margin-bottom: 18px; }

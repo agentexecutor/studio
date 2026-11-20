@@ -16,6 +16,7 @@ package kube
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -43,5 +44,37 @@ func TestValidateName(t *testing.T) {
 		if err := ValidateName(invalid); err == nil {
 			t.Errorf("ValidateName(%q) expected error, got nil", invalid)
 		}
+	}
+}
+
+func TestExecInTaskSandboxPositionalArgs(t *testing.T) {
+	rec := &recordingRunner{}
+	_, _, _, err := ExecInTaskSandbox(
+		context.Background(),
+		rec,
+		"/usr/local/bin/ax",
+		"default",
+		"demo-task",
+		"local",
+		"ax-system",
+		[]string{"git", "diff", "--no-index", "--", "/dev/null", "notes with space.txt"},
+		"/workspace/repo",
+	)
+	if err != nil {
+		t.Fatalf("ExecInTaskSandbox unexpected error: %v", err)
+	}
+	if len(rec.specs) != 1 {
+		t.Fatalf("expected 1 recorded command, got %d", len(rec.specs))
+	}
+	wantArgs := []string{
+		"--context", "local",
+		"-n", "ax-system",
+		"-a", "default",
+		"ssh", "demo-task", "--",
+		"/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "sh", "/workspace/repo",
+		"git", "diff", "--no-index", "--", "/dev/null", "notes with space.txt",
+	}
+	if !reflect.DeepEqual(rec.specs[0].Args, wantArgs) {
+		t.Fatalf("unexpected args:\ngot:  %#v\nwant: %#v", rec.specs[0].Args, wantArgs)
 	}
 }
