@@ -19,8 +19,9 @@ package ux
 
 import "embed"
 
-// FS holds the UI: the page, its scripts and stylesheets, and its images.
-// The tests in tests/ and the README are not part of it.
+// FS holds the UI: the page, its scripts and stylesheets, its images, and the
+// third-party code it uses unchanged (vendor/), with that code's licenses.
+// The tests in tests/ and the READMEs are not part of it.
 //
-//go:embed index.html *.js *.css assets
+//go:embed index.html *.js *.css assets vendor/xterm/*.js vendor/xterm/*.css vendor/xterm/LICENSE-*
 var FS embed.FS

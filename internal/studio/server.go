@@ -63,6 +63,7 @@ type Options struct {
 	UXFS          fs.FS
 	Runner        kube.Runner
 	ResolveServer ServerResolver
+	GuestExec     GuestExecFunc
 	OnListening   func(boundURL string)
 	OnShutdown    func()
 }
@@ -82,6 +83,7 @@ type Server struct {
 	uxFS           fs.FS
 	runner         kube.Runner
 	resolveServer  ServerResolver
+	guestExec      GuestExecFunc
 	onListening    func(string)
 	onShutdown     func()
 	hub            *Hub
@@ -99,8 +101,11 @@ type Server struct {
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 
+	// sessions are the shells open in task sandboxes (terminal.go), by id.
+	// termWG counts their goroutines, so shutdown can wait for them.
 	sessMu   sync.Mutex
-	sessions map[string]*liveSession
+	sessions map[string]*termSession
+	termWG   sync.WaitGroup
 
 	// dialMu guards dialLocks, which holds one lock per kube context so that
 	// only one caller at a time finds or starts the tunnel to its ax-server.
@@ -152,6 +157,15 @@ func NewServer(opts Options) (*Server, error) {
 		resolver = axclient.ServerURL
 	}
 
+	guestExec := opts.GuestExec
+	if guestExec == nil {
+		guestExec = func(ctx context.Context, atespace, taskName, kubeContext, axNamespace string, command []string, cwd string) (string, string, int, error) {
+			execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			return kube.ExecInTaskSandbox(execCtx, runner, axBin, atespace, taskName, kubeContext, axNamespace, command, cwd)
+		}
+	}
+
 	sessTok, err := generateSecretHex(32)
 	if err != nil {
 		return nil, fmt.Errorf("generating session secret: %w", err)
@@ -176,6 +190,7 @@ func NewServer(opts Options) (*Server, error) {
 		uxFS:           uxFS,
 		runner:         runner,
 		resolveServer:  resolver,
+		guestExec:      guestExec,
 		onListening:    opts.OnListening,
 		onShutdown:     opts.OnShutdown,
 		hub:            NewHub(),
@@ -186,7 +201,7 @@ func NewServer(opts Options) (*Server, error) {
 		rateLast:       time.Now(),
 		shutdownCtx:    shutCtx,
 		shutdownCancel: shutCancel,
-		sessions:       make(map[string]*liveSession),
+		sessions:       make(map[string]*termSession),
 		dialLocks:      make(map[string]*sync.Mutex),
 	}, nil
 }
@@ -247,8 +262,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ax/exec", s.requireMutatingAuth(s.handleAXExec))
 	mux.HandleFunc("/api/sessions/start", s.requireMutatingAuth(s.handleSessionStart))
 	mux.HandleFunc("/api/sessions/write", s.requireMutatingAuth(s.handleSessionWrite))
-	mux.HandleFunc("/api/sessions/interrupt", s.requireMutatingAuth(s.handleSessionInterrupt))
-	mux.HandleFunc("/api/sessions/eof", s.requireMutatingAuth(s.handleSessionEOF))
+	mux.HandleFunc("/api/sessions/resize", s.requireMutatingAuth(s.handleSessionResize))
 	mux.HandleFunc("/api/sessions/close", s.requireMutatingAuth(s.handleSessionClose))
 	// The web UI is served at the root.
 	mux.HandleFunc("/env.js", s.handleEnvJS)
@@ -337,18 +351,6 @@ func (s *Server) gracefulCleanup() {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-	}
-}
-
-func (s *Server) closeAllSessions() {
-	s.sessMu.Lock()
-	defer s.sessMu.Unlock()
-	for id, sess := range s.sessions {
-		_ = sess.stdin.Close()
-		if sess.cmd.Process != nil {
-			_ = sess.cmd.Process.Kill()
-		}
-		delete(s.sessions, id)
 	}
 }
 

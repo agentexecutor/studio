@@ -159,12 +159,19 @@ const studioApi = {
   /** verb is suspend, resume or delete. */
   taskAction: (verb, context, atespace, name) => studioPost(`/api/tasks/${verb}`, { context, atespace, name }),
 
-  /** Interactive ax ssh terminal sessions. Output arrives as "sessionData" and "sessionExit" events. */
-  sessionStart: (id, args) => studioPost('/api/sessions/start', { id, args }),
-  sessionWrite: (id, data) => studioPost('/api/sessions/write', { id, data }),
-  sessionInterrupt: (id) => studioPost('/api/sessions/interrupt', { id }),
-  sessionEOF: (id) => studioPost('/api/sessions/eof', { id }),
+  /** Shells in a task's sandbox (ax ssh, on a terminal). What a shell prints arrives as "sessionData" events, its data
+      base64 of the raw bytes, and its end as "sessionExit". size is { cols, rows }, or null for the server's default.
+      data is what was typed, as it is; binary says each character is one byte (some mouse reports). */
+  sessionStart: (id, args, size) => studioPost('/api/sessions/start', Object.assign({ id, args }, size ? { cols: size.cols, rows: size.rows } : {})),
+  sessionWrite: (id, data, binary) => studioPost('/api/sessions/write', binary ? { id, data, binary: true } : { id, data }),
+  sessionResize: (id, cols, rows) => studioPost('/api/sessions/resize', { id, cols, rows }),
   sessionClose: (id) => studioPost('/api/sessions/close', { id }),
+  /** Closes a shell as the page goes away: the request outlives the page. */
+  sessionCloseOnLeave: (id) => {
+    try {
+      fetch('/api/sessions/close', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-AX-CSRF-Token': STUDIO.token }, body: JSON.stringify({ id }) }).catch(() => {});
+    } catch (e) { /* the page is going anyway */ }
+  },
 
   /** Runs one of the ax subcommands the server allows. Answers { status, stdout, stderr }. */
   ax: (args, stdin) => studioPost('/api/ax/exec', { program: 'ax', args, stdin: stdin || '' }),

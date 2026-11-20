@@ -360,10 +360,6 @@ const LIVE_ACTIONS = {
   'live-palette': () => { if (typeof openPalette === 'function') openPalette(); },
   'live-shortcuts': () => { if (typeof openShortcuts === 'function') openShortcuts(); },
   'live-term-open': (el) => liveTermOpen(el.dataset.task),
-  'live-term-close': (el) => liveTermClose(el.dataset.task),
-  'live-term-ctrlc': (el) => liveTermInterrupt(el.dataset.task),
-  'live-term-clear': (el) => { const tm = liveTermOf(el.dataset.task); tm.out = ''; liveTermPaint(el.dataset.task); },
-  'live-term-send': (el) => liveTermSend(el.dataset.task),
   'live-term-add': (el) => liveTermAdd(el.dataset.task),
   'live-term-pick': (el) => liveTermPick(el.dataset.task, +el.dataset.i),
   'live-term-drop': (el) => liveTermDrop(el.dataset.task, +el.dataset.i),
@@ -371,40 +367,92 @@ const LIVE_ACTIONS = {
   'live-home-filter': (el) => { liveTasksFilter().status = el.dataset.v || 'all'; liveTasksFilter().q = ''; location.hash = '#/tasks'; },
 };
 
-/* ---------- Interactive sandbox terminal (ax ssh) ----------
-   A shell in the sandbox: `ax ssh` runs /bin/sh in it, without a terminal of its own (AX's guest exec has none), so
-   this is a line at a time rather than a full terminal: type a command, Run (or Enter) sends it. Each task can have
-   several shells at once, as tabs. Up and Down go through the commands you ran, Ctrl-C interrupts, Ctrl-D ends the
-   shell's input and Ctrl-L clears. Colors programs print are shown. */
-LIVE.terms = {};               // task name -> { list: [shell], active, history: [commands], hpos }
+/* ---------- The Terminal: shells in a task's sandbox (ax ssh) ----------
+   Each shell is `ax ssh <task>`, run by the Studio server under a pseudo-terminal, with a terminal of its own inside
+   the sandbox, drawn here by xterm.js (vendor/xterm). Keys go to the server as they are typed (a few milliseconds of
+   them per request, one request at a time, in order), and what the shell prints comes back as "sessionData" events
+   (base64 of the raw bytes). Ctrl-C, Ctrl-D, Tab, the arrow keys and full-screen programs work as in any terminal.
+   A task can have a few shells at once, as tabs. They stay connected while you look at other pages: each keeps its
+   xterm, scrollback and all, and the Terminal tab puts it back on screen. Without xterm.js (the smoke tests run
+   without it) a shell shows what it printed as text, read-only. */
+LIVE.terms = {};               // cluster, atespace and task -> { list: [shell], active, seq, opened }
 const LIVE_TERM_MAX = 4;       // shells per task
+const LIVE_TERM_BATCH_MS = 12; // keys typed within this long go in one request
+const LIVE_TERM_CHUNK = 65536; // the most text one request carries (a long paste goes in several)
+const LIVE_TERM_RESIZE_MS = 150;
+const LIVE_TERM_BACKLOG = 1 << 20; // what a shell may print before its xterm is made
+function liveTermXterm() { return typeof Terminal === 'function'; }
 function liveTermSet(name) {
-  return (LIVE.terms[name] = LIVE.terms[name] || { list: [], active: 0, history: [], hpos: -1, seq: 0 });
+  const k = `${LIVE.context}\n${LIVE.atespace}\n${name}`;
+  return (LIVE.terms[k] = LIVE.terms[k] || { list: [], active: 0, seq: 0, opened: false });
 }
-/** The shell on screen for a task (one is made the first time). */
-function liveTermOf(name) {
+/** The shell on screen for a task, or null when it has none. */
+function liveTermActive(name) {
   const set = liveTermSet(name);
-  if (!set.list.length) set.list.push(liveTermNew(name, set));
-  return set.list[Math.min(set.active, set.list.length - 1)];
+  return set.list[Math.min(set.active, set.list.length - 1)] || null;
 }
-function liveTermNew(name, set) {
+function liveTermNewId() {
+  const a = new Uint8Array(8);
+  crypto.getRandomValues(a);
+  return 'sh-' + Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+function liveTermNew(name) {
+  const set = liveTermSet(name);
   set.seq += 1;
-  return { id: `term-${name}-${set.seq}`, label: `Shell ${set.seq}`, status: 'idle', out: '', error: '', exitCode: null };
+  /* status: idle (not started), starting, open, or closed (it ended, or couldn't start). heard: it printed something. */
+  return { id: '', name, label: `Shell ${set.seq}`, status: 'idle', error: '', exitCode: null, heard: false, lastSeq: 0,
+    term: null, fit: null, host: null, backlog: [], backlogSize: 0, text: '', dec: null, carry: null, queue: [], sending: false,
+    timer: 0, sent: null, sizeTimer: 0 };
 }
 function liveTermById(id) {
-  for (const name of Object.keys(LIVE.terms)) {
-    const tm = LIVE.terms[name].list.find((x) => x.id === id);
-    if (tm) return { name, tm };
+  if (!id) return null;
+  for (const k of Object.keys(LIVE.terms)) {
+    const sh = LIVE.terms[k].list.find((x) => x.id === id);
+    if (sh) return sh;
   }
   return null;
 }
-/* SGR colors in what a program prints, as spans; every other escape sequence is dropped. */
+
+/* What the shell prints arrives as base64. */
+function liveB64(s) {
+  s = String(s || '');
+  if (typeof atob === 'function') { const bin = atob(s); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const out = [];
+  let acc = 0, bits = 0;
+  for (const ch of s) {
+    const v = abc.indexOf(ch);
+    if (v < 0) continue;
+    acc = ((acc << 6) | v) & 0xffffff; bits += 6;
+    if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); }
+  }
+  return Uint8Array.from(out);
+}
+/** Bytes as text, for the read-only view. A character split between two events comes out whole. */
+function liveTermText(sh, bytes) {
+  if (typeof TextDecoder === 'function') { sh.dec = sh.dec || new TextDecoder('utf-8'); return sh.dec.decode(bytes, { stream: true }); }
+  /* Without TextDecoder: keep the bytes of a character that isn't complete yet for the next event. */
+  const all = sh.carry && sh.carry.length ? Uint8Array.from([...sh.carry, ...bytes]) : bytes;
+  let end = all.length;
+  for (let k = 1; k <= Math.min(3, all.length); k++) {
+    const b = all[all.length - k];
+    if ((b & 0xc0) === 0x80) continue;
+    const need = b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+    if (need > k) end = all.length - k;
+    break;
+  }
+  sh.carry = all.slice(end);
+  let bin = '';
+  for (let i = 0; i < end; i++) bin += String.fromCharCode(all[i]);
+  try { return decodeURIComponent(escape(bin)); } catch (e) { return bin; }
+}
+/* SGR colors in what a program prints, as spans; every other escape sequence is dropped. For the read-only view. */
 const LIVE_ANSI_FG = { 30: 'k', 31: 'r', 32: 'g', 33: 'y', 34: 'bl', 35: 'm', 36: 'c', 37: 'w', 90: 'k', 91: 'r', 92: 'g', 93: 'y', 94: 'bl', 95: 'm', 96: 'c', 97: 'w' };
 function liveAnsiHTML(text) {
   let out = '', open = false, bold = false, fg = '';
   const close = () => { if (open) { out += '</span>'; open = false; } };
   const start = () => { close(); if (bold || fg) { out += `<span class="${[bold ? 'a-bold' : '', fg ? `a-${fg}` : ''].filter(Boolean).join(' ')}">`; open = true; } };
-  const re = /\x1b\[([0-9;?]*)([A-Za-z])|\x1b[()][A-Za-z0-9]|\x1b[=>]|\r(?!\n)/g;
+  const re = /\x1b\[([0-9;?]*)([A-Za-z])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>]|\r(?!\n)/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
     out += esc(text.slice(last, m.index));
@@ -421,151 +469,364 @@ function liveAnsiHTML(text) {
   close();
   return out;
 }
-function liveTermPaint(name) {
-  const box = $('#live-term');
-  if (!box || !box.dataset || box.dataset.task !== name) return;
-  const row = LIVE.tasks.find((t) => t.name === name);
-  box.innerHTML = liveTermInnerHTML(name, row ? row.state : 'Working');
-  const out = $('#live-term-out', box);
-  if (out) out.scrollTop = out.scrollHeight;
+
+/* ---------- xterm.js ---------- */
+const LIVE_TERM_COLORS = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+/** The terminal's colors and font, from the theme's CSS variables (styles.css and polish.css). */
+function liveTermLook() {
+  const cs = typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement) : null;
+  const v = (k) => ((cs && cs.getPropertyValue(k)) || '').trim();
+  const theme = {
+    background: v('--term-bg') || '#090E14', foreground: v('--term-ink') || '#E6EEF6',
+    cursor: v('--term-cursor') || '#5CCBF9', cursorAccent: v('--term-bg') || '#090E14',
+    selectionBackground: v('--term-selection') || 'rgba(92, 203, 249, .3)',
+  };
+  LIVE_TERM_COLORS.forEach((c) => {
+    const bright = 'bright' + c.charAt(0).toUpperCase() + c.slice(1);
+    if (v(`--term-${c}`)) theme[c] = v(`--term-${c}`);
+    if (v(`--term-bright-${c}`)) theme[bright] = v(`--term-bright-${c}`);
+  });
+  return { theme, font: v('--font-mono') || 'ui-monospace, Menlo, Consolas, monospace' };
 }
-function liveOnSessionData(p) {
-  if (!p || !p.id) return;
-  const hit = liveTermById(p.id);
-  if (!hit) return;
-  const { name, tm } = hit;
-  tm.out += String(p.data || '');
-  if (tm.out.length > 32000) tm.out = tm.out.slice(-32000);
-  const out = $('#live-term-out');
-  const shown = out && $('#live-term') && $('#live-term').dataset.task === name && liveTermOf(name) === tm;
-  if (shown) {
-    out.innerHTML = liveAnsiHTML(tm.out);
-    out.scrollTop = out.scrollHeight;
-  } else {
-    liveTermPaint(name);
+/** Makes the shell's xterm inside el, once. Later its element moves to wherever the Terminal tab shows it. */
+function liveTermMake(sh, el) {
+  const look = liveTermLook();
+  const term = new Terminal({ fontFamily: look.font, fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 5000, theme: look.theme });
+  const fit = typeof FitAddon !== 'undefined' && FitAddon.FitAddon ? new FitAddon.FitAddon() : null;
+  if (fit) term.loadAddon(fit);
+  const host = document.createElement('div');
+  host.className = 'term-xterm';
+  el.appendChild(host);
+  term.open(host);
+  sh.term = term; sh.fit = fit; sh.host = host;
+  term.onData((d) => liveTermInput(sh, d));
+  term.onBinary((d) => liveTermInput(sh, d, true));
+  term.onResize(() => liveTermSizeLater(sh));
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown' || e.altKey || e.metaKey) return true;
+    /* Shift-Esc leaves the terminal, which keeps Tab for the shell. */
+    if (e.key === 'Escape' && e.shiftKey && !e.ctrlKey) {
+      e.preventDefault();
+      const tab = $('#live-term-tabs [aria-selected="true"]');
+      if (tab) tab.focus(); else term.blur();
+      return false;
+    }
+    /* With text selected, Ctrl-C (or Ctrl-Shift-C) copies it; with nothing selected, Ctrl-C is an interrupt. */
+    if (e.ctrlKey && String(e.key).toLowerCase() === 'c' && term.hasSelection()) {
+      if (e.shiftKey && navigator.clipboard) { e.preventDefault(); navigator.clipboard.writeText(term.getSelection()).catch(() => {}); }
+      return false; // a plain Ctrl-C goes to the browser, which copies the selection
+    }
+    return true;
+  });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => liveTermFit(sh)).observe(host);
+  /* What it printed before it had an xterm. */
+  sh.backlog.forEach((b) => term.write(b));
+  sh.backlog = []; sh.backlogSize = 0;
+  return term;
+}
+function liveTermFit(sh) {
+  if (!sh.fit || !sh.host || !sh.host.isConnected || !sh.host.clientWidth || !sh.host.clientHeight) return;
+  try { sh.fit.fit(); } catch (e) { /* not measurable yet */ }
+}
+/** The size to start a shell with, once its xterm is on screen. */
+function liveTermSizeOf(sh) {
+  return sh.term && sh.term.cols && sh.term.rows ? { cols: sh.term.cols, rows: sh.term.rows } : null;
+}
+/** Tells the server the shell's new size, once resizing settles. */
+function liveTermSizeLater(sh) {
+  clearTimeout(sh.sizeTimer);
+  sh.sizeTimer = setTimeout(() => {
+    const size = liveTermSizeOf(sh);
+    if (!size || sh.status !== 'open' || (sh.sent && sh.sent.cols === size.cols && sh.sent.rows === size.rows)) return;
+    sh.sent = size;
+    studioApi.sessionResize(sh.id, size.cols, size.rows).catch(() => { sh.sent = null; });
+  }, LIVE_TERM_RESIZE_MS);
+}
+/** What the shell printed, into its xterm, or kept until it has one. */
+function liveTermWrite(sh, data) {
+  if (sh.term) { sh.term.write(data); return; }
+  if (liveTermXterm()) {
+    sh.backlog.push(data);
+    sh.backlogSize += data.length;
+    while (sh.backlogSize > LIVE_TERM_BACKLOG && sh.backlog.length > 1) sh.backlogSize -= sh.backlog.shift().length;
+    return;
   }
+  sh.text += typeof data === 'string' ? data : liveTermText(sh, data);
+  if (sh.text.length > 64000) sh.text = sh.text.slice(-64000);
+  const out = $('#live-term-out');
+  if (out && out.dataset && out.dataset.shell === sh.id) out.innerHTML = liveAnsiHTML(sh.text);
 }
-function liveOnSessionExit(p) {
-  if (!p || !p.id) return;
-  const hit = liveTermById(p.id);
-  if (!hit) return;
-  hit.tm.status = 'closed';
-  hit.tm.exitCode = typeof p.status === 'number' ? p.status : 0;
-  liveTermPaint(hit.name);
+/** A line from Studio in the terminal, dimmed, such as "The shell ended." */
+function liveTermNote(sh, text) { liveTermWrite(sh, `\r\n\x1b[2m${text}\x1b[0m\r\n`); }
+/** Puts the task's shell on screen: makes its xterm the first time, or moves it back into the Terminal tab. */
+function liveTermMount(name) {
+  const screen = $('#live-term-screen');
+  const sh = liveTermActive(name);
+  const refocus = LIVE.termRefocus;
+  LIVE.termRefocus = false;
+  if (!screen || !sh || !liveTermXterm() || !screen.dataset || screen.dataset.task !== name || !document.contains(screen)) return;
+  if (!sh.term) liveTermMake(sh, screen);
+  else if (sh.host.parentNode !== screen) { screen.textContent = ''; screen.appendChild(sh.host); }
+  liveTermFit(sh);
+  sh.term.refresh(0, sh.term.rows - 1);
+  if (refocus) sh.term.focus();
 }
-async function liveTermOpen(name) {
-  if (!name) return;
-  const tm = liveTermOf(name);
-  if (tm.status === 'starting' || tm.status === 'open') return;
-  tm.status = 'starting'; tm.error = ''; tm.exitCode = null;
+function liveTermFocus(name) {
+  const sh = liveTermActive(name);
+  if (sh && sh.term) sh.term.focus();
+}
+function liveTermDispose(sh) {
+  clearTimeout(sh.timer); clearTimeout(sh.sizeTimer);
+  if (sh.term) { try { sh.term.dispose(); } catch (e) { /* ignore */ } }
+  if (sh.host && sh.host.parentNode) sh.host.parentNode.removeChild(sh.host);
+  sh.term = null; sh.fit = null; sh.host = null; sh.backlog = [];
+}
+/* The terminals follow the light and dark themes. */
+if (LIVE.on && typeof MutationObserver === 'function' && document.documentElement) {
+  new MutationObserver(() => {
+    const look = liveTermLook();
+    Object.keys(LIVE.terms).forEach((k) => LIVE.terms[k].list.forEach((sh) => { if (sh.term) sh.term.options.theme = look.theme; }));
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+/* Shells belong to this page: when it goes (closed, reloaded), so do they, rather than run on with no one to see them. */
+if (LIVE.on) {
+  window.addEventListener('pagehide', () => {
+    Object.keys(LIVE.terms).forEach((k) => LIVE.terms[k].list.forEach((sh) => {
+      if (sh.status !== 'open' && sh.status !== 'starting') return;
+      studioApi.sessionCloseOnLeave(sh.id);
+      sh.status = 'closed';
+      liveTermNote(sh, 'The shell ended when you left the page.');
+    }));
+  });
+}
+
+/* ---------- Talking to the server ---------- */
+/** Starts the shell's ax ssh, sized to its xterm when it has one. */
+async function liveTermStart(name, sh) {
+  if (sh.status === 'starting' || sh.status === 'open') return;
+  if (sh.status === 'closed') liveTermNote(sh, 'Opening the shell again…');
+  Object.assign(sh, { id: liveTermNewId(), status: 'starting', error: '', exitCode: null, heard: false, lastSeq: 0, queue: [], sent: null });
   liveTermPaint(name);
+  const size = liveTermSizeOf(sh);
+  sh.sent = size;
   const args = (LIVE.context ? ['--context', LIVE.context] : []).concat(['-a', LIVE.atespace, 'ssh', name]);
   try {
-    await studioApi.sessionStart(tm.id, args);
-    tm.status = 'open';
-    if (!tm.out) tm.out = `$ ${liveCmd(['ssh', name])}\n`;
-    liveTermPaint(name);
-    const inp = $('#live-term-in'); if (inp) inp.focus({ preventScroll: true });
+    await studioApi.sessionStart(sh.id, args, size);
+    /* It may have ended already: ax couldn't connect, say. */
+    if (sh.status === 'starting') { sh.status = 'open'; liveTermFlush(sh); liveTermSizeLater(sh); }
   } catch (e) {
-    tm.status = 'idle'; tm.error = e.message;
-    liveTermPaint(name);
+    if (sh.status === 'starting') { sh.status = 'closed'; sh.error = e.message; }
   }
+  liveTermPaint(name);
+}
+/** Keys for the shell. They wait a moment for the next ones, then go in one request. */
+function liveTermInput(sh, data, binary) {
+  if (!sh || !data || (sh.status !== 'open' && sh.status !== 'starting')) return;
+  const last = sh.queue[sh.queue.length - 1];
+  if (last && !last.binary && !binary) last.data += data;
+  else sh.queue.push({ data, binary: !!binary });
+  if (sh.status === 'open' && !sh.timer && !sh.sending) sh.timer = setTimeout(() => { sh.timer = 0; liveTermFlush(sh); }, LIVE_TERM_BATCH_MS);
+}
+/** Sends the keys waiting, one request at a time, so they arrive in order. */
+async function liveTermFlush(sh) {
+  if (!sh || sh.sending || sh.status !== 'open') return;
+  sh.sending = true;
+  try {
+    while (sh.queue.length && sh.status === 'open') {
+      const item = sh.queue[0];
+      let data = item.data;
+      if (data.length > LIVE_TERM_CHUNK) {
+        let cut = LIVE_TERM_CHUNK;
+        const c = data.charCodeAt(cut);
+        if (c >= 0xdc00 && c <= 0xdfff) cut -= 1; // never between the two halves of one character
+        data = item.data.slice(0, cut);
+        item.data = item.data.slice(cut);
+      } else sh.queue.shift();
+      await studioApi.sessionWrite(sh.id, data, item.binary);
+    }
+  } catch (e) {
+    sh.queue = [];
+    /* A shell that is gone says so with its exit; anything else is worth showing. */
+    if (sh.status === 'open' && e.status !== 404 && e.status !== 409) { sh.error = e.message; liveTermPaint(sh.name); }
+  }
+  sh.sending = false;
+}
+function liveOnSessionData(p) {
+  const sh = p && liveTermById(p.id);
+  if (!sh) return;
+  if (p.seq && sh.lastSeq && p.seq > sh.lastSeq + 1) liveTermNote(sh, 'Some output was skipped.');
+  if (p.seq) sh.lastSeq = p.seq;
+  liveTermWrite(sh, liveB64(p.data));
+  if (!sh.heard) { sh.heard = true; liveTermPaint(sh.name); }
+}
+function liveOnSessionExit(p) {
+  const sh = p && liveTermById(p.id);
+  if (!sh || sh.status === 'closed') return;
+  sh.status = 'closed';
+  sh.exitCode = typeof p.status === 'number' ? p.status : 0;
+  liveTermNote(sh, sh.exitCode ? `The shell ended (exit ${sh.exitCode}).` : 'The shell ended.');
+  liveTermPaint(sh.name);
+}
+
+/* ---------- Opening, switching and closing shells ---------- */
+/** Makes sure the task has a shell open: the one on screen, again if it ended, or a new one. */
+function liveTermOpen(name) {
+  if (!name) return;
+  const sh = liveTermActive(name);
+  if (!sh) { liveTermAdd(name); return; }
+  liveTermSet(name).opened = true;
+  if (sh.status === 'closed' || sh.status === 'idle') liveTermStart(name, sh);
+  liveTermFocus(name);
 }
 /** Another shell in the same sandbox, next to the ones open. */
-function liveTermAdd(name) {
+function liveTermAdd(name, quiet) {
   const set = liveTermSet(name);
   if (set.list.length >= LIVE_TERM_MAX) return;
-  set.list.push(liveTermNew(name, set));
+  set.opened = true;
+  const sh = liveTermNew(name);
+  set.list.push(sh);
   set.active = set.list.length - 1;
-  liveTermOpen(name);
+  liveTermPaint(name);
+  liveTermStart(name, sh);
+  if (!quiet) liveTermFocus(name);
 }
 function liveTermPick(name, idx) {
   const set = liveTermSet(name);
   if (!set.list[idx]) return;
   set.active = idx;
   liveTermPaint(name);
-  const inp = $('#live-term-in'); if (inp) inp.focus({ preventScroll: true });
+  /* A click on a shell's tab is for typing in it. (Arrow keys on the tabs keep focus on them.) */
+  if (!document.activeElement || document.activeElement === document.body) liveTermFocus(name);
 }
-/** Ends a shell and takes its tab away (the last one stays, closed). */
+/** Ends a shell and takes its tab away. */
 async function liveTermDrop(name, idx) {
   const set = liveTermSet(name);
-  const tm = set.list[idx];
-  if (!tm) return;
-  if (tm.status === 'open' || tm.status === 'starting') { try { await studioApi.sessionClose(tm.id); } catch (e) { /* ignore */ } }
-  if (set.list.length > 1) { set.list.splice(idx, 1); set.active = Math.min(set.active, set.list.length - 1); } else tm.status = 'closed';
+  const sh = set.list[idx];
+  if (!sh) return;
+  set.list.splice(idx, 1);
+  if (set.active > idx || set.active >= set.list.length) set.active = Math.max(0, set.active - 1);
+  const live = sh.status === 'open' || sh.status === 'starting';
+  sh.status = 'closed';
+  liveTermDispose(sh);
   liveTermPaint(name);
+  if (set.list.length) liveTermFocus(name);
+  else { const open = $('#live-term-open'); if (open && open.focus) open.focus(); }
+  if (live) { try { await studioApi.sessionClose(sh.id); } catch (e) { /* it ends when Studio does, too */ } }
 }
-async function liveTermSend(name) {
-  const tm = liveTermOf(name);
+/** The Terminal tab is on screen: the first time, a task that can have a shell gets one; then its shell goes back on. */
+function liveTermShown(name, canShell) {
   const set = liveTermSet(name);
-  const inp = $('#live-term-in');
-  if (!inp || tm.status !== 'open') return;
-  const cmd = inp.value;
-  inp.value = '';
-  if (cmd.trim() && set.history[set.history.length - 1] !== cmd) set.history.push(cmd);
-  if (set.history.length > 100) set.history.shift();
-  set.hpos = -1;
-  tm.out += `$ ${cmd}\n`;
-  const out = $('#live-term-out');
-  if (out) { out.innerHTML = liveAnsiHTML(tm.out); out.scrollTop = out.scrollHeight; }
-  try {
-    await studioApi.sessionWrite(tm.id, cmd + '\n');
-  } catch (e) {
-    tm.error = e.message;
-    liveTermPaint(name);
+  if (canShell && !set.opened && !set.list.length) { liveTermAdd(name, true); return; }
+  liveTermMount(name);
+}
+
+/* ---------- The Terminal tab ---------- */
+/** Why the task can't have a shell now, or '' when it can. */
+function liveTermWhyNot(t, stateName) {
+  if (!t.debug) return 'This task has no shell. A shell needs debug on when the task starts.';
+  if (stateName === 'Working') return '';
+  if (stateName === 'Suspended' || stateName === 'Suspending') return 'Resume the task to open a shell.';
+  if (stateName === 'Queued') return 'The task is starting. A shell can open once it runs.';
+  return 'A shell can open only while the task is running.';
+}
+function liveTermBarHTML(name, sh, canShell) {
+  if (!sh) return '<span class="lb-text">A shell inside the task\'s sandbox.</span>';
+  const chip = sh.status === 'open' && sh.heard ? '<span class="chip running"><i class="pulse-dot"></i>Connected</span>'
+    : sh.status === 'open' || sh.status === 'starting' ? `<span class="chip starting">${icon('loader')}Connecting…</span>`
+      : '<span class="chip paused">Ended</span>';
+  const again = sh.status === 'closed' && canShell ? `<button type="button" class="btn sm" data-action="live-term-open" data-task="${esc(name)}">${icon('refresh', 'sm')}Open the shell again</button>` : '';
+  return `<span class="lb-text">A shell inside the task's sandbox.</span><span class="lb-actions">${chip}${again}</span>`;
+}
+function liveTermErrHTML(sh) {
+  return sh && sh.error ? `<div class="callout warn" role="alert">${icon('alert')}<div style="overflow-wrap:anywhere">${esc(sh.error)}</div></div>` : '';
+}
+function liveTermTabsHTML(name, canShell) {
+  const set = liveTermSet(name);
+  const on = Math.min(set.active, set.list.length - 1);
+  return set.list.map((x, i) => `<span class="tt-item${i === on ? ' on' : ''}"><button type="button" role="tab" id="live-term-tab-${i}" aria-selected="${i === on}" aria-controls="live-term-screen" tabindex="${i === on ? 0 : -1}" data-action="live-term-pick" data-task="${esc(name)}" data-i="${i}">${x.status === 'open' ? '<i class="tt-dot" aria-hidden="true"></i>' : ''}${esc(x.label)}</button><button type="button" class="tt-x" data-action="live-term-drop" data-task="${esc(name)}" data-i="${i}" aria-label="Close ${esc(x.label)}" title="Close ${esc(x.label)}">${icon('x', 'xs')}</button></span>`).join('')
+    + (canShell && set.list.length < LIVE_TERM_MAX ? `<button type="button" class="tt-new" data-action="live-term-add" data-task="${esc(name)}" aria-label="New shell" title="New shell">${icon('plus', 'xs')}</button>` : '');
+}
+function liveTermScreenHTML(name, sh, canShell) {
+  if (!sh) return `<div class="term-empty"><p>No shell is open.</p>${canShell ? `<button type="button" class="btn sm" id="live-term-open" data-action="live-term-open" data-task="${esc(name)}">${icon('terminal', 'sm')}Open a shell</button>` : ''}</div>`;
+  if (liveTermXterm()) return '';
+  /* No xterm.js: what the shell printed, read-only. */
+  return `<pre class="term-body term-fallback" id="live-term-out" data-shell="${esc(sh.id)}" tabindex="0" aria-label="Shell output">${liveAnsiHTML(sh.text)}</pre>`;
+}
+/** The Terminal tab's panel for a task (t from liveTask, stateName as in LIVE_STATES). */
+function liveTermInnerHTML(name, t, stateName) {
+  const set = liveTermSet(name);
+  const why = liveTermWhyNot(t, stateName);
+  const cli = `<p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['ssh', name]))}</code></p>`;
+  /* No shell can open, and none is left from before: say why. */
+  if (why && !set.list.length) {
+    const resume = t.debug && stateName === 'Suspended' ? `<div class="btn-row" style="margin-top:12px">${liveSuspendResumeHTML(name, stateName, LIVE.busy[name], 'sm')}</div>` : '';
+    return `<h2 id="live-term-h" class="sr-only">Terminal</h2>
+      <div class="log-bar"><span class="lb-text">A shell inside the task's sandbox.</span></div>
+      <div class="callout term-why" role="status" id="live-term-why">${icon('terminal')}<div><p>${esc(why)}</p>${resume}</div></div>${cli}`;
   }
-  inp.focus({ preventScroll: true });
-}
-async function liveTermInterrupt(name) {
-  const tm = liveTermOf(name);
-  if (tm.status !== 'open') return;
-  try { await studioApi.sessionInterrupt(tm.id); } catch (e) { tm.error = e.message; liveTermPaint(name); }
-}
-/** Ctrl-D: the end of the shell's input, which ends a shell (or a program reading it). */
-async function liveTermEOF(name) {
-  const tm = liveTermOf(name);
-  if (tm.status !== 'open') return;
-  tm.out += '^D\n';
-  try { await studioApi.sessionEOF(tm.id); } catch (e) { tm.error = e.message; }
-  liveTermPaint(name);
-}
-async function liveTermClose(name) {
-  const tm = liveTermOf(name);
-  try { await studioApi.sessionClose(tm.id); } catch (e) { /* ignore */ }
-  tm.status = 'closed';
-  liveTermPaint(name);
-}
-function liveTermInnerHTML(name, stateName) {
-  const tm = liveTermOf(name);
-  const set = liveTermSet(name);
-  /* `ax ssh` only connects to a task that is Working. */
-  const canShell = stateName === 'Working';
-  const open = tm.status === 'open', starting = tm.status === 'starting';
-  const anyOpen = set.list.some((x) => x.status === 'open');
-  const controls = open
-    ? `<span class="chip running"><i class="pulse-dot"></i>Connected</span><button type="button" class="btn ghost sm" data-action="live-term-ctrlc" data-task="${esc(name)}" title="Send SIGINT (Ctrl-C)">Ctrl-C</button><button type="button" class="btn ghost sm" data-action="live-term-clear" data-task="${esc(name)}" title="Clear (Ctrl-L)">Clear</button><button type="button" class="btn sm" data-action="live-term-close" data-task="${esc(name)}">Disconnect</button>`
-    : `<button type="button" class="btn ${canShell ? 'primary' : ''} sm" id="live-term-open" data-action="live-term-open" data-task="${esc(name)}" ${!canShell || starting ? 'disabled' : ''}>${icon(starting ? 'loader' : 'terminal', 'sm')}${starting ? 'Connecting…' : tm.status === 'closed' ? 'Open the shell again' : 'Open shell in sandbox'}</button>`;
-  const placeholder = canShell ? 'Open a shell to run commands inside the sandbox, in /workspace.' : 'The task is not running right now, so its sandbox shell is closed.';
-  /* The shells, as tabs: the one on screen, and New shell while one is connected. */
-  const tabs = set.list.length > 1 || anyOpen ? `<div class="term-tabs" role="tablist" aria-label="Shells">${set.list.map((x, i) => `<span class="tt-item${i === set.active ? ' on' : ''}">
-      <button type="button" role="tab" aria-selected="${i === set.active}" data-action="live-term-pick" data-task="${esc(name)}" data-i="${i}">${x.status === 'open' ? '<i class="tt-dot"></i>' : ''}${esc(x.label)}</button>
-      ${set.list.length > 1 ? `<button type="button" class="tt-x" data-action="live-term-drop" data-task="${esc(name)}" data-i="${i}" aria-label="Close ${esc(x.label)}">${icon('x', 'xs')}</button>` : ''}</span>`).join('')}
-      ${canShell && set.list.length < LIVE_TERM_MAX ? `<button type="button" class="tt-new" data-action="live-term-add" data-task="${esc(name)}" aria-label="New shell">${icon('plus', 'xs')}New shell</button>` : ''}</div>` : '';
-  const ended = tm.status === 'closed' && tm.exitCode != null ? `\n<span class="m">The shell ended${tm.exitCode ? ` (exit ${esc(tm.exitCode)})` : ''}.</span>` : '';
+  const canShell = !why;
+  const sh = liveTermActive(name);
+  const on = Math.min(set.active, set.list.length - 1);
   return `<h2 id="live-term-h" class="sr-only">Terminal</h2>
-    <div class="log-bar"><span class="lb-text">${canShell ? 'A shell inside its sandbox, in <span class="mono">/workspace</span>, a line at a time.' : 'The task is not running right now, so its sandbox shell is closed.'}</span><span class="lb-actions">${controls}</span></div>
-    ${tm.error ? `<div class="callout warn" role="alert" style="margin-bottom:10px">${icon('alert')}<div style="overflow-wrap:anywhere">${esc(tm.error)}</div></div>` : ''}
+    <div class="log-bar" id="live-term-bar">${liveTermBarHTML(name, sh, canShell)}</div>
+    <div id="live-term-err">${liveTermErrHTML(sh)}</div>
     <div class="terminal live-terminal">
-      <div class="term-bar"><span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>${tabs || `<span class="term-tab" aria-hidden="true">${esc(name)} · /workspace</span>`}</div>
-      <pre class="term-body" id="live-term-out" tabindex="0" aria-label="Terminal output">${open || tm.out ? liveAnsiHTML(tm.out || 'Connected. Run a command below.\n') + ended : `<span class="m">${placeholder}</span>`}</pre>
-      ${open ? `<div class="term-input-row live-term-row"><span class="p" aria-hidden="true">$</span><label class="sr-only" for="live-term-in">Command to run in the sandbox</label><input class="term-input mono" id="live-term-in" data-term-task="${esc(name)}" placeholder="pwd, ls -la, git status…" autocomplete="off" spellcheck="false" aria-describedby="live-term-keys"><button type="button" class="btn sm" id="live-term-send" data-action="live-term-send" data-task="${esc(name)}">${icon('send', 'sm')}Run</button></div>
-        <div class="term-keys" id="live-term-keys"><kbd>↑</kbd> <kbd>↓</kbd> earlier commands · <kbd>Ctrl</kbd> <kbd>C</kbd> interrupt · <kbd>Ctrl</kbd> <kbd>D</kbd> end input · <kbd>Ctrl</kbd> <kbd>L</kbd> clear</div>` : ''}
-    </div>
-    <p class="xsmall muted" style="margin-top:10px">${icon('terminal', 'xs')} <code>${esc(liveCmd(['ssh', name]))}</code></p>`;
+      <div class="term-bar"><span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span><div class="term-tabs" id="live-term-tabs" role="tablist" aria-label="Shells">${liveTermTabsHTML(name, canShell)}</div></div>
+      <div class="term-screen${sh ? '' : ' empty'}" id="live-term-screen" data-task="${esc(name)}"${sh ? ` role="tabpanel" aria-labelledby="live-term-tab-${on}"` : ''}>${liveTermScreenHTML(name, sh, canShell)}</div>
+      ${sh && liveTermXterm() ? '<div class="term-keys"><kbd>Shift</kbd> <kbd>Esc</kbd> leaves the terminal</div>' : ''}
+    </div><div id="live-term-note">${liveTermNoteHTML(why)}</div>${cli}`;
+}
+/** Why no shell can open now, under shells left from before. */
+function liveTermNoteHTML(why) {
+  return why ? `<p class="small muted" style="margin-top:8px">${esc(why)}</p>` : '';
 }
 function liveTermHTML(name, t, stateName) {
-  if (!t.debug) return '';
-  return `<section aria-labelledby="live-term-h" id="live-term" data-task="${esc(name)}">${liveTermInnerHTML(name, stateName)}</section>`;
+  return `<section aria-labelledby="live-term-h" id="live-term" data-task="${esc(name)}">${liveTermInnerHTML(name, t, stateName)}</section>`;
+}
+/** The task and state the Terminal tab is drawn for. */
+function liveTermTaskOf(name) {
+  const row = LIVE.tasks.find((x) => x.name === name);
+  const det = LIVE.detail[name];
+  const t = liveTask((det && det.doc) || (row && row.doc) || { metadata: { name } });
+  return { t, stateName: row ? row.state : t.state };
+}
+/** Draws the Terminal tab again where it is on screen. With a shell on screen, only what is around it is drawn, so
+    its xterm stays where it is. */
+function liveTermPaint(name) {
+  const box = $('#live-term');
+  if (!box || !box.dataset || box.dataset.task !== name) return;
+  const { t, stateName } = liveTermTaskOf(name);
+  const sh = liveTermActive(name);
+  const screen = $('#live-term-screen', box);
+  const why = liveTermWhyNot(t, stateName);
+  if (liveTermXterm() && sh && sh.host && screen && screen.contains(sh.host)) {
+    const set = liveTermSet(name);
+    const bar = $('#live-term-bar', box); if (bar) bar.innerHTML = liveTermBarHTML(name, sh, !why);
+    const err = $('#live-term-err', box); if (err) err.innerHTML = liveTermErrHTML(sh);
+    const tabs = $('#live-term-tabs', box); if (tabs) tabs.innerHTML = liveTermTabsHTML(name, !why);
+    const note = $('#live-term-note', box); if (note) note.innerHTML = liveTermNoteHTML(why);
+    screen.setAttribute('aria-labelledby', `live-term-tab-${Math.min(set.active, set.list.length - 1)}`);
+    return;
+  }
+  box.innerHTML = liveTermInnerHTML(name, t, stateName);
+  liveTermMount(name);
+}
+/** A refresh in the background while a shell is on screen: the page around the shell is drawn again, the shell isn't.
+    True when that was all it took. */
+function liveTermPatchPage(v) {
+  const screen = $('#live-term-screen');
+  const name = screen && screen.dataset ? screen.dataset.task : '';
+  const sh = name ? liveTermActive(name) : null;
+  if (!liveTermXterm() || !sh || !sh.host || !screen.contains(sh.host)) return false;
+  const next = document.createElement('div');
+  next.innerHTML = v.html;
+  const nextScreen = next.querySelector('#live-term-screen');
+  if (!nextScreen || nextScreen.dataset.task !== name || nextScreen.classList.contains('empty')) return false;
+  ['#task-head', '#live-task-side', '.tabs-bar', '#live-term-bar', '#live-term-err', '#live-term-tabs', '#live-term-note'].forEach((sel) => {
+    const now = $(sel), want = next.querySelector(sel);
+    if (now && want && now.innerHTML !== want.innerHTML) now.innerHTML = want.innerHTML;
+  });
+  return true;
 }
 
 function liveAxoMood(stateName) {
@@ -857,8 +1118,8 @@ function liveViewTasks(rawTab) {
 }
 /* ---------- A task's page ----------
    The header (title, then status, template, workspace and age, and Suspend or Resume and Delete), then two columns. On
-   the left, tabs: Activity, Logs, Terminal for a task with debug access, and YAML. Switching tabs swaps only the panel.
-   On the right: the task's state in AX's words, where it runs, and what it can reach. */
+   the left, tabs: Activity, Logs, Terminal and YAML. Switching tabs swaps only the panel. On the right: the task's
+   state in AX's words, where it runs, and what it can reach. */
 const LIVE_TASK_TABS = [['activity', 'Activity'], ['logs', 'Logs'], ['terminal', 'Terminal'], ['file', 'YAML']];
 /* What AX's conditions say, in the UI's words. */
 const LIVE_COND_WORDS = {
@@ -1086,7 +1347,8 @@ function liveViewTask(name, tab) {
   const stateName = row ? row.state : t.state;
   const busy = LIVE.busy[name];
   const tpl = liveTaskTemplate(spec);
-  const tabs = LIVE_TASK_TABS.filter(([k]) => spec.debug || k !== 'terminal');
+  /* Every task has a Terminal tab: one that can't have a shell says why. */
+  const tabs = LIVE_TASK_TABS;
   tab = tabs.some(([k]) => k === tab) ? tab : 'activity';
   /* The logs are read as the page opens too, so the Logs tab and the Next card can say when the agent logged an error. */
   if (typeof liveLogsWanted === 'function') liveLogsWanted(name);
@@ -1112,7 +1374,9 @@ function liveViewTask(name, tab) {
       </div>
       <aside class="side" id="live-task-side" aria-label="Task details">${liveTaskSideHTML(name, t, stateName, spec, status, busy)}</aside>
     </div>`;
-  return { title: t.goal ? t.goal.split('\n')[0].slice(0, 60) : name, crumbs, html, wide: true };
+  /* Once the Terminal tab is on screen, its shell goes on it (a task that can have one gets one the first time). */
+  const after = tab === 'terminal' ? () => liveTermShown(name, !liveTermWhyNot(t, stateName)) : null;
+  return { title: t.goal ? t.goal.split('\n')[0].slice(0, 60) : name, crumbs, html, wide: true, after };
 }
 const LIVE_HIDDEN = { guardrails: 'Guardrails', welcome: 'Setup', cuj: 'This page', review: 'This page', get: 'This page' };
 function liveViewNotYet(part) {
@@ -1229,7 +1493,17 @@ function liveRender(opts) {
   else if (r.parts[0] === 'settings') { v = liveViewSettings(r.parts[1]); top = 'settings'; }
   else { v = liveViewNotYet(r.parts[0]); top = ''; }
   if (!$('.app.live', root)) root.innerHTML = liveShellHTML();
+  /* A shell on screen isn't redrawn by a refresh in the background: the page around it is. */
+  if (opts.background && !moved && r.parts[0] === 'task' && r.parts[2] === 'terminal' && liveTermPatchPage(v)) {
+    renderCrumbs(v.crumbs || []);
+    state.docTitle = v.title + ' · AX Studio';
+    liveChrome(top);
+    return;
+  }
   const fk = focusKeyOf(document.activeElement);
+  /* Typing in a shell carries on after the page is drawn again around it. */
+  const act = document.activeElement;
+  LIVE.termRefocus = !moved && !!(act && act.closest && act.closest('#live-term-screen'));
   /* Switching tabs on one task or between Tasks tabs swaps smoothly without scrolling back to top. */
   const prev = (LIVE.lastPath || '').split('/').filter(Boolean);
   const tabSwitch = moved && LIVE.lastPath !== null && ((r.parts[0] === 'task' && prev[0] === 'task' && prev[1] === r.parts[1]) || (r.parts[0] === 'tasks' && prev[0] === 'tasks'));
@@ -1256,6 +1530,7 @@ function liveRender(opts) {
   }
   /* A page can finish its own job once it is on screen (Settings moves focus to the section you switched to). */
   if (typeof v.after === 'function') v.after();
+  LIVE.termRefocus = false;
 }
 
 function livePaletteItems() {
@@ -1303,25 +1578,10 @@ function livePaletteItems() {
 if (LIVE.on) {
   document.addEventListener('keydown', (e) => {
     const el = e.target;
-    if (el && el.id === 'live-term-in' && el.dataset && el.dataset.termTask) {
-      const name = el.dataset.termTask;
-      const set = liveTermSet(name);
-      if (e.key === 'Enter') { e.preventDefault(); liveTermSend(name); return; }
-      /* Up and Down go through the commands run in this sandbox, newest first. */
-      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && set.history.length) {
-        e.preventDefault();
-        set.hpos = e.key === 'ArrowUp' ? (set.hpos < 0 ? set.history.length - 1 : Math.max(0, set.hpos - 1)) : (set.hpos < 0 ? -1 : set.hpos + 1);
-        if (set.hpos >= set.history.length) set.hpos = -1;
-        el.value = set.hpos < 0 ? '' : set.history[set.hpos];
-        return;
-      }
-      if (e.ctrlKey && !e.metaKey && !e.altKey) {
-        const k = String(e.key).toLowerCase();
-        if (k === 'c' && !(window.getSelection && String(window.getSelection()))) { e.preventDefault(); liveTermInterrupt(name); return; }
-        if (k === 'd' && !el.value) { e.preventDefault(); liveTermEOF(name); return; }
-        if (k === 'l') { e.preventDefault(); liveTermOf(name).out = ''; liveTermPaint(name); const i = $('#live-term-in'); if (i) i.focus({ preventScroll: true }); return; }
-      }
-      return;
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && el && el.id === 'live-new-goal') {
+      /* Ctrl/⌘ ↵ in the goal box runs the task, as the hint under it says. */
+      e.preventDefault();
+      liveNewRun();
     }
   });
   document.addEventListener('input', (e) => {

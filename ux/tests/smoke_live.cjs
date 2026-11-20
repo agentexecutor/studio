@@ -264,8 +264,7 @@ function makeBackend(opts) {
       }
       case '/api/sessions/start':
       case '/api/sessions/write':
-      case '/api/sessions/interrupt':
-      case '/api/sessions/eof':
+      case '/api/sessions/resize':
       case '/api/sessions/close':
         return answer(200, { ok: true, id: body.id });
       case '/api/secrets/credential':
@@ -375,7 +374,7 @@ function makeContext(B, env) {
   vm.runInContext(files.map((f) => fs.readFileSync(dir + '/' + f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = { state, render, ACTIONS, STUDIO, LIVE, liveOn, liveState, liveStateName, liveTask, liveAge, liveShellHTML, liveRefresh, liveTaskAction, liveConnect,
   liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
-  liveTermOpen, liveTermSend, liveTermClose, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
+  liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems, liveGoalHelpHTML, liveNewGateMapHTML,
   liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
   viewHome, studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
@@ -547,10 +546,15 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(head, ['live-promote', 'Send a follow-up']);
     /* Activity: the goal you set, then what AX recorded, then that it runs. */
     need(h, ['<span class="who">You</span><span class="what">set the goal</span>', 'started the task in its sandbox', 'Task is running and its workspace is ready', 'Running ·']);
-    /* A task without debug access has no Terminal tab. */
+    /* A task without debug access has a Terminal tab too: it says why there is no shell, and starts none. */
     await go(p, '#/task/readme-polish');
-    need(main(p), ['id="tab-activity"', 'id="tab-file"']);
-    never(main(p), ['id="tab-changes"', 'id="tab-terminal"']);
+    need(main(p), ['id="tab-activity"', 'id="tab-terminal"', 'id="tab-file"']);
+    never(main(p), ['id="tab-changes"']);
+    await go(p, '#/task/readme-polish/terminal');
+    const term = main(p).slice(main(p).indexOf('id="live-term"'), main(p).indexOf('class="side"'));
+    need(term, ['id="live-term-why"', 'This task has no shell. A shell needs debug on when the task starts.', '<code>ax --context ax-local ssh readme-polish</code>']);
+    never(term, ['live-term-open', 'live-resume']);
+    if (B.posts.some((x) => x.path === '/api/sessions/start')) throw new Error('no shell for a task without debug access');
     await go(p, '#/task/fix-flaky-tests');
   });
   await check('pause asks the server to suspend that task on that cluster, and the page follows the new state', async () => {
@@ -1168,8 +1172,12 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await go(p, '#/task/fix-flaky-tests');
     await settle();
     need(main(p), ['<dt>Sandbox</dt>', '427663e8-5707-4ea2-9dce-d38d059e8fbe', 'aria-label="Copy the sandbox uid"', '<dt>Previous attempt</dt><dd>attempt 1: sandbox crashed</dd>']);
-    need(api.liveTermInnerHTML('fix-flaky-tests', 'Working'), ['id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests" >']);
-    need(api.liveTermInnerHTML('fix-flaky-tests', 'Idle'), ['The task is not running right now', 'data-task="fix-flaky-tests" disabled']);
+    const ft = api.liveTask(t);
+    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Working'), ['No shell is open.', 'id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests"', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
+    const idle = api.liveTermInnerHTML('fix-flaky-tests', ft, 'Idle');
+    need(idle, ['A shell can open only while the task is running.', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
+    never(idle, ['live-term-open', 'live-resume']);
+    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Suspended'), ['Resume the task to open a shell.', 'data-action="live-resume" data-task="fix-flaky-tests"']);
   });
   await check('Settings: notifications are opt-in; once on, a task that newly needs you rings while the tab is in the background', async () => {
     await go(p, '#/settings/notifications');
@@ -1391,31 +1399,73 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
       if (count !== 1) throw new Error(`${page} should have 1 Axel, got ${count}`);
     }
   });
-  await check('in-page Terminal opens an ax ssh session, streams output, sends commands and disconnects', async () => {
+  await check('in-page Terminal opens an ax ssh shell, streams what it prints, sends keys in order, and keeps shells as tabs', async () => {
     const M = makeBackend();
     const m = makeContext(M);
     await settle();
     await go(m, '#/task/fix-flaky-tests/terminal');
-    need(main(m), ['id="live-term"', 'id="live-term-open"', 'Open shell in sandbox', 'role="tabpanel" class="task-panel" id="panel-terminal"', 'class="terminal live-terminal"']);
-    await m.api.liveTermOpen('fix-flaky-tests');
-    await settle();
-    const startPost = M.posts.find((x) => x.path === '/api/sessions/start');
-    if (!startPost || startPost.body.args.join(' ') !== '--context ax-local -a default ssh fix-flaky-tests') throw new Error(JSON.stringify(startPost));
-    const id = startPost.body.id;
-    M.push('sessionData', { id, data: 'root@sandbox:/workspace# \x1b[1;32mok\x1b[0m \x1b[?2004h', stream: 'stdout' });
-    const h = m.api.liveTermInnerHTML('fix-flaky-tests', 'Working');
-    /* Colors show as colors; other escape sequences don't show at all. */
-    need(h, ['Connected', 'root@sandbox:/workspace#', '<span class="a-bold a-g">ok</span>', 'id="live-term-in"', 'earlier commands', 'data-action="live-term-add"']);
-    never(h, ['2004h', '\x1b']);
+    need(main(m), ['id="live-term"', 'role="tabpanel" class="task-panel" id="panel-terminal"', 'class="terminal live-terminal"', 'id="live-term-tabs" role="tablist" aria-label="Shells"']);
+    /* The Terminal tab of a running task with debug access opens its first shell. */
+    const starts = () => M.posts.filter((x) => x.path === '/api/sessions/start');
+    if (starts().length !== 1 || starts()[0].body.args.join(' ') !== '--context ax-local -a default ssh fix-flaky-tests') throw new Error(JSON.stringify(starts()));
+    const id = starts()[0].body.id;
+    if (!/^sh-[0-9a-f]{16}$/.test(id)) throw new Error('session id ' + id);
+    const doc = () => m.api.liveTask(M.tasks['ax-local'].find((x) => x.metadata.name === 'fix-flaky-tests'));
+    const panel = () => m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Working');
+    need(panel(), ['Connecting…', 'Shell 1']);
+    /* What the shell prints comes as base64 of its bytes; a character split between two events still shows whole. */
+    const bytes = Buffer.from('root@sandbox:/workspace# \x1b[1;32mok\x1b[0m café \x1b[?2004h');
+    const cut = bytes.indexOf(0xc3) + 1;
+    M.push('sessionData', { id, data: bytes.subarray(0, cut).toString('base64'), seq: 1 });
+    M.push('sessionData', { id, data: bytes.subarray(cut).toString('base64'), seq: 2 });
+    /* Without xterm.js (as here) the output shows as text: colors as colors, other escape sequences not at all. */
+    need(panel(), ['Connected', 'root@sandbox:/workspace#', '<span class="a-bold a-g">ok</span>', 'café', 'data-action="live-term-add"']);
+    never(panel(), ['2004h', '\x1b', 'skipped']);
+    /* Output that went missing on the way is called out. */
+    M.push('sessionData', { id, data: Buffer.from('later').toString('base64'), seq: 5 });
+    need(panel(), ['Some output was skipped.', 'later']);
+    /* Keys go to the server as they are, a batch per request, in order; a long paste goes in pieces. */
+    const sh = m.api.liveTermActive('fix-flaky-tests');
+    ['l', 's', '\t', '\x1b[A', '\r'].forEach((k) => m.api.liveTermInput(sh, k));
+    await m.api.liveTermFlush(sh);
+    const writes = () => M.posts.filter((x) => x.path === '/api/sessions/write');
+    if (writes().length !== 1 || writes()[0].body.id !== id || writes()[0].body.data !== 'ls\t\x1b[A\r' || writes()[0].body.binary) throw new Error(JSON.stringify(writes()));
+    m.api.liveTermInput(sh, 'x'.repeat(70000));
+    m.api.liveTermInput(sh, '\x80\x81', true);
+    await m.api.liveTermFlush(sh);
+    const rest = writes().slice(1).map((x) => `${x.body.data.length}${x.body.binary ? 'b' : ''}`).join(',');
+    if (rest !== '65536,4464,2b') throw new Error(rest);
     /* A second shell in the same sandbox opens next to the first, as a tab. */
     m.api.ACTIONS['live-term-add']({ dataset: { task: 'fix-flaky-tests' } });
     await settle();
-    const starts = M.posts.filter((x) => x.path === '/api/sessions/start').map((x) => x.body.id);
-    if (starts.length !== 2 || starts[0] === starts[1]) throw new Error(JSON.stringify(starts));
-    need(m.api.liveTermInnerHTML('fix-flaky-tests', 'Working'), ['Shell 1', 'Shell 2', 'aria-selected="true" data-action="live-term-pick" data-task="fix-flaky-tests" data-i="1"']);
+    if (starts().length !== 2 || starts()[0].body.id === starts()[1].body.id) throw new Error(JSON.stringify(starts()));
+    const id2 = starts()[1].body.id;
+    need(panel(), ['Shell 1', 'Shell 2', 'aria-selected="true" aria-controls="live-term-screen" tabindex="0" data-action="live-term-pick" data-task="fix-flaky-tests" data-i="1"', 'aria-label="Close Shell 1"']);
     m.api.ACTIONS['live-term-pick']({ dataset: { task: 'fix-flaky-tests', i: '0' } });
-    await m.api.liveTermClose('fix-flaky-tests');
+    if (m.api.liveTermActive('fix-flaky-tests').id !== id) throw new Error('pick');
+    /* Closing a shell ends its session and takes its tab away. */
+    await m.api.ACTIONS['live-term-drop']({ dataset: { task: 'fix-flaky-tests', i: '0' } });
+    await settle();
     if (!M.posts.some((x) => x.path === '/api/sessions/close' && x.body.id === id)) throw new Error('close session');
+    need(panel(), ['Shell 2']);
+    never(panel(), ['Shell 1']);
+    /* A shell that ends says so, and can open again. */
+    M.push('sessionExit', { id: id2, status: 0 });
+    need(panel(), ['The shell ended.', 'Ended', 'Open the shell again']);
+    /* Once the task pauses, its shells stay to read, with why no new one can open. */
+    const paused = m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Suspended');
+    need(paused, ['Shell 2', 'The shell ended.', 'id="live-term-note"><p class="small muted" style="margin-top:8px">Resume the task to open a shell.</p>']);
+    never(paused, ['Open the shell again', 'data-action="live-term-add"']);
+    /* Leaving the page and coming back keeps the shell as it was, and opens no other. */
+    await go(m, '#/');
+    await go(m, '#/task/fix-flaky-tests/terminal');
+    need(main(m), ['Shell 2', 'The shell ended.']);
+    if (starts().length !== 2) throw new Error('coming back opened another shell');
+    /* Opening it again starts a new session in the same tab. */
+    m.api.ACTIONS['live-term-open']({ dataset: { task: 'fix-flaky-tests' } });
+    await settle();
+    if (starts().length !== 3 || m.api.liveTermActive('fix-flaky-tests').id !== starts()[2].body.id) throw new Error('open again');
+    need(panel(), ['Opening the shell again…', 'Shell 2']);
   });
   await check('New task shows prompt-clarity helper pills and the visual Guardrails gateMap', async () => {
     const M = makeBackend();
