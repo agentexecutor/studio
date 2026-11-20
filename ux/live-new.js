@@ -36,12 +36,12 @@
      Load a task file opens a file from this computer in the YAML editor; Download saves the YAML. */
 
 /* The agents Start from offers. The task page also reads them, to name a task's agent by its image and its key by
-   its host. Antigravity is the official image with its runtime-install contract: the agent is installed when the task
+   its host. Antigravity is the official v0.0.0 image with its runtime-install contract: the agent is installed when the task
    starts, from storage.googleapis.com, which the Gateway passes through. */
 const LIVE_AGENTS = {
   antigravity: {
     id: 'antigravity', name: 'Antigravity', desc: "Google's coding agent, on Gemini", keyFrom: 'Gemini', model: '',
-    image: 'ghcr.io/agentexecutor/antigravity@sha256:0ccd91d03f996c375d6d391dc20106102187f15210a0016212b6721cd8044078',
+    image: 'ghcr.io/agentexecutor/antigravity@sha256:864c5979bb9240da9e445a9d9a16885a177e486aff2f1931783ea68f3441c42d',
     secret: 'gemini-api-creds', keyName: 'GEMINI_API_KEY', host: 'generativelanguage.googleapis.com', header: 'x-goog-api-key',
     tlsPassthrough: ['storage.googleapis.com'],
     extraEnv: [['AGY_RUNTIME_INSTALL', 'true']],
