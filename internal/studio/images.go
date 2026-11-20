@@ -21,18 +21,16 @@ import (
 
 // The images `ax local start` deploys when you don't choose others.
 //
-// AX doesn't publish release images yet, so its own defaults are empty and
-// `ax local start` stops without --server-image. Studio pins images built
-// from the same AX commit as its go.mod (749fa9c), so that setting up AX on
-// this computer is one click. Each is multi-arch (amd64 and arm64) and pinned
-// by digest. Replace them with AX's official images once they're published,
-// together with the go.mod pin.
+// `ax local start` still leaves its own release defaults empty, so Studio
+// pins official AX images built from the same AX release as its go.mod
+// (v0.4.0-rc.1) for one-click local setup. Each is multi-arch (amd64 and arm64)
+// and pinned by digest.
 const (
 	// DefaultServerImage is the ax-server image (--server-image).
-	DefaultServerImage = "ghcr.io/yoyinzyc/ax/ax-server:v0.0.0-yczhou.1@sha256:b4381b8fe58e4e7572676fdfa04b14bdb8228c6160768ecf3d314023f183e9cd"
+	DefaultServerImage = "ghcr.io/google/ax/ax-server@sha256:95737151ccc54fdb8d99a8a8674f11777d7b08b7108a7b80820a1c502bb71223"
 	// DefaultTaskImage is the image of a task that doesn't name one
 	// (--default-task-image): a shell with AX's task runner.
-	DefaultTaskImage = "ghcr.io/yoyinzyc/ax/ax-task-runner:v0.0.0-yczhou.1@sha256:0ec668d57c3fade9a9e2c6998c36876530540cee2a6963c55657cbf5dcb950c7"
+	DefaultTaskImage = "ghcr.io/google/ax/ax-task-runner@sha256:3a61e70d70cede25cec04c34b2902e2febac08bd78741207101d5c102f6e7a2c"
 )
 
 // SetupImages are the images setup uses unless you choose others, and where
