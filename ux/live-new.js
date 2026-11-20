@@ -97,32 +97,22 @@ function liveRememberRepo(url) {
   try { localStorage.setItem(LIVE_RECENT_KEY, JSON.stringify([url].concat(liveRecentRepos().filter((x) => x !== url)).slice(0, 5))); } catch (e) { /* ignore */ }
 }
 
-/* ---------- Where it runs ---------- */
+/* ---------- Where it runs: AX on this computer ---------- */
 /** AX on this computer is running, and its cluster is in the kubeconfig. */
 function liveLocalReady() {
   const L = LIVE.local;
   return !!(L && L.state === 'Running' && L.context && LIVE.contexts.some((c) => c.name === L.context));
 }
-/** The cluster in use, if a task can run there; else this computer; else the first remote cluster. */
-function liveNewDefaultWhere() {
-  if (LIVE.context && LIVE.contexts.some((c) => c.name === LIVE.context) && (!liveIsLocal(LIVE.context) || liveLocalReady())) return LIVE.context;
-  if (liveLocalReady()) return LIVE.local.context;
-  const r = LIVE.contexts.find((c) => !liveIsLocal(c.name));
-  return r ? r.name : '';
-}
-/** Until you choose where it runs, the form follows the best place. It also picks again if your choice is gone. */
+/** Tasks run on AX on this computer. */
+function liveNewDefaultWhere() { return LIVE.context || ''; }
 function liveNewRepick(d) {
   if (d.from) return;
-  const gone = !d.where || !LIVE.contexts.some((c) => c.name === d.where);
-  if (d.whereTouched && !gone) return;
-  if (gone) d.whereTouched = false;
   d.where = liveNewDefaultWhere();
-  if (!d.debugTouched) d.debug = liveIsLocal(d.where);
 }
 /** What the form shows that comes from the cluster, not from you. When it changes, the form is drawn again. */
 function liveNewEnvSig() {
   const L = LIVE.local || {};
-  return [LIVE.context, LIVE.contexts.map((c) => c.name).join(','), L.state || '', L.context || ''].join('|');
+  return [LIVE.context, L.state || '', L.context || ''].join('|');
 }
 
 /* ---------- The draft ---------- */
@@ -137,7 +127,7 @@ function liveSizeOf(limits) {
 function liveNewDraft(from, again) {
   const where = liveNewDefaultWhere();
   const d = { agent: 'antigravity', image: '', source: 'git', repo: liveRecentRepos()[0] || '', branch: '', goal: '', key: '', network: 'balanced',
-    where, whereTouched: false, debug: liveIsLocal(where), debugTouched: false, size: '', wsOpen: null, moreOpen: false, envSig: '',
+    where, debug: true, debugTouched: false, size: '', wsOpen: null, moreOpen: false, envSig: '',
     name: '', nameEdited: false, suffix: liveHex(2), from: '', base: '', session: '', workspace: '', gateway: '', raw: false, yaml: '', busy: '', error: '',
     /* Workspace setup (more repos, setup commands, files, MCP servers) and More options (custom size, command, env). */
     existing: '', cpu: '', memory: '', command: '', envText: '', repos: '', setup: '', files: [], mcp: [] };
@@ -223,7 +213,7 @@ function liveDraftName(d) {
 function liveNewIssues(d) {
   const out = [];
   if (!d.where) out.push('Choose where it runs. Set up AX on this computer, or add a cluster to your kubeconfig.');
-  else if (liveIsLocal(d.where) && !liveLocalReady()) out.push('Start AX on this computer first, in Where agents run.');
+  else if (liveIsLocal(d.where) && !liveLocalReady()) out.push('Start AX on this computer first, on Local cluster.');
   if (d.raw) { if (!/^kind:\s*Task\s*$/m.test(d.yaml)) out.push('The file needs a Task.'); return out; }
   const A = LIVE_AGENTS[d.agent];
   if (!A && d.image.trim() && !LIVE_DIGEST_RE.test(d.image.trim())) out.push('The image address must end in its digest: @sha256: and 64 characters.');
@@ -393,33 +383,7 @@ function liveNewAgentHTML(d) {
   return `${picker}<div class="panel tpl-panel">${rows.join('')}</div>`;
 }
 
-/* ---------- 2 · Where should it run? ---------- */
-function liveNewWhereHTML(d) {
-  const L = LIVE.local || {};
-  const localOk = liveLocalReady();
-  const remotes = LIVE.contexts.filter((c) => !liveIsLocal(c.name));
-  const onLocal = !!d.where && liveIsLocal(d.where);
-  if (d.from) {
-    return `<div class="radio-list"><div class="radio-card info is-on" id="live-where-fixed"><span class="rc-icon" aria-hidden="true">${icon(onLocal ? 'laptop' : 'cloud')}</span>
-      <span class="rc-main"><span class="rc-title">${onLocal ? 'On this computer' : esc(d.where)}</span><span class="rc-desc">A follow-up runs where its session is, so it can reuse the workspace and network rules.</span></span></div></div>`;
-  }
-  const localDesc = localOk ? `In a gVisor sandbox on <span class="mono">${esc(L.context)}</span>. Starts in seconds, and costs nothing in the cloud.`
-    : L.state === 'Stopped' ? 'AX on this computer is stopped.' : "AX isn't set up on this computer yet.";
-  const remoteRight = !onLocal && d.where ? esc(d.where) : remotes.length ? plural(remotes.length, 'cluster') : 'None in your kubeconfig';
-  const hint = !localOk && !remotes.length ? `<p class="hint" style="margin-top:8px"><a href="#/places">Set up AX on this computer</a>, or add a cluster to your kubeconfig.</p>`
-    : !localOk ? `<p class="hint" style="margin-top:8px"><a href="#/places">${L.state === 'Stopped' ? 'Start' : 'Set up'} AX on this computer</a> to run here.</p>`
-      : !remotes.length ? '<p class="hint" style="margin-top:8px">Add a remote cluster to your kubeconfig and it shows up here.</p>' : '';
-  return `<div class="radio-list" role="radiogroup" aria-labelledby="live-step-where">
-      <button type="button" class="radio-card" role="radio" aria-checked="${onLocal}" ${localOk ? '' : 'aria-disabled="true"'} data-action="live-new-where" data-where="local" id="live-where-local">
-        <span class="rc-dot"></span><span class="rc-main"><span class="rc-title">On this computer</span><span class="rc-desc">${localDesc}</span></span><span class="rc-right">${localOk ? 'Best to start' : L.state === 'Stopped' ? 'Stopped' : 'Not set up'}</span></button>
-      <button type="button" class="radio-card" role="radio" aria-checked="${!onLocal && !!d.where}" ${remotes.length ? '' : 'aria-disabled="true"'} data-action="live-new-where" data-where="remote" id="live-where-remote">
-        <span class="rc-dot"></span><span class="rc-main"><span class="rc-title">On a remote cluster</span><span class="rc-desc">On a shared GKE or Kubernetes cluster from your kubeconfig. It keeps running when your laptop closes.</span></span><span class="rc-right">${remoteRight}</span></button>
-    </div>
-    ${!onLocal && d.where && remotes.length > 1 ? `<div class="pills where-pills" role="group" aria-label="Which remote cluster">${remotes.map((c) => `<button type="button" class="pill mono" aria-pressed="${d.where === c.name}" data-action="live-new-cluster" data-context="${esc(c.name)}">${esc(c.name)}</button>`).join('')}</div>` : ''}
-    ${hint}`;
-}
-
-/* ---------- 3 · Set up the workspace ---------- */
+/* ---------- 2 · Set up the workspace ---------- */
 /* The workspaces on the cluster a new task runs on. The cluster in use shares Home's list; another is read here. */
 LIVE.newWs = {};
 function liveNewWorkspaces(ctx) {
@@ -446,7 +410,7 @@ const LIVE_WS_LOOK = { Ready: ['checkCircle', ''], Preparing: ['loader', 'Settin
 /** The workspaces you can start from, as pills, with what the one you picked says. */
 function liveNewExistingHTML(d) {
   const c = liveNewWorkspaces(d.where);
-  const where = !d.where ? 'the cluster' : liveIsLocal(d.where) ? 'this computer' : liveShortCtx(d.where);
+  const where = 'this computer';
   if (!c || (!c.at && (c.loading || !c.error))) return `<span class="prow-hint">${icon('loader', 'xs')} Reading the workspaces on ${esc(where)}…</span>`;
   if (c.error && !(c.list || []).length) return `<span class="prow-hint" style="color:var(--wait)">Couldn't read the workspaces on ${esc(where)}: ${esc(c.error)}</span>`;
   const list = (c.list || []).slice().sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
@@ -469,9 +433,9 @@ function liveBranchPillsHTML(d) {
   return LIVE_BRANCH_PICKS.map((b) => `<button type="button" class="pill mono" aria-pressed="${d.branch.trim() === b}" data-action="live-new-branch-pick" data-branch="${b}">${b}</button>`).join('');
 }
 function liveNewDebugRow(d) {
-  return prow('Debug access', `<label class="toggle-line"><span class="tl-text"><b>Let Studio look inside the sandbox</b><span>Shows the files it changed and hasn't pushed, and opens a shell with <span class="mono">ax ssh</span>. Off keeps the sandbox closed: you review its result and what it pushes.</span></span>
+  return prow('Debug access', `<label class="toggle-line"><span class="tl-text"><b>Let Studio open a shell in the sandbox</b><span>A shell with <span class="mono">ax ssh</span>, in Terminal. Off keeps the sandbox closed.</span></span>
       <span class="switch"><input type="checkbox" role="switch" id="live-new-debug" data-action="live-new-debug" ${d.debug ? 'checked' : ''} aria-label="Debug access"><span class="track"></span><span class="thumb"></span></span></label>
-      ${!d.from && !d.debugTouched && d.where ? `<span class="prow-hint">${liveIsLocal(d.where) ? 'On by default on this computer.' : 'Off by default on a shared cluster.'}</span>` : ''}`);
+      ${!d.from && !d.debugTouched ? '<span class="prow-hint">On by default.</span>' : ''}`);
 }
 const LIVE_SETUP_PICKS = ['npm ci', 'pip install -r requirements.txt', 'go mod download', 'uv sync'];
 function liveWsMoreSum(d) {
@@ -539,7 +503,7 @@ function liveNewWorkspaceHTML(d) {
     </div>`;
 }
 
-/* ---------- 4 · Describe the goal ---------- */
+/* ---------- 3 · Describe the goal ---------- */
 function liveGoalHelpHTML(d) {
   const g = (d.goal || '').trim();
   const sugs = typeof SUGGESTIONS !== 'undefined' ? SUGGESTIONS : ['Fix the failing tests', 'Validate the signup form', 'Document the public API', 'Fix accessibility issues'];
@@ -623,27 +587,22 @@ function liveNewGateMapHTML(d) {
   if (!hosts.length) return `${kicker('What it can reach')}<p class="xsmall muted">No Gateway, so no network access.</p>`;
   return `${kicker(`What it can reach · ${d.network === 'balanced' ? 'Balanced' : 'Locked down'}`)}${gateMap(hosts, [], 4)}`;
 }
-/** Which of the four steps are done: template, where, workspace, goal. */
+/** Which of the three steps are done: template, workspace, goal. */
 function liveNewStepStates(d) {
   const A = LIVE_AGENTS[d.agent];
   const agentOk = A ? true : (d.from ? (!d.image.trim() || LIVE_DIGEST_RE.test(d.image.trim())) : LIVE_DIGEST_RE.test(d.image.trim()));
-  const whereOk = !!d.where && (!liveIsLocal(d.where) || liveLocalReady());
   const wsOk = !!d.workspace || d.source === 'empty' || (d.source === 'existing' ? !!d.existing : !!liveRepoHost(d.repo.trim()));
   const goalOk = A ? !!d.goal.trim() : (!!d.goal.trim() || agentOk);
-  return [agentOk, whereOk, wsOk, goalOk];
+  return [agentOk, wsOk, goalOk];
 }
 function liveReadyItems(d) {
   const A = LIVE_AGENTS[d.agent];
-  const [agentOk, whereOk, wsOk, goalOk] = liveNewStepStates(d);
-  const L = LIVE.local || {};
+  const [agentOk, wsOk, goalOk] = liveNewStepStates(d);
   const repo = d.repo.trim();
   const line = (s) => { const first = s.split('\n')[0]; return esc(first.slice(0, 48)) + (first.length > 48 ? '…' : ''); };
   return [
     { ok: agentOk, todo: 'give the image address', t: A ? (A.model ? `${A.name} · <span class="mono">${esc(A.model)}</span>` : A.name) : 'Your own image',
       s: A ? (d.key.trim() ? 'The key is stored on the cluster when you run' : 'Its key is added outside the sandbox') : (d.image.trim() ? esc(liveImageShort(d.image.trim())) : 'An image address with @sha256:…') },
-    { ok: whereOk, todo: liveIsLocal(d.where) ? 'start AX on this computer' : 'choose where it runs',
-      t: !d.where ? 'Where it runs' : liveIsLocal(d.where) ? 'On this computer' : `On ${esc(d.where)}`,
-      s: !d.where ? 'Set up AX, or add a cluster' : liveIsLocal(d.where) ? (whereOk ? 'gVisor sandbox · starts in seconds' : L.state === 'Stopped' ? 'AX is stopped here' : "AX isn't set up here") : 'A remote cluster from your kubeconfig' },
     { ok: wsOk, todo: d.source === 'existing' ? 'pick a workspace' : 'add a Git repo, or choose Empty workspace', t: d.workspace ? 'Workspace from the last turn' : d.source === 'existing' ? 'An existing workspace' : d.source === 'git' ? 'Git repo' : 'Empty workspace',
       s: d.workspace ? esc(d.workspace) : d.source === 'existing' ? (d.existing ? `<span class="mono">${esc(d.existing)}</span>` : 'One already on the cluster')
         : d.source === 'git' ? (liveRepoHost(repo) ? `${esc(liveRepoShort(repo))}${d.branch.trim() ? ` · ${esc(d.branch.trim())}` : ''}` : 'An https:// Git address') : 'An empty /workspace' },
@@ -658,7 +617,7 @@ function livePlanHeadHTML(d) {
   const n = items.filter((c) => c.ok).length;
   const issues = liveNewIssues(d);
   const ready = !issues.length;
-  const sub = ready ? (liveIsLocal(d.where) ? 'Runs on this computer, in a gVisor sandbox.' : `Runs on ${esc(d.where)}.`)
+  const sub = ready ? 'Runs on this computer, in its own sandbox.'
     : n < items.length ? `${n} of ${items.length} done · next: ${esc(items.find((c) => !c.ok).todo)}` : esc(issues[0]);
   return `${axo(ready ? 'wave' : 'thinking', { decorative: true }).replace('<svg ', '<svg data-follow ')}<div><div class="h-display-sm">${ready ? (d.from ? 'Ready to send' : 'Ready to run') : 'Almost ready'}</div><div class="small muted">${sub}</div></div>`;
 }
@@ -688,14 +647,11 @@ function liveViewNew() {
       <section class="step-block first" aria-labelledby="live-step-agent">
         <div class="step-head">${stepN(1)}<h2 id="live-step-agent">Pick a template</h2><span class="muted">${d.from ? 'The last turn used this one.' : 'Each brings its agent and model.'}</span></div>
         ${liveNewAgentHTML(d)}</section>
-      <section class="step-block" aria-labelledby="live-step-where">
-        <div class="step-head">${stepN(2)}<h2 id="live-step-where">${d.from ? 'Where it runs' : 'Where should it run?'}</h2><span class="muted">${d.from ? 'Where its session is.' : 'Same task file and network rules either way.'}</span></div>
-        <div id="live-where-body">${liveNewWhereHTML(d)}</div></section>
       <section class="step-block" aria-labelledby="live-step-ws" id="live-ws-step">
-        <div class="step-head">${stepN(3)}<h2 id="live-step-ws">Set up the workspace</h2><span class="muted">What the agent starts with in <span class="mono">/workspace</span>.</span></div>
+        <div class="step-head">${stepN(2)}<h2 id="live-step-ws">Set up the workspace</h2><span class="muted">What the agent starts with in <span class="mono">/workspace</span>.</span></div>
         ${liveNewWorkspaceHTML(d)}</section>
       <section class="step-block" aria-labelledby="live-step-goal">
-        <div class="step-head">${stepN(4)}<h2 id="live-step-goal">Describe the goal</h2><span class="muted">The agent plans from this.</span></div>
+        <div class="step-head">${stepN(3)}<h2 id="live-step-goal">Describe the goal</h2><span class="muted">The agent plans from this.</span></div>
         ${liveNewGoalHTML(d)}</section>
       ${liveNewMoreHTML(d)}`;
   }
@@ -711,7 +667,7 @@ function liveViewNew() {
   const html = `
     <div class="new-head"><div><h1 tabindex="-1">${title}</h1>
       <p class="lede">${d.again ? 'A new turn in the same session, starting from the same goal. Change what made it fail first, like its size under More options.'
-        : d.from ? 'The agent picks up the same session with a new goal, on the same workspace and network rules.' : 'The agent works in its own gVisor sandbox, and you review what it changed before it reaches your code.'}</p></div></div>
+        : d.from ? 'The agent picks up the same session with a new goal, on the same workspace and network rules.' : 'AX runs the task on this computer, in its own sandbox.'}</p></div></div>
     ${follow}
     <div class="new-grid">
       <div style="min-width:0">${body}</div>
@@ -759,203 +715,15 @@ function liveNewTyped(el) {
 function liveNewEnvRefresh(d) {
   liveNewRepick(d);
   d.envSig = liveNewEnvSig();
-  const w = $('#live-where-body'); if (w) w.innerHTML = liveNewWhereHTML(d);
   const dbg = $('#live-new-debug'); if (dbg) dbg.checked = !!d.debug;
   const gm = $('#live-new-gatemap'); if (gm) gm.innerHTML = liveNewGateMapHTML(d);
   liveNewRefreshParts(d, '');
-}
-
-/* ---------- Running on another cluster ----------
-   `ax promote` does it: check first (--preflight-only), then send. You choose the cluster and atespace, whether it
-   starts there, and what happens to the original. */
-function livePromoteArgs(p, preflight) {
-  const ns = (STUDIO.info && STUDIO.info.axNamespace) || 'ax-system';
-  const args = ['promote', 'task', p.name, '--to', p.to, '--to-namespace', ns];
-  if (p.toAtespace && p.toAtespace !== LIVE.atespace) args.push('--to-atespace', p.toAtespace);
-  if (p.replace) args.push('--replace');
-  if (p.original === 'suspend') args.push('--suspend-source');
-  if (!p.start) args.push('--no-resume');
-  if (preflight) args.push('--preflight-only');
-  return args;
-}
-/** One line of what `ax promote` prints ("task.ax.io/fix-tests created (preflight only)"), in the UI's words.
-    A line this doesn't know stays as ax printed it. */
-function livePromoteLine(line) {
-  const m = /^(gateway|workspace|task)\.ax\.io\/(\S+) (created|reused|unchanged|replaced|resumed|suspended on the source)(?: \(preflight only\))?$/.exec(line.trim());
-  if (!m) return esc(line);
-  const n = `<span class="mono">${esc(m[2])}</span>`;
-  const [what, there] = { gateway: ['Gateway', 'that is already there'], workspace: ['workspace', 'that is already there'], task: ['task', 'that is already there'] }[m[1]];
-  if (m[3] === 'created') return `Creates the ${what} ${n} there`;
-  if (m[3] === 'reused' || m[3] === 'unchanged') return `Uses the ${what} ${n} ${there}`;
-  if (m[3] === 'replaced') return `Deletes the ${what} ${n} ${there}, then creates it again`;
-  if (m[3] === 'resumed') return `Starts ${n} there`;
-  return `Pauses ${n} on this cluster`;
-}
-/** A note `ax promote` prints about keys the other cluster must hold, in the UI's words. */
-function livePromoteNote(line) {
-  const m = /^Note: the target must provide the credentials that gateway (\S+) injects: (.+)$/.exec(line.trim());
-  if (!m) return esc(line.trim().replace(/^Note:\s*/i, ''));
-  const secrets = m[2].split(',').map((u) => u.trim().split('/').slice(-2, -1)[0]).filter(Boolean);
-  return liveKeysNote(secrets);
-}
-function liveKeysNote(secrets) {
-  return `That cluster needs its own copy of ${secrets.length === 1 ? 'the key' : 'the keys'} ${secrets.map((x) => `<span class="mono">${esc(x)}</span>`).join(', ')}. Keys aren't copied.`;
-}
-function liveOpenPromote(name) {
-  const targets = LIVE.contexts;
-  const others = targets.filter((c) => c.name !== LIVE.context);
-  /* Start on a cluster a check found AX on, else one that didn't fail its check, else the first other one. */
-  const chk = (c) => LIVE.clusterChecks[c.name];
-  const best = others.find((c) => chk(c) && !chk(c).error && chk(c).ax) || others.find((c) => !(chk(c) && chk(c).error)) || others[0];
-  const p = { name, to: best ? best.name : LIVE.context, toAtespace: LIVE.atespace, start: true, original: 'keep', replace: false,
-    check: null, checking: false, sending: false, error: '', seq: 0 };
-  const scope = ['--context', LIVE.context, '-a', LIVE.atespace];
-  const text = (r) => [String(r.stdout || '').trim(), String(r.stderr || '').trim()].filter(Boolean).join('\n');
-  const same = () => p.to === LIVE.context && (p.toAtespace || 'default') === LIVE.atespace;
-  const atesBad = () => !LIVE_NAME_RE.test(p.toAtespace || 'default');
-  const dlg = openDialog(dialogShell('lp', `Run ${esc(name)} on another cluster`, '', '<div id="lp-body"></div>', `<span class="left"></span><button class="btn ghost" data-action="close-dialog" id="lp-cancel">Cancel</button><button class="btn primary" id="lp-go">${icon('cloudUp', 'sm')}Send</button>`, true, 'cloudUp'));
-  const radio = (k, v, label) => `<button type="button" role="radio" aria-checked="${p[k] === v}" data-lp-pick="${k}" data-value="${v}" ${p.sending ? 'disabled' : ''}>${label}</button>`;
-  const toggle = (id, k, title, desc) => `<label class="toggle-line" style="margin-top:8px"><span class="tl-text"><b>${title}</b><span>${desc}</span></span>
-      <span class="switch"><input type="checkbox" role="switch" id="${id}" data-lp-toggle="${k}" ${p[k] ? 'checked' : ''} ${p.sending ? 'disabled' : ''} aria-label="${esc(title)}"><span class="track"></span><span class="thumb"></span></span></label>`;
-  const paint = () => {
-    const body = $('#lp-body', dlg);
-    if (!body) return;
-    const go = $('#lp-go', dlg);
-    if (!targets.length) {
-      body.innerHTML = `<p class="small">Your kubeconfig has no cluster yet. Add one to <span class="mono">~/.kube/config</span> and it shows up here.</p>`;
-      go.disabled = true;
-      return;
-    }
-    /* What sending it does, from ax promote's check. */
-    let check = '';
-    if (same()) {
-      check = '<p class="small" style="margin-top:14px" id="lp-check">That\'s where it is now. Pick another cluster or atespace.</p>';
-    } else if (atesBad()) {
-      check = '<p class="small" style="margin-top:14px;color:var(--wait)" id="lp-check">An atespace name is lowercase letters, digits and dashes.</p>';
-    } else if (p.checking) {
-      check = `<p class="small muted" id="lp-check" style="margin-top:14px">${icon('loader', 'xs')} Checking ${esc(liveShortCtx(p.to))}…</p>`;
-    } else if (p.check) {
-      const lines = String(p.check.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
-      const notes = lines.filter((l) => /^Note:/i.test(l));
-      const steps = lines.filter((l) => !/^Note:/i.test(l));
-      check = p.check.ok ? `<div class="live-title" style="margin-top:14px">The check passed. This is what sending it does:</div>
-          <ul class="live-steps" id="lp-check">${steps.map((l) => `<li>${livePromoteLine(l)}</li>`).join('') || '<li>Creates the task there</li>'}${p.original === 'delete' ? `<li>Deletes <span class="mono">${esc(name)}</span> on this cluster once it's there</li>` : ''}</ul>
-          ${notes.map((l) => `<p class="small lp-note" style="margin-top:8px">${icon('key', 'xs')} ${livePromoteNote(l)}</p>`).join('')}`
-        : `<div class="live-title" style="margin-top:14px">The check found a problem:</div>
-          <pre class="manifest" id="lp-check" style="margin-top:8px;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere" tabindex="0" aria-label="Check result">${esc(p.check.text || 'The check failed without saying why.')}</pre>
-          ${/--replace/.test(p.check.text) && !p.replace ? '<p class="small" style="margin-top:8px" id="lp-fix">To send it anyway, turn on <b>Replace the task that is there</b>.</p>' : ''}`;
-    }
-    const fresh = "The run there starts fresh. It pulls from the Git branch that was pushed, and it uses that cluster's own Gateway credentials. Files in this sandbox and keys stored on this cluster aren't copied.";
-    const cli = cliHint(['ax', '--context', LIVE.context].concat(LIVE.atespace !== 'default' ? ['-a', LIVE.atespace] : [], livePromoteArgs(p, false)).join(' '));
-    body.innerHTML = `
-      <div class="lp-grid">
-        <label class="small" style="display:grid;gap:4px" for="lp-to">Cluster
-          <select class="input" id="lp-to" ${p.sending ? 'disabled' : ''}>${targets.map((c) => `<option value="${esc(c.name)}" ${c.name === p.to ? 'selected' : ''}>${esc(liveShortCtx(c.name))}${liveIsLocal(c.name) ? ' (this computer)' : ''}${c.name === LIVE.context ? ' (where it is now)' : ''}</option>`).join('')}</select></label>
-        <label class="small" style="display:grid;gap:4px" for="lp-ates">Atespace there
-          <input class="input mono" id="lp-ates" value="${esc(p.toAtespace)}" autocomplete="off" spellcheck="false" ${p.sending ? 'disabled' : ''} ${atesBad() ? 'aria-invalid="true"' : ''}></label>
-      </div>
-      <div class="callout" style="margin-top:12px" id="lp-note">${icon('info')}<div>${fresh}</div></div>
-      <div class="lp-row"><span class="small lp-label" id="lp-orig-label">The original</span>
-        <div class="seg" role="radiogroup" aria-labelledby="lp-orig-label">${radio('original', 'keep', 'Keep it running')}${radio('original', 'suspend', 'Pause it')}${radio('original', 'delete', 'Delete it')}</div></div>
-      <p class="xsmall muted" style="margin-top:4px">${p.original === 'delete' ? 'Deleted once the copy is there. It can\'t be undone.' : p.original === 'suspend' ? 'Paused, so it doesn\'t run in both places. Resume it here anytime.' : 'It keeps running here too.'}</p>
-      ${toggle('lp-start', 'start', 'Start it there', 'Off creates it there paused, so you can start it when you choose.')}
-      ${toggle('lp-replace', 'replace', 'Replace the task that is there', 'If that cluster already has a task with this name, it is deleted first.')}
-      ${check}
-      ${p.error ? `<div class="callout warn" role="alert" style="margin-top:12px">${icon('alert')}<div style="overflow-wrap:anywhere;white-space:pre-wrap">${esc(p.error)}</div></div>` : ''}
-      <div class="live-cli-wrap" style="margin-top:12px;display:grid;gap:6px">${cli}</div>`;
-    const ready = !same() && !atesBad() && !p.checking && p.check && p.check.ok;
-    go.disabled = p.sending || !ready;
-    go.innerHTML = p.sending ? `${icon('loader', 'sm')}Sending…` : `${icon('cloudUp', 'sm')}Send to ${esc(liveShortCtx(p.to))}`;
-    /* ax promote can't be stopped once it's sending. */
-    const cancel = $('#lp-cancel', dlg);
-    if (cancel) cancel.disabled = p.sending;
-  };
-  /* Check first. ax promote --preflight-only reads both clusters and changes nothing. */
-  const runCheck = async () => {
-    const seq = ++p.seq;
-    p.check = null; p.error = '';
-    if (same() || atesBad()) { p.checking = false; paint(); return; }
-    p.checking = true;
-    paint();
-    let r;
-    try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, true))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
-    if (seq !== p.seq) return; // the options changed while this check ran
-    p.check = { ok: r.status === 0, text: text(r) };
-    p.checking = false;
-    paint();
-    const ok = p.check.ok;
-    announce(ok ? `The check passed. You can send it to ${p.to}.` : `The check found a problem with ${p.to}.`);
-  };
-  const finish = () => {
-    closeDialog(true);
-    toast(`<span class="mono">${esc(name)}</span> is on ${esc(liveShortCtx(p.to))}${p.toAtespace !== 'default' ? ` (atespace ${esc(p.toAtespace)})` : ''}`, { icon: 'cloudUp' });
-    announce(`${name} is on ${p.to}`);
-    if (p.to !== LIVE.context) liveUseContext(p.to);
-    liveUseAtespace(p.toAtespace);
-    location.hash = `#/task/${encodeURIComponent(name)}`;
-    render();
-    liveRefresh(true);
-  };
-  dlg.addEventListener('change', (e) => {
-    const t = e.target;
-    if (!t) return;
-    if (t.id === 'lp-to') { p.to = t.value; runCheck(); }
-    if (t.dataset && t.dataset.lpToggle) { p[t.dataset.lpToggle] = t.checked; runCheck(); }
-  });
-  dlg.addEventListener('input', (e) => { if (e.target && e.target.id === 'lp-ates') { p.toAtespace = e.target.value.trim() || 'default'; clearTimeout(p.timer); p.timer = setTimeout(runCheck, 400); } });
-  dlg.addEventListener('click', (e) => {
-    const b = e.target && e.target.closest && e.target.closest('[data-lp-pick]');
-    if (!b || p.sending) return;
-    p[b.dataset.lpPick] = b.dataset.value;
-    runCheck();
-  });
-  $('#lp-go', dlg).addEventListener('click', async () => {
-    if (p.sending || $('#lp-go', dlg).disabled) return;
-    p.sending = true; p.error = '';
-    paint();
-    let r;
-    try { r = await studioApi.ax(scope.concat(livePromoteArgs(p, false))); } catch (e) { r = { status: 1, stdout: '', stderr: e.message }; }
-    if (r.status !== 0) { p.sending = false; p.error = text(r) || 'ax promote failed.'; paint(); return; }
-    /* ax promote can pause the original, not delete it: Studio does that once it's there. */
-    if (p.original === 'delete') {
-      try { await studioApi.taskAction('delete', LIVE.context, LIVE.atespace, name); } catch (e) { toast(`It's on ${esc(p.to)}, but Studio couldn't delete it here: ${esc(e.message)}`, { icon: 'alert', timeout: 9000 }); }
-    }
-    p.sending = false;
-    finish();
-  });
-  paint();
-  if (targets.length) runCheck();
 }
 
 const LIVE_NEW_ACTIONS = {
   'live-new-agent': (el) => { if (LIVE.draft && !LIVE.draft.busy) { LIVE.draft.agent = el.dataset.agent; LIVE.draft.error = ''; render({ keepScroll: true }); } },
   'live-new-network': (el) => { if (LIVE.draft) { LIVE.draft.network = el.dataset.network; render({ keepScroll: true }); } },
   'live-new-debug': (el) => { const d = LIVE.draft; if (d) { d.debug = !!el.checked; d.debugTouched = true; liveNewRefreshParts(d, 'debug'); } },
-  /* Where it runs: this computer, or a remote cluster (the one in use, else the first). A follow-up stays put. */
-  'live-new-where': (el) => {
-    const d = LIVE.draft;
-    if (!d || d.from || d.busy) return;
-    const remotes = LIVE.contexts.filter((c) => !liveIsLocal(c.name));
-    if (el.dataset.where === 'local') {
-      if (!liveLocalReady()) return;
-      d.where = LIVE.local.context;
-    } else {
-      if (!remotes.length) return;
-      if (!d.where || liveIsLocal(d.where)) d.where = (remotes.find((c) => c.name === LIVE.context) || remotes[0]).name;
-    }
-    d.whereTouched = true;
-    if (!d.debugTouched) d.debug = liveIsLocal(d.where);
-    d.error = '';
-    render({ keepScroll: true });
-  },
-  'live-new-cluster': (el) => {
-    const d = LIVE.draft;
-    if (!d || d.from || d.busy || !LIVE.contexts.some((c) => c.name === el.dataset.context)) return;
-    d.where = el.dataset.context;
-    d.whereTouched = true;
-    if (!d.debugTouched) d.debug = liveIsLocal(d.where);
-    render({ keepScroll: true });
-  },
   'live-new-source': (el) => { const d = LIVE.draft; if (d) { d.source = ['empty', 'existing'].includes(el.dataset.source) ? el.dataset.source : 'git'; d.error = ''; render({ keepScroll: true }); } },
   /* An existing workspace: pressing the one picked again unpicks it. */
   'live-new-ws-pick': (el) => { const d = LIVE.draft; if (d) { d.existing = d.existing === el.dataset.ws ? '' : el.dataset.ws || ''; d.source = 'existing'; d.error = ''; render({ keepScroll: true }); } },
@@ -1023,7 +791,6 @@ const LIVE_NEW_ACTIONS = {
   'live-new-raw': () => { const d = LIVE.draft; if (d) { d.yaml = liveNewYAML(d, 'text', ''); d.raw = true; d.error = ''; render({ keepScroll: true }); } },
   'live-new-form': () => { if (LIVE.draft) { LIVE.draft.raw = false; LIVE.draft.error = ''; render({ keepScroll: true }); } },
   'live-new-run': () => liveNewRun(),
-  'live-promote': (el) => liveOpenPromote(el.dataset.task),
   'live-new-suggest': (el) => {
     if (!LIVE.draft) return;
     LIVE.draft.goal = el.dataset.text || '';

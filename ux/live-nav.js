@@ -18,9 +18,7 @@
 
    - Browser notifications, if you turn them on in Settings: when a task newly needs you (it waits for you, or failed),
      and when setup or an install finishes, while this tab is in the background.
-   - Links that open Studio on a cluster and atespace: ?context=<name>&atespace=<name>. Copy link puts one for the page
-     you're on on the clipboard.
-   - The cluster switcher in the top bar: the cluster Studio is connected to, and every other one in your kubeconfig.
+   - Links that open Studio on an atespace: ?atespace=<name>. Copy link puts one for the page you're on on the clipboard.
    - A compact task list, if you prefer more tasks on screen (Settings > Appearance). */
 
 /* ---------- Notifications ---------- */
@@ -80,20 +78,17 @@ function liveSetNotifyHTML() {
     </div>`;
 }
 
-/* ---------- Links to a cluster and atespace ---------- */
+/* ---------- Links to an atespace ---------- */
 LIVE.deepLinkDone = false;
-/** ?context= and ?atespace= in the address pick where Studio looks, once, then leave the address. */
+/** ?atespace= in the address picks where Studio looks, once, then leaves the address. Studio only works with AX on
+    this computer, so an older link's ?context= is dropped. */
 function liveApplyDeepLink() {
   if (LIVE.deepLinkDone) return;
   LIVE.deepLinkDone = true;
   let q;
   try { q = new URLSearchParams(location.search || ''); } catch (e) { return; }
-  const ctx = (q.get('context') || '').trim(), ates = (q.get('atespace') || '').trim();
-  if (!ctx && !ates) return;
-  if (ctx) {
-    if (LIVE.contexts.some((c) => c.name === ctx)) { if (ctx !== LIVE.context) liveUseContext(ctx); }
-    else toast(`The link names <span class="mono">${esc(ctx)}</span>, which isn't in your kubeconfig. Studio stays on ${esc(LIVE.context || 'no cluster')}.`, { icon: 'alert', timeout: 9000 });
-  }
+  const ates = (q.get('atespace') || '').trim();
+  if (!ates && !q.has('context')) return;
   if (ates) {
     if (/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(ates) && ates.length <= 63) liveUseAtespace(ates);
     else toast(`The link names an atespace AX can't have: <span class="mono">${esc(ates)}</span>.`, { icon: 'alert', timeout: 9000 });
@@ -102,45 +97,12 @@ function liveApplyDeepLink() {
   const rest = q.toString();
   try { history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`); } catch (e) { /* ignore */ }
 }
-/** A link to the page you're on, on the cluster and atespace you're looking at. */
+/** A link to the page you're on, in the atespace you're looking at. */
 function liveLinkHere() {
   const q = new URLSearchParams();
-  if (LIVE.context) q.set('context', LIVE.context);
   if (LIVE.atespace && LIVE.atespace !== 'default') q.set('atespace', LIVE.atespace);
-  return `${location.origin || ''}${location.pathname || '/'}?${q.toString()}${location.hash || '#/'}`;
-}
-
-/* ---------- The cluster card & switcher in the sidebar footer ---------- */
-LIVE.ctxMenu = false;
-function liveCtxSwitchHTML() {
-  const { bad, title, sub } = liveFootStatus();
-  const ic = icon(!LIVE.context || liveIsLocal(LIVE.context) ? 'laptop' : 'cloud');
-  if (LIVE.phase !== 'ready' || !LIVE.contexts.length) {
-    return `<a class="health-card ${bad ? 'attn' : ''}" href="#/places" id="live-health" aria-label="${esc(title)}: ${esc(sub)}. Open Where agents run.">${ic}<span class="hc-text"><span class="hc-title">${esc(title)}</span><span class="hc-sub">${esc(sub)}</span></span></a>`;
-  }
-  const cur = LIVE.context;
-  const ates = LIVE.atespace !== 'default' ? ` <span class="cs-ates">${esc(LIVE.atespace)}</span>` : '';
-  const items = LIVE.contexts.slice().sort((a, b) => (liveIsLocal(b.name) - liveIsLocal(a.name)) || a.name.localeCompare(b.name)).map((c) => {
-    const local = liveIsLocal(c.name);
-    const csub = local ? (LIVE.local && LIVE.local.state === 'Running' ? 'AX on this computer' : LIVE.local && LIVE.local.state === 'Stopped' ? 'AX on this computer · stopped' : 'Not set up') : (c.current ? 'Current in your kubeconfig' : 'Remote cluster');
-    return `<button type="button" class="cs-item" role="menuitemradio" aria-checked="${c.name === cur}" data-action="live-use-context" data-context="${esc(c.name)}" title="${esc(c.name)}">
-        ${icon(local ? 'laptop' : 'cloud', 'sm')}<span class="cs-text"><span class="cs-name">${esc(local ? 'This computer' : liveShortCtx(c.name))}</span><span class="cs-sub">${esc(csub)}</span></span>${c.name === cur ? icon('check', 'sm') : ''}</button>`;
-  }).join('');
-  return `<button type="button" class="health-card ${bad ? 'attn' : ''}" id="live-health" data-action="live-ctx-menu" aria-haspopup="menu" aria-expanded="${LIVE.ctxMenu}" aria-controls="live-ctx-menu" title="${esc(cur || 'No cluster')}">
-      ${ic}<span class="hc-text"><span class="hc-title">${esc(title)}${ates}</span><span class="hc-sub">${esc(sub)}</span></span><span class="hc-chev" aria-hidden="true">${icon('chevDown', 'xs')}</span></button>
-    <div class="cs-menu" id="live-ctx-menu" role="menu" aria-label="Clusters" ${LIVE.ctxMenu ? '' : 'hidden'}>
-      <div class="cs-head">Clusters in your kubeconfig</div>${items}
-      <a class="cs-foot" href="#/places" role="menuitem" data-action="live-ctx-places">${icon('server', 'sm')}Where agents run</a></div>`;
-}
-function liveCtxPaint() {
-  const box = $('#live-foot');
-  if (box) box.innerHTML = liveCtxSwitchHTML();
-}
-function liveCtxClose(focus) {
-  if (!LIVE.ctxMenu) return;
-  LIVE.ctxMenu = false;
-  liveCtxPaint();
-  if (focus) { const b = $('#live-health'); if (b) b.focus(); }
+  const qs = q.toString();
+  return `${location.origin || ''}${location.pathname || '/'}${qs ? `?${qs}` : ''}${location.hash || '#/'}`;
 }
 
 /* ---------- A compact task list ---------- */
@@ -161,28 +123,10 @@ const LIVE_NAV_ACTIONS = {
   },
   'live-copy-link': async () => {
     const link = liveLinkHere();
-    try { await navigator.clipboard.writeText(link); toast('Copied a link to this page, on this cluster', { icon: 'link' }); } catch (e) { toast(`Copy this link: <span class="mono">${esc(link)}</span>`, { icon: 'link', timeout: 12000 }); }
+    try { await navigator.clipboard.writeText(link); toast('Copied a link to this page', { icon: 'link' }); } catch (e) { toast(`Copy this link: <span class="mono">${esc(link)}</span>`, { icon: 'link', timeout: 12000 }); }
   },
-  'live-ctx-menu': () => {
-    LIVE.ctxMenu = !LIVE.ctxMenu;
-    liveCtxPaint();
-    if (LIVE.ctxMenu) { const first = $('#live-ctx-menu .cs-item[aria-checked="true"]') || $('#live-ctx-menu .cs-item'); if (first) first.focus(); }
-  },
-  'live-ctx-places': () => { LIVE.ctxMenu = false; location.hash = '#/places'; },
   'live-compact': (el) => {
     try { if (el.checked) localStorage.setItem(LIVE_COMPACT_KEY, '1'); else localStorage.removeItem(LIVE_COMPACT_KEY); } catch (e) { /* ignore */ }
     render({ keepScroll: true });
   },
 };
-if (LIVE.on) {
-  /* The switcher closes when you click elsewhere or press Escape; arrow keys move through it. */
-  document.addEventListener('click', (e) => { if (LIVE.ctxMenu && e.target && e.target.closest && !e.target.closest('#live-foot')) liveCtxClose(false); }, true);
-  document.addEventListener('keydown', (e) => {
-    if (!LIVE.ctxMenu) return;
-    const items = $$('#live-ctx-menu .cs-item, #live-ctx-menu .cs-foot');
-    const at = items.indexOf(document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); liveCtxClose(true); }
-    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = items[(at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]; if (n) n.focus(); }
-    else if (e.key === 'Tab') liveCtxClose(false);
-  }, true);
-}

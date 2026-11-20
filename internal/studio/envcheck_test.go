@@ -101,68 +101,6 @@ func newEnvTestServer(t *testing.T, r *clusterRunner) *Server {
 	return srv
 }
 
-func TestClusterCheckSaysWhatAClusterOffersAndWhatIsOnIt(t *testing.T) {
-	r := &clusterRunner{paths: map[string]string{"kubectl": "/usr/bin/kubectl"}, answers: teamCluster}
-	srv := newEnvTestServer(t, r)
-	c := srv.checkCluster(context.Background(), "gke-team-dev")
-	if c.Error != "" || c.Kubernetes != "v1.37.2-gke.1100" {
-		t.Fatalf("unexpected check: %+v", c)
-	}
-	byID := map[string]PreflightItem{}
-	for _, it := range c.Requirements {
-		byID[it.ID] = it
-	}
-	for id, want := range map[string]struct{ status, detail string }{
-		"version": {"ok", "v1.37.2-gke.1100"},
-		"nodes":   {"warn", "1/2 Ready · kernel 6.6.0-1012-gke is older than 6.8"},
-		"apis":    {"fail", "doesn't serve podcertificaterequests"},
-		"storage": {"warn", "ax-postgres needs one for its 10Gi volume"},
-	} {
-		got := byID[id]
-		if got.Status != want.status || !strings.Contains(got.Detail, want.detail) {
-			t.Errorf("%s: got %+v, want %s containing %q", id, got, want.status, want.detail)
-		}
-	}
-	if c.Substrate == nil || *c.Substrate != (Replicas{3, 3}) || c.Router == nil || *c.Router != (Replicas{0, 2}) {
-		t.Errorf("Substrate: got %+v and router %+v", c.Substrate, c.Router)
-	}
-	if c.WorkerPools != (Replicas{1, 2}) {
-		t.Errorf("worker pools: got %+v, want 1 of 2 ready", c.WorkerPools)
-	}
-	if c.AX == nil || *c.AX != (Replicas{1, 1}) || c.AXImage != "ghcr.io/google/ax/ax-server@sha256:abc" {
-		t.Errorf("AX: got %+v %q", c.AX, c.AXImage)
-	}
-	// Every command names the cluster and only reads.
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, line := range r.calls {
-		if !strings.Contains(line, "--context gke-team-dev") {
-			t.Errorf("a check names the cluster on every call: %s", line)
-		}
-		for _, verb := range []string{" apply", " delete", " create", " patch", " edit"} {
-			if strings.Contains(line, verb+" ") {
-				t.Errorf("a check only reads: %s", line)
-			}
-		}
-	}
-}
-
-func TestClusterCheckSaysWhyItCouldNotReachTheCluster(t *testing.T) {
-	r := &clusterRunner{paths: map[string]string{"kubectl": "/usr/bin/kubectl"}, answers: func(line string) kube.Result {
-		return kube.Result{ExitCode: 1, Stdout: `{"clientVersion":{"gitVersion":"v1.36.0"}}`, Stderr: "E1118 reflector\nUnable to connect to the server: dial tcp 34.118.12.7:443: i/o timeout\n"}
-	}}
-	srv := newEnvTestServer(t, r)
-	c := srv.checkCluster(context.Background(), "gke-broken")
-	if c.Error != "Unable to connect to the server: dial tcp 34.118.12.7:443: i/o timeout" || len(c.Requirements) != 0 || c.AX != nil {
-		t.Errorf("unexpected check: %+v", c)
-	}
-	// Without kubectl at all, the check says so.
-	srv2 := newEnvTestServer(t, &clusterRunner{answers: teamCluster})
-	if c := srv2.checkCluster(context.Background(), "gke-team-dev"); !strings.Contains(c.Error, "kubectl isn't installed") {
-		t.Errorf("no kubectl: got %+v", c)
-	}
-}
-
 func TestToolsSayWhereEachIsAndWhatAxDownloads(t *testing.T) {
 	r := &clusterRunner{paths: map[string]string{"ax": "/opt/ax/bin/ax", "kind": "/usr/local/bin/kind"}, answers: func(line string) kube.Result {
 		switch {
@@ -238,10 +176,11 @@ func TestOperationStagesMoveForwardOnAxProgressLinesOnly(t *testing.T) {
 	t.Fatal("the operation didn't finish")
 }
 
-func TestUninstallAndCancelGoThroughTheServer(t *testing.T) {
+func TestCancelGoesThroughTheServer(t *testing.T) {
 	block := make(chan struct{})
 	r := &clusterRunner{answers: func(line string) kube.Result {
-		if strings.Contains(line, " uninstall") {
+		// Only the start itself waits; reading its --help for the flags doesn't.
+		if strings.Contains(line, " local start") && !strings.Contains(line, "--help") {
 			<-block
 		}
 		return kube.Result{}
@@ -258,27 +197,16 @@ func TestUninstallAndCancelGoThroughTheServer(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := post("/api/env/uninstall", `{"context":"--kubeconfig=/etc/x"}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("a context that reads as a flag is refused, got %d", rec.Code)
-	}
 	if rec := post("/api/env/cancel", `{}`); rec.Code != http.StatusConflict {
 		t.Errorf("nothing to cancel: got %d", rec.Code)
 	}
-	rec := post("/api/env/uninstall", `{"context":"gke-team-dev"}`)
+	rec := post("/api/env/local/up", `{"purpose":"setup"}`)
 	if rec.Code != http.StatusAccepted {
-		t.Fatalf("uninstall returned %d: %s", rec.Code, rec.Body.String())
-	}
-	var op EnvOpSnapshot
-	_ = json.Unmarshal(rec.Body.Bytes(), &op)
-	if op.Action != "remote-uninstall" || op.Target != "gke-team-dev" {
-		t.Errorf("unexpected operation: %+v", op)
+		t.Fatalf("local up returned %d: %s", rec.Code, rec.Body.String())
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for !r.called("ax --context gke-team-dev -n ax-system uninstall") && time.Now().Before(deadline) {
+	for !r.called("ax -n ax-system local start") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
-	}
-	if !r.called("ax --context gke-team-dev -n ax-system uninstall") {
-		t.Fatalf("expected ax uninstall on the cluster, got %v", r.calls)
 	}
 	if rec := post("/api/env/cancel", `{}`); rec.Code != http.StatusOK {
 		t.Fatalf("cancel returned %d: %s", rec.Code, rec.Body.String())
@@ -298,33 +226,6 @@ func TestUninstallAndCancelGoThroughTheServer(t *testing.T) {
 	}
 	t.Fatal("the cancelled operation didn't end")
 }
-
-func TestClusterCheckEndpointNeedsASessionAndAContext(t *testing.T) {
-	srv := newEnvTestServer(t, &clusterRunner{paths: map[string]string{"kubectl": "/usr/bin/kubectl"}, answers: teamCluster})
-	h := srv.Handler()
-	cookie, _ := bootstrapTestSession(t, h)
-	get := func(path string, withCookie bool) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+path, nil)
-		if withCookie {
-			req.AddCookie(cookie)
-		}
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec
-	}
-	if rec := get("/api/env/check?context=gke-team-dev", false); rec.Code != http.StatusUnauthorized {
-		t.Errorf("without a session: got %d", rec.Code)
-	}
-	if rec := get("/api/env/check?context=--kubeconfig", true); rec.Code != http.StatusBadRequest {
-		t.Errorf("a context that reads as a flag: got %d", rec.Code)
-	}
-	rec := get("/api/env/check?context=gke-team-dev", true)
-	var c ClusterCheck
-	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil || rec.Code != http.StatusOK || c.Context != "gke-team-dev" || len(c.Requirements) != 4 {
-		t.Errorf("check returned %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestLocalUpRecordsWhatItWasStartedFor(t *testing.T) {
 	r := &clusterRunner{answers: func(string) kube.Result { return kube.Result{} }}
 	srv := newEnvTestServer(t, r)

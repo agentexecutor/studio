@@ -26,7 +26,6 @@ package studio
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -58,32 +57,7 @@ type ToolInfo struct {
 // what will work.
 type AXFlags struct {
 	RunnerVolumeImage bool `json:"runnerVolumeImage"`
-}
-
-// Replicas is a deployment's ready and wanted replicas.
-type Replicas struct {
-	Ready int `json:"ready"`
-	Total int `json:"total"`
-}
-
-// ClusterCheck is what a read-only look at a cluster found: what it offers
-// before Agent Substrate and AX can run on it, and whether each is installed.
-type ClusterCheck struct {
-	Context string `json:"context"`
-	// Error says why the cluster couldn't be reached. The rest is empty then.
-	Error string `json:"error,omitempty"`
-	// Kubernetes is the API server's version.
-	Kubernetes   string          `json:"kubernetes,omitempty"`
-	Requirements []PreflightItem `json:"requirements"`
-	// Substrate and Router are Agent Substrate's API server and router; nil
-	// when the deployment isn't there.
-	Substrate *Replicas `json:"substrate"`
-	Router    *Replicas `json:"router"`
-	// WorkerPools counts the pools with every replica ready, out of all pools.
-	WorkerPools Replicas  `json:"workerPools"`
-	AX          *Replicas `json:"ax"`
-	AXImage     string    `json:"axImage,omitempty"`
-	Checked     int64     `json:"checked"`
+	DefaultTaskImage  bool `json:"defaultTaskImage"`
 }
 
 const (
@@ -95,11 +69,6 @@ const (
 )
 
 var (
-	// minKubernetes is the oldest Kubernetes Agent Substrate and AX support.
-	minKubernetes = [2]int{1, 36}
-	// minNodeKernel is the oldest node kernel Substrate's image cache needs.
-	minNodeKernel = [2]int{6, 8}
-
 	kubectlClientRe = regexp.MustCompile(`Client Version:\s*(\S+)`)
 	kindVersionRe   = regexp.MustCompile(`kind (v[\w.-]+)`)
 	axVersionRe     = regexp.MustCompile(`(?i)ax version\s+(\S+)`)
@@ -213,7 +182,9 @@ func (s *Server) axFlags(ctx context.Context) AXFlags {
 		hctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		res, _ := s.runner.Run(hctx, kube.Spec{Name: s.axBinary, Args: []string{"local", "start", "--help"}})
-		s.extras.flags.RunnerVolumeImage = strings.Contains(res.Stdout+res.Stderr, "--runner-volume-image")
+		help := res.Stdout + res.Stderr
+		s.extras.flags.RunnerVolumeImage = strings.Contains(help, "--runner-volume-image")
+		s.extras.flags.DefaultTaskImage = strings.Contains(help, "--default-task-image")
 	})
 	return s.extras.flags
 }
@@ -286,19 +257,6 @@ func (s *Server) macVMAdvice() (detail, command string) {
 		found[0].command
 }
 
-// parseReplicas reads "ready/total" (ready may be empty); nil when the
-// deployment isn't there.
-func parseReplicas(v string) *Replicas {
-	v = strings.TrimSpace(v)
-	ready, total, ok := strings.Cut(v, "/")
-	if !ok || total == "" {
-		return nil
-	}
-	r, _ := strconv.Atoi(ready)
-	t, _ := strconv.Atoi(total)
-	return &Replicas{Ready: r, Total: t}
-}
-
 func nonEmptyLines(s string) []string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
@@ -318,163 +276,6 @@ func lastLine(s string) string {
 	return lines[len(lines)-1]
 }
 
-// checkCluster looks at a cluster in the kubeconfig, read-only, with kubectl.
-func (s *Server) checkCluster(ctx context.Context, kubeCtx string) ClusterCheck {
-	out := ClusterCheck{Context: kubeCtx, Requirements: []PreflightItem{}, Checked: time.Now().UnixMilli()}
-	kubectl, err := kube.ResolveKubectl(s.runner)
-	if err != nil || kubectl == "" {
-		out.Error = "kubectl isn't installed, so Studio can't look at the cluster. Set up AX on this computer once (it downloads kubectl), or install kubectl."
-		return out
-	}
-	k := func(args ...string) (kube.Result, error) {
-		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		return s.runner.Run(cctx, kube.Spec{Name: kubectl, Args: append([]string{"--context", kubeCtx, "--request-timeout=10s"}, args...)})
-	}
-
-	// kubectl prints its own version even when the cluster doesn't answer.
-	ver, _ := k("version", "-o", "json")
-	var vdoc struct {
-		ServerVersion struct {
-			GitVersion string `json:"gitVersion"`
-		} `json:"serverVersion"`
-	}
-	_ = json.Unmarshal([]byte(ver.Stdout), &vdoc)
-	server := vdoc.ServerVersion.GitVersion
-	if server == "" {
-		out.Error = nonEmptyStr(lastLine(ver.Stderr), "The cluster didn't answer.")
-		return out
-	}
-	out.Kubernetes = server
-
-	var wg sync.WaitGroup
-	var nodes, apis, storage, substrate, pools, ax kube.Result
-	run := func(dst *kube.Result, args ...string) {
-		wg.Add(1)
-		go func() { defer wg.Done(); *dst, _ = k(args...) }()
-	}
-	run(&nodes, "get", "nodes", "-o", `jsonpath={range .items[*]}{.status.nodeInfo.kernelVersion}|{.status.nodeInfo.architecture}|{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}`)
-	run(&apis, "api-resources", "--api-group=certificates.k8s.io", "-o", "name")
-	run(&storage, "get", "storageclass", "-o", `jsonpath={range .items[*]}{.metadata.name}|{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`)
-	run(&substrate, "-n", "ate-system", "get", "deployment", "ate-api-server", "atenet-router", "-o", `jsonpath={range .items[*]}{.metadata.name}|{.status.availableReplicas}/{.spec.replicas}{"\n"}{end}`)
-	run(&pools, "get", "workerpools", "-A", "-o", `jsonpath={range .items[*]}{.status.readyReplicas}/{.spec.replicas}{"\n"}{end}`)
-	run(&ax, "-n", s.axNamespace, "get", "deployment", "ax-server", "-o", `jsonpath={.status.availableReplicas}/{.spec.replicas}|{.spec.template.spec.containers[0].image}`)
-	wg.Wait()
-
-	want := fmt.Sprintf("%d.%d", minKubernetes[0], minKubernetes[1])
-	if olderThan(server, minKubernetes) {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "version", Label: "Kubernetes version", Status: "fail", Detail: fmt.Sprintf("%s; Agent Substrate and AX need %s or newer.", server, want)})
-	} else {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "version", Label: "Kubernetes version", Status: "ok", Detail: server})
-	}
-
-	var kernels, arches []string
-	ready, total := 0, 0
-	oldKernel := ""
-	for _, row := range nonEmptyLines(nodes.Stdout) {
-		f := strings.Split(row, "|")
-		for len(f) < 3 {
-			f = append(f, "")
-		}
-		total++
-		if f[2] == "True" {
-			ready++
-		}
-		if !contains(kernels, f[0]) {
-			kernels = append(kernels, f[0])
-		}
-		if !contains(arches, f[1]) {
-			arches = append(arches, f[1])
-		}
-		if oldKernel == "" && olderThan(f[0], minNodeKernel) {
-			oldKernel = f[0]
-		}
-	}
-	nodeWant := fmt.Sprintf("%d.%d", minNodeKernel[0], minNodeKernel[1])
-	switch {
-	case total == 0:
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "nodes", Label: "Nodes", Status: "warn", Detail: nonEmptyStr(lastLine(nodes.Stderr), "No nodes were listed.")})
-	case oldKernel != "":
-		// Not a failure: a vendor kernel can carry the feature without the version.
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "nodes", Label: "Nodes", Status: "warn",
-			Detail: fmt.Sprintf("%d/%d Ready · kernel %s is older than %s, which Substrate's image cache needs unless the vendor backported it.", ready, total, oldKernel, nodeWant)})
-	default:
-		status := "ok"
-		if ready != total {
-			status = "warn"
-		}
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "nodes", Label: "Nodes", Status: status,
-			Detail: fmt.Sprintf("%d/%d Ready · kernel %s · %s", ready, total, kernels[0], strings.Join(arches, ", "))})
-	}
-
-	var missing []string
-	served := nonEmptyLines(apis.Stdout)
-	for _, name := range []string{"clustertrustbundles", "podcertificaterequests"} {
-		ok := false
-		for _, l := range served {
-			if strings.HasPrefix(l, name+".") {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "apis", Label: "Certificate APIs", Status: "fail",
-			Detail: fmt.Sprintf("The cluster doesn't serve %s. Enable ClusterTrustBundle and PodCertificateRequest.", strings.Join(missing, " or "))})
-	} else {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "apis", Label: "Certificate APIs", Status: "ok", Detail: "ClusterTrustBundle and PodCertificateRequest are served"})
-	}
-
-	var defaults []string
-	for _, row := range nonEmptyLines(storage.Stdout) {
-		name, def, _ := strings.Cut(row, "|")
-		if def == "true" {
-			defaults = append(defaults, name)
-		}
-	}
-	if len(defaults) > 0 {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "storage", Label: "Default StorageClass", Status: "ok", Detail: strings.Join(defaults, ", ")})
-	} else {
-		out.Requirements = append(out.Requirements, PreflightItem{ID: "storage", Label: "Default StorageClass", Status: "warn",
-			Detail: "None. ax-postgres needs one for its 10Gi volume, or a volume you provision yourself."})
-	}
-
-	for _, row := range nonEmptyLines(substrate.Stdout) {
-		name, reps, _ := strings.Cut(row, "|")
-		switch name {
-		case "ate-api-server":
-			out.Substrate = parseReplicas(reps)
-		case "atenet-router":
-			out.Router = parseReplicas(reps)
-		}
-	}
-	for _, row := range nonEmptyLines(pools.Stdout) {
-		r := parseReplicas(row)
-		out.WorkerPools.Total++
-		if r != nil && r.Total > 0 && r.Ready >= r.Total {
-			out.WorkerPools.Ready++
-		}
-	}
-	reps, image, _ := strings.Cut(strings.TrimSpace(ax.Stdout), "|")
-	out.AX = parseReplicas(reps)
-	if out.AX != nil {
-		out.AXImage = image
-	}
-	return out
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 // exitStatusRe finds the code in an error like "exit status 2".
 var exitStatusRe = regexp.MustCompile(`exit status (\d+)`)
 
@@ -492,49 +293,6 @@ func exitCodeOf(err error) int {
 		}
 	}
 	return 0
-}
-
-// validContext refuses a context that could be read as a flag.
-func validContext(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || strings.HasPrefix(name, "-") || strings.ContainsAny(name, " \t\r\n") {
-		return "", fmt.Errorf("a valid Kubernetes context is required")
-	}
-	return name, nil
-}
-
-// handleClusterCheck serves GET /api/env/check?context=: a read-only look at a
-// cluster in the kubeconfig.
-func (s *Server) handleClusterCheck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	kubeCtx, err := validContext(r.URL.Query().Get("context"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, s.checkCluster(r.Context(), kubeCtx))
-}
-
-// handleRemoteUninstall serves POST /api/env/uninstall: `ax uninstall` on a
-// cluster. It removes ax-server and ax-postgres and takes ax-server off Agent
-// Substrate's allowlists; the database's volume is kept.
-func (s *Server) handleRemoteUninstall(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Context string `json:"context"`
-	}
-	if err := decodeJSONBody(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	kubeCtx, err := validContext(req.Context)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.runAXOperation(w, "remote-uninstall", kubeCtx, "", []string{"--context", kubeCtx, "-n", s.axNamespace, "uninstall"})
 }
 
 // handleEnvCancel serves POST /api/env/cancel: it interrupts the command that
