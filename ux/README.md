@@ -69,7 +69,8 @@ Activity; what AX says about its state is in the State card; this computer's che
 
 Four things to know about how tasks are written:
 
-- Antigravity uses its official image.
+- Antigravity uses the `agy-cli` image from [agentexecutor/images](https://github.com/agentexecutor/images/tree/main/agy-cli),
+  pinned by digest. `agy` is built into it, so its Gateway only allows the Gemini API and adds the key outside the sandbox.
 - The goal field of a Task is `goal.text`. AX called it `goal.spec` until mid-November 2026. If `ax apply` says it
   doesn't know `text`, Studio sends the same task again with `spec`.
 - Debug access is on by default. You can change it for each task. Without it the sandbox stays closed: there is no

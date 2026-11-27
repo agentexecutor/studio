@@ -1033,7 +1033,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const noNetDocs = axDocs(api.liveNewYAML(d, 'text', {}));
     if (noNetDocs.map((x) => x.kind).join() !== 'Task' || 'goal' in noNetDocs[0].spec || 'gateway' in noNetDocs[0].spec) throw new Error(JSON.stringify(noNetDocs));
     api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
-    need(main(p), ['Optional. What the agent should work on.', 'aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'storage.googleapis.com', 'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options', 'id="nt-creds-0-value"', 'type="password"']);
+    need(main(p), ['Optional. What the agent should work on.', 'aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options', 'id="nt-creds-0-value"', 'type="password"']);
+    /* agy is built into the agy-cli image: nothing is installed at start, so nothing passes through. */
+    if (!/^ghcr\.io\/agentexecutor\/agy-cli@sha256:[0-9a-f]{64}$/.test(A.image) || d.tls.length) throw new Error(JSON.stringify([A.image, d.tls]));
     d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
     const name = api.liveDraftName(d);
     if (!/^make-the-signer-tests-ab[0-9a-f]{2}$/.test(name)) throw new Error('name: ' + name);
@@ -1042,11 +1044,10 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const gw = docOf(docs, 'Gateway'), t = docOf(docs, 'Task');
     if (gw.metadata.name !== `gw-${name}`) throw new Error(gw.metadata.name);
     const egress = [
-      { tlsPassthrough: { hostnames: ['storage.googleapis.com'], ports: { numbers: [443] } } },
       { https: { hostnames: ['generativelanguage.googleapis.com'], effects: { replaceHeaders: [{ header: 'x-goog-api-key', credentialUri: 'ate-secret://k8s.io/default/ax-system/gemini-api-creds/GEMINI_API_KEY' }] } } },
     ];
     if (JSON.stringify(gw.spec.egress) !== JSON.stringify(egress)) throw new Error(JSON.stringify(gw.spec.egress));
-    const spec = { profile: { image: A.image, resources: { limits: { cpu: '2', memory: '4Gi' } } }, env: [{ name: 'GEMINI_API_KEY', value: 'placeholder' }, { name: 'AGY_RUNTIME_INSTALL', value: 'true' }],
+    const spec = { profile: { image: A.image, resources: { limits: { cpu: '2', memory: '4Gi' } } }, env: [{ name: 'GEMINI_API_KEY', value: 'placeholder' }],
       debug: true, goal: { text: 'Make the signer tests pass.\nExplain what was wrong.\n' }, gateway: { name: `gw-${name}` } };
     if (JSON.stringify(t.spec) !== JSON.stringify(spec)) throw new Error(JSON.stringify(t.spec));
   });
