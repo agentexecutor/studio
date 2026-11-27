@@ -102,7 +102,7 @@ function liveSetAboutHTML() {
   const def = (env.setupImages || {});
   const imgLine = (label, typed, img, from) => `${label}: ${typed ? `${mono(typed)} ${muted('(kept in this browser)')}` : img ? `${mono(img)} ${muted(from === 'env' ? '(from Studio\'s environment)' : '(Studio\'s default)')}` : 'None yet'}`;
   const images = `${imgLine('AX server', kept('serverImage'), def.serverImage || env.serverImageEnv, def.serverImageFrom || 'env')}<br>
-    ${def.taskImageAllowed ? `${imgLine('Default task image', kept('defaultTaskImage'), def.taskImage, def.taskImageFrom)}<br>` : ''}
+    ${def.runnerVolumeImageAllowed ? `${imgLine('Runner volume', kept('runnerVolumeImage'), def.runnerVolumeImage, def.runnerVolumeImageFrom)}<br>` : ''}
     ${muted('Change them under AX images on')} <a href="#/places">Local cluster</a>`;
   /* The atespace Studio lists and starts tasks in. It's Studio's own choice. */
   const ates = `<span class="ls-ates"><input class="input mono" id="ls-atespace" value="${esc(LIVE.atespace)}" aria-label="Atespace" autocomplete="off" spellcheck="false" maxlength="63">

@@ -91,7 +91,9 @@ function liveState(s) { return LIVE_STATES[s] || { label: 'Unknown', chip: 'paus
 function liveStateName(v) {
   return String(v || '').replace(/^TASK_STATE_/, '').toLowerCase().split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('') || 'Unknown';
 }
-const LIVE_RESULTS = { TASK_RESULT_SUCCEEDED: 'Succeeded', TASK_RESULT_FAILED: 'Failed', TASK_RESULT_CANCELLED: 'Cancelled' };
+/* AX's task runner image: a plain shell with AX's runner (v0.4.0-rc.2, multi-arch index). AX has no default task image
+   any more, so a task that just needs a shell (Blank, the sample task) names this one. */
+const LIVE_SHELL_IMAGE = 'ghcr.io/google/ax/ax-runner@sha256:0937ebe5ad2d8db6bb25e88ded44d2d65de1b1bd8f0a9a97c6bb3787407d9947';
 
 /** A Task from the API, with what the pages read most. The goal field is `text` in newer AX and `spec` in older. */
 function liveTask(doc) {
@@ -961,7 +963,7 @@ function liveTasksTableHTML(all, opts) {
     return `<tr id="live-trow-${esc(t.name)}">
       <td class="tk-title"><a href="#/task/${encodeURIComponent(t.name)}" class="mono">${esc(t.name)}</a>${goal || turn || t.atespace !== 'default' ? `<div class="xsmall muted tk-goal">${esc(goal)}${turn ? `${goal ? ' · ' : ''}${turn}` : ''}${t.atespace !== 'default' ? ` · ${esc(t.atespace)}` : ''}</div>` : ''}</td>
       <td>${busy ? `<span class="chip stopping">${icon('loader')}${LIVE_VERBS[busy].doing}</span>` : liveChip(t.state)}</td>
-      <td class="tk-img"><span class="tk-agent" title="${esc((spec.profile && spec.profile.image) || 'The default task image')}">${tpl.tile}<span class="tk-img-name">${esc(tpl.name)}</span></span></td>
+      <td class="tk-img"><span class="tk-agent" title="${esc((spec.profile && spec.profile.image) || 'No image')}">${tpl.tile}<span class="tk-img-name">${esc(tpl.name)}</span></span></td>
       <td class="tk-ws">${ws ? `<span class="mono">${esc(ws)}</span>` : '<span class="muted">None</span>'}</td>
       <td class="tk-res tnum">${lim ? esc(lim) : '<span class="muted">Default</span>'}</td>
       <td class="tk-created muted">${age ? `${esc(age)} ago` : 'Just now'}</td>
@@ -969,13 +971,13 @@ function liveTasksTableHTML(all, opts) {
   }).join('');
   return `<table class="table tasks-table"><thead><tr><th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th><th class="tk-act"><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
-/** A first task that always works: the cluster's default task image, a shell that waits, with debug on so Terminal
-    can open a shell in it. */
+/** A first task that always works: AX's runner image, a shell that waits, with debug on so Terminal can open a shell
+    in it. */
 async function liveSampleTask() {
   if (LIVE.sampleBusy || !LIVE.context) return;
   const name = `sample-${typeof liveHex === 'function' ? liveHex(3) : Date.now().toString(16).slice(-6)}`;
   const scope = ['--context', LIVE.context, '-a', LIVE.atespace];
-  const yaml = `apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: "${name}"\nspec:\n  commands: ["sh", "-c", "echo Hello from a sandbox on this computer; sleep infinity"]\n  debug: true\n`;
+  const yaml = `apiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: "${name}"\nspec:\n  profile:\n    image: "${LIVE_SHELL_IMAGE}"\n  commands: ["sh", "-c", "echo Hello from a sandbox on this computer; sleep infinity"]\n  debug: true\n`;
   LIVE.sampleBusy = true;
   render({ keepScroll: true });
   try {
@@ -1006,7 +1008,7 @@ function liveListProblemHTML() {
       : liveProblemHTML(`Can't reach AX on ${where}`, LIVE.error, liveCmd(['get', 'tasks']));
 }
 function liveSampleBtnHTML(primary) {
-  return `<button type="button" class="btn${primary ? ' primary' : ''}" data-action="live-sample-task" id="live-sample" ${LIVE.sampleBusy ? 'disabled' : ''} title="A shell in the cluster's default task image, with debug on">${icon(LIVE.sampleBusy ? 'loader' : 'play', 'sm')}${LIVE.sampleBusy ? 'Starting…' : 'Try a sample task'}</button>`;
+  return `<button type="button" class="btn${primary ? ' primary' : ''}" data-action="live-sample-task" id="live-sample" ${LIVE.sampleBusy ? 'disabled' : ''} title="A shell on AX's runner image, with debug on">${icon(LIVE.sampleBusy ? 'loader' : 'play', 'sm')}${LIVE.sampleBusy ? 'Starting…' : 'Try a sample task'}</button>`;
 }
 /** Home (#/): setup while AX isn't running, a clean zero state right after setup, or a quick launchpad once tasks exist. */
 function liveViewHome() {
@@ -1035,7 +1037,7 @@ function liveViewHome() {
         <section class="card home-start-card">
           <div class="hsc-ic" aria-hidden="true">${icon('terminal', 'sm')}</div>
           <h2>Try a sample task</h2>
-          <p class="small sub">Launch a ready-to-use sandbox in the cluster's default task image with debug enabled, so you can read its logs and open a shell right away.</p>
+          <p class="small sub">Launch a ready-to-use sandbox on AX's runner image with debug enabled, so you can read its logs and open a shell right away.</p>
           <div class="btn-row hsc-act">${liveSampleBtnHTML(false)}</div>
         </section>
       </div>
@@ -1138,7 +1140,7 @@ function liveTaskTemplate(spec) {
   const cfg = spec.config || {};
   const model = cfg.model || (cfg.agent && cfg.agent.model) || '';
   if (k) return { id: k, name: LIVE_AGENTS[k].name, tile: agentTile(k, 'sm'), model: model || LIVE_AGENTS[k].model };
-  return { id: '', name: image ? (typeof liveImageShort === 'function' ? liveImageShort(image) : image) : 'Default image', tile: byoTile('sm'), model };
+  return { id: '', name: image ? (typeof liveImageShort === 'function' ? liveImageShort(image) : image) : 'No image', tile: byoTile('sm'), model };
 }
 function liveLimitsText(spec) {
   const l = (spec.profile && spec.profile.resources && spec.profile.resources.limits) || {};
@@ -1152,17 +1154,6 @@ function liveEvTime(iso) {
 }
 function liveEv(cls, iconHTML, head, body, at) {
   return `<li class="ev ${cls}"><div class="ev-icon">${iconHTML}</div><div class="ev-body"><div class="ev-head">${head}${liveEvTime(at)}</div>${body || ''}</div></li>`;
-}
-/** What a finished task left: its result, exit code and output, when AX has recorded them. */
-function liveResultHTML(status) {
-  const o = status.outcome;
-  if (!o) return '';
-  const result = LIVE_RESULTS[o.result] || '';
-  const code = typeof o.exitCode === 'number' ? o.exitCode : result ? 0 : null;
-  const why = o.status && o.status.message;
-  if (!result && code == null && !o.output && !why) return '';
-  return `<div id="live-result" style="margin-top:8px">${liveKV([['Result', esc(result)], ['Exit code', code == null ? '' : `<span class="mono">${esc(code)}</span>`], ['Reason', why ? esc(why) : '']])}</div>
-      ${o.output ? `<pre class="manifest" style="margin-top:10px" tabindex="0" aria-label="Task output">${esc(o.output)}</pre>` : ''}`;
 }
 /** Activity: what AX records about the task, in order. AX doesn't stream the agent's own steps yet. */
 function liveActivityEvents(name, t, stateName, spec, status, meta, tpl) {
@@ -1184,13 +1175,7 @@ function liveActivityEvents(name, t, stateName, spec, status, meta, tpl) {
   const exit = typeof liveLogsAgentExit === 'function' && stateName === 'Running' ? liveLogsAgentExit(name) : null;
   if (exit) out.push({ at: exit.at, order: 1, html: liveEv('fail', icon('xCircle', 'sm'), `<span class="who">${esc(tpl.name)}</span><span class="what">stopped with an error${exit.code ? ` (exit code ${esc(exit.code)})` : ''}</span>`,
     `${exit.error ? `<div class="ev-text mono">${esc(exit.error)}</div>` : ''}<div class="ev-text muted"><a href="#/task/${encodeURIComponent(name)}/logs">See what it printed in Logs</a></div>`, exit.at) });
-  const detail = status.statusDetail && (status.statusDetail.detail || status.statusDetail.reason);
-  if (stateName === 'Crashed' && detail) out.push({ at: meta.updateTime, order: 2, html: liveEv('fail', icon('xCircle', 'sm'), '<span class="who">AX</span><span class="what">stopped the task</span>', `<div class="ev-text">${esc(detail)}</div>`, meta.updateTime) });
-  const result = liveResultHTML(status);
-  if (result) {
-    const failed = status.outcome && status.outcome.result === 'TASK_RESULT_FAILED';
-    out.push({ at: (status.outcome && status.outcome.finishTime) || meta.updateTime, order: 3, html: liveEv(failed ? 'fail' : 'done', icon(failed ? 'xCircle' : 'checkCircle', 'sm'), `<span class="who">${esc(tpl.name)}</span><span class="what">finished</span>`, result, (status.outcome && status.outcome.finishTime) || meta.updateTime) });
-  }
+  if (stateName === 'Crashed') out.push({ at: meta.updateTime, order: 2, html: liveEv('fail', icon('xCircle', 'sm'), '<span class="who">AX</span><span class="what">says its sandbox crashed</span>', `<div class="ev-text muted"><a href="#/task/${encodeURIComponent(name)}/logs">See what it printed in Logs</a></div>`, meta.updateTime) });
   const ms = (x) => { const v = Date.parse(x.at || ''); return isNaN(v) ? Infinity : v; };
   return out.sort((a, b) => a.order - b.order || ms(a) - ms(b));
 }
@@ -1208,7 +1193,6 @@ function liveActivityHTML(name, t, stateName, spec, status, meta, tpl, events) {
     ['Session', spec.sessionId ? `<span class="mono">${esc(spec.sessionId)}</span>` : ''],
     /* The sandbox's names in Agent Substrate (the actor and its uid), for kubectl and the worker's logs. */
     ['Sandbox', status.actor ? `<span class="mono">${esc(status.actor)}</span>${status.actorUid ? ` <span class="muted">· uid</span> <span class="mono">${esc(status.actorUid)}</span> <button class="btn ghost sm icon" data-action="copy" data-text="${esc(status.actorUid)}" aria-label="Copy the sandbox uid">${icon('copy', 'sm')}</button>` : ''}` : ''],
-    ['Previous attempt', status.previousFailure ? esc(status.previousFailure) : ''],
     ['Labels', labels],
     ['Created', created && !isNaN(created) ? esc(created.toLocaleString()) : ''],
   ]);
@@ -1294,7 +1278,6 @@ function liveReachHTML(gw) {
   return `${head(label)}${map(hosts, hosts.length ? [] : [{ domain: 'All outbound network' }])}<ul class="facts one-col reach-facts">${facts.join('')}</ul>${from}`;
 }
 function liveTaskSideHTML(name, t, stateName, spec, status, busy) {
-  const detail = status.statusDetail && (status.statusDetail.detail || status.statusDetail.reason);
   /* The task's command exited with an error while AX still calls the task running: its logs say so. */
   const exited = stateName === 'Running' && typeof liveLogsAgentExit === 'function' ? liveLogsAgentExit(name) : null;
   const nsTone = stateName === 'Crashed' ? 'fail' : exited ? 'attn' : stateName === 'Suspended' ? 'paused' : 'calm';
@@ -1303,15 +1286,11 @@ function liveTaskSideHTML(name, t, stateName, spec, status, busy) {
       : stateName === 'Running' ? 'Running in its sandbox'
         : liveState(stateName).label;
   const tab = (k, label) => `<a href="#/task/${encodeURIComponent(name)}/${k}">${label}</a>`;
-  /* When AX says why it stopped, say what to change. */
-  const remedy = /out of memory|oom/i.test(detail || '') ? ' Give it more memory when you start it again.' : '';
   const nsBody = (exited ? `Its command exited${exited.time ? ` at ${esc(exited.time)}` : ''}, though AX still shows the task as running. ${tab('logs', 'Logs')} has what it printed.`
-    : stateName === 'Crashed' ? (detail ? esc(detail) + remedy : `${tab('logs', 'Logs')} has what it printed.`)
+    : stateName === 'Crashed' ? `${tab('logs', 'Logs')} has what it printed.`
     : stateName === 'Suspended' ? "Its sandbox is checkpointed and nothing is running. Resume it when you're ready."
         : spec.debug ? `Open a shell in ${tab('terminal', 'Terminal')}, or read ${tab('logs', 'Logs')}.`
           : `${tab('logs', 'Logs')} has what it prints.`)
-    /* What AX says about the state, when it says something and the state isn't already explained by it. */
-    + (detail && stateName !== 'Crashed' ? ` <span class="ns-detail">AX says: ${esc(detail)}</span>` : '')
     + (typeof liveLogsNextHTML === 'function' ? liveLogsNextHTML(name) : '');
   const next = `<section class="card card-pad next-card s-${nsTone}" id="next-step" data-tone="${nsTone}" aria-labelledby="ns-k">
       <span class="ns-axel" aria-hidden="true">${axo(liveAxoMood(stateName), { decorative: true, cls: 'axo-ns' }).replace('<svg ', '<svg data-follow ')}</span>

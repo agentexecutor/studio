@@ -33,22 +33,15 @@ const (
 	// Agent images such as agentexecutor/images' agy-cli don't ship a runner
 	// of their own, so without it their tasks can't start.
 	DefaultRunnerVolumeImage = "ghcr.io/google/ax/ax-runner-volume@sha256:a85dc4ac3e4b060d9157e3f80c01463544e79a0e92106bacad1e4f3f3cf5e4d5"
-	// DefaultTaskImage is the image of a task that doesn't name one
-	// (--default-task-image), for an ax that still takes the flag: a shell
-	// with AX's task runner.
-	DefaultTaskImage = "ghcr.io/google/ax/ax-runner@sha256:0937ebe5ad2d8db6bb25e88ded44d2d65de1b1bd8f0a9a97c6bb3787407d9947"
 )
 
 // SetupImages are the images setup uses unless you choose others, and where
-// each comes from: "env" when AX_SERVER_IMAGE, AX_DEFAULT_TASK_IMAGE or
-// AX_RUNNER_VOLUME_IMAGE sets it for Studio, "studio" for Studio's pinned
-// default.
+// each comes from: "env" when AX_SERVER_IMAGE or AX_RUNNER_VOLUME_IMAGE sets it
+// for Studio, "studio" for Studio's pinned default. AX no longer has a default
+// task image (rc.2 dropped --default-task-image): every task names its own.
 type SetupImages struct {
 	ServerImage              string `json:"serverImage"`
 	ServerImageFrom          string `json:"serverImageFrom"`
-	TaskImage                string `json:"taskImage"`
-	TaskImageFrom            string `json:"taskImageFrom"`
-	TaskImageAllowed         bool   `json:"taskImageAllowed"`
 	RunnerVolumeImage        string `json:"runnerVolumeImage"`
 	RunnerVolumeImageFrom    string `json:"runnerVolumeImageFrom"`
 	RunnerVolumeImageAllowed bool   `json:"runnerVolumeImageAllowed"`
@@ -59,14 +52,10 @@ type SetupImages struct {
 func setupImages(flags AXFlags) SetupImages {
 	out := SetupImages{
 		ServerImage: DefaultServerImage, ServerImageFrom: "studio",
-		TaskImage: DefaultTaskImage, TaskImageFrom: "studio", TaskImageAllowed: flags.DefaultTaskImage,
 		RunnerVolumeImage: DefaultRunnerVolumeImage, RunnerVolumeImageFrom: "studio", RunnerVolumeImageAllowed: flags.RunnerVolumeImage,
 	}
 	if v := strings.TrimSpace(os.Getenv("AX_SERVER_IMAGE")); v != "" {
 		out.ServerImage, out.ServerImageFrom = v, "env"
-	}
-	if v := strings.TrimSpace(os.Getenv("AX_DEFAULT_TASK_IMAGE")); v != "" {
-		out.TaskImage, out.TaskImageFrom = v, "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("AX_RUNNER_VOLUME_IMAGE")); v != "" {
 		out.RunnerVolumeImage, out.RunnerVolumeImageFrom = v, "env"

@@ -360,7 +360,6 @@ type localActionRequest struct {
 	Name              string `json:"name"`
 	Workers           int    `json:"workers"`
 	ServerImage       string `json:"serverImage"`
-	DefaultTaskImage  string `json:"defaultTaskImage"`
 	RunnerVolumeImage string `json:"runnerVolumeImage"`
 	// Purpose is the button that started `ax local start`: setup, start,
 	// update or repair. It only changes how the operation is worded.
@@ -397,11 +396,6 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	taskImg, err := validateOptionalFlagImage(req.DefaultTaskImage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	runnerImg, err := validateOptionalFlagImage(req.RunnerVolumeImage)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -412,9 +406,6 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	flags := s.axFlags(r.Context())
 	if srvImg == "" && strings.TrimSpace(os.Getenv("AX_SERVER_IMAGE")) == "" {
 		srvImg = DefaultServerImage
-	}
-	if taskImg == "" && strings.TrimSpace(os.Getenv("AX_DEFAULT_TASK_IMAGE")) == "" && flags.DefaultTaskImage {
-		taskImg = DefaultTaskImage
 	}
 	if runnerImg == "" && strings.TrimSpace(os.Getenv("AX_RUNNER_VOLUME_IMAGE")) == "" && flags.RunnerVolumeImage {
 		runnerImg = DefaultRunnerVolumeImage
@@ -430,9 +421,6 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	args := []string{"-n", s.axNamespace, "local", "start", "--name", name, "--workers", strconv.Itoa(workers)}
 	if srvImg != "" {
 		args = append(args, "--server-image", srvImg)
-	}
-	if taskImg != "" {
-		args = append(args, "--default-task-image", taskImg)
 	}
 	if runnerImg != "" {
 		args = append(args, "--runner-volume-image", runnerImg)

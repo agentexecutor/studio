@@ -47,9 +47,8 @@ function liveNotifyNeeds() {
   LIVE.needsKnown = names;
   if (!known) return;
   needs.filter((t) => !known.has(t.name)).forEach((t) => {
-    const detail = t.doc && t.doc.status && t.doc.status.statusDetail && (t.doc.status.statusDetail.detail || '');
     const title = (t.goal || t.name).split('\n')[0].slice(0, 80);
-    const body = `Crashed${detail ? `: ${detail}` : ''}`;
+    const body = 'Crashed';
     liveNotify(title, `${body} · ${t.name}`, `#/task/${encodeURIComponent(t.name)}`, `ax-${t.name}`);
   });
 }
