@@ -97,7 +97,7 @@ function liveLogsTick() {
   const row = LIVE.tasks.find((t) => t.name === name);
   const L = LIVE.logs[name];
   if (!row || !L || L.loading || !L.at) return;
-  const running = liveState(row.state).active || row.state === 'Idle' || row.state === 'RequiresAction';
+  const running = liveState(row.state).active;
   const every = r.parts[2] === 'logs' && running ? LIVE_LOGS_MS : running ? LIVE_LOGS_IDLE_MS : 0;
   if (every && Date.now() - L.at >= every - 200) liveLoadLogs(name);
 }
@@ -226,7 +226,7 @@ function liveLogsInnerHTML(name, stateName) {
   const lines = L.lines.map(liveLogLine);
   const shown = withSandbox ? lines : lines.filter((l) => l.src !== 'sandbox');
   const hidden = lines.length - shown.length;
-  const running = liveState(stateName).active || stateName === 'Idle' || stateName === 'RequiresAction';
+  const running = liveState(stateName).active;
   const copyText = shown.map((l) => `${l.time} ${l.text}`).join('\n');
   let body;
   if (L.error && !lines.length) {

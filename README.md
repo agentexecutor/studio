@@ -147,7 +147,7 @@ Requests that change something also need the `X-AX-CSRF-Token` header from the b
 | Variable | What it does |
 |:---|:---|
 | `AX_SERVER_IMAGE` | The AX server image setup deploys, instead of Studio's own. You can also enter one in Studio. |
-| `AX_DEFAULT_TASK_IMAGE` | The image of a task that doesn't name one, instead of Studio's own |
+| `AX_RUNNER_VOLUME_IMAGE` | The runner volume setup mounts into every task, instead of Studio's own. Agent images without a runner of their own, such as `agy-cli`, need one. |
 | `KUBECONFIG` | The kubeconfig files Studio reads (default `~/.kube/config`). Studio never writes to them. |
 | `AX_HOME` | Where AX keeps its files (default `~/.ax`). Studio looks for its tools in `$AX_HOME/bin`. |
 | `AX_BIN_DIR` | Where to look for `ax`, `kubectl` and `kind`, instead of `~/.ax/bin` |

@@ -254,7 +254,6 @@ func TestLocalUpPassesImageOverrides(t *testing.T) {
 
 func TestLocalUpUsesStudiosImagesByDefault(t *testing.T) {
 	t.Setenv("AX_SERVER_IMAGE", "")
-	t.Setenv("AX_DEFAULT_TASK_IMAGE", "")
 	start := func(t *testing.T, help string) string {
 		t.Helper()
 		runner := argsRunner{ran: make(chan []string, 1), help: help}
@@ -274,18 +273,25 @@ func TestLocalUpUsesStudiosImagesByDefault(t *testing.T) {
 		}
 		return strings.Join(<-runner.ran, " ")
 	}
-	got := start(t, "  --server-image string\n  --default-task-image string\n")
-	if want := "--server-image " + DefaultServerImage + " --default-task-image " + DefaultTaskImage; !strings.HasSuffix(got, want) {
-		t.Errorf("ax arguments = %q, want them to end with %q", got, want)
-	}
-	// An ax without --default-task-image still gets the server image.
-	if got := start(t, "  --server-image string\n"); strings.Contains(got, "--default-task-image") || !strings.Contains(got, "--server-image "+DefaultServerImage) {
+	// AX has no default task image any more: setup never passes one.
+	if got := start(t, "  --server-image string\n"); strings.Contains(got, "--default-task-image") || !strings.HasSuffix(got, "--server-image "+DefaultServerImage) {
 		t.Errorf("ax arguments = %q", got)
 	}
 	// An image in Studio's environment wins: ax reads it from there.
 	t.Setenv("AX_SERVER_IMAGE", "example.com/ax-server:v2")
 	if got := start(t, ""); strings.Contains(got, "--server-image") {
 		t.Errorf("with AX_SERVER_IMAGE set, ax arguments = %q", got)
+	}
+	t.Setenv("AX_SERVER_IMAGE", "")
+	// An ax that takes --runner-volume-image gets Studio's runner volume, so
+	// agent images without a runner of their own (agy-cli) can start.
+	t.Setenv("AX_RUNNER_VOLUME_IMAGE", "")
+	if got := start(t, "  --server-image string\n  --runner-volume-image string\n"); !strings.HasSuffix(got, "--server-image "+DefaultServerImage+" --runner-volume-image "+DefaultRunnerVolumeImage) {
+		t.Errorf("ax arguments = %q, want the runner volume", got)
+	}
+	t.Setenv("AX_RUNNER_VOLUME_IMAGE", "example.com/ax-runner-volume:v2")
+	if got := start(t, "  --server-image string\n  --runner-volume-image string\n"); strings.Contains(got, "--runner-volume-image") {
+		t.Errorf("with AX_RUNNER_VOLUME_IMAGE set, ax arguments = %q", got)
 	}
 }
 

@@ -50,15 +50,15 @@ const TOOLS = () => [
   { name: 'kind', version: 'v0.31.0', status: 'warn', detail: 'The kind at /opt/homebrew/bin/kind is older than v0.32.0. ax downloads a newer one into ~/.ax/bin when you set up AX on this computer.' },
 ];
 /* The images setup uses unless you choose others: Studio's own, pinned to the AX in its go.mod. */
-const SETUP_IMAGES = () => ({ serverImage: 'ghcr.io/acme/ax/ax-server:v1@sha256:' + 'b438'.repeat(16), serverImageFrom: 'studio', taskImage: 'ghcr.io/acme/ax/ax-task-runner:v1@sha256:' + '0ec6'.repeat(16), taskImageFrom: 'studio', taskImageAllowed: true });
+const SETUP_IMAGES = () => ({ serverImage: 'ghcr.io/acme/ax/ax-server:v1@sha256:' + 'b438'.repeat(16), serverImageFrom: 'studio', runnerVolumeImage: 'ghcr.io/acme/ax/ax-runner-volume:v1@sha256:' + '0ec6'.repeat(16), runnerVolumeImageFrom: 'studio', runnerVolumeImageAllowed: false });
 const envRunning = () => ({
   os: 'darwin', arch: 'arm64', canStartLocal: true, preflight: CHECKS_OK.map((c) => Object.assign({}, c)),
   local: { name: 'ax-local', state: 'Running', kubeContext: 'ax-local', substrateStatus: 'ate-api-server (1/1 available)', axStatus: 'ax-server (1/1 available in ax-system)', access: 'ok' },
-  contexts: CONTEXTS.map((c) => Object.assign({}, c)), currentContext: 'ax-local', tools: TOOLS(), axFlags: { runnerVolumeImage: false, defaultTaskImage: true }, setupImages: SETUP_IMAGES(),
+  contexts: CONTEXTS.map((c) => Object.assign({}, c)), currentContext: 'ax-local', tools: TOOLS(), axFlags: { runnerVolumeImage: false }, setupImages: SETUP_IMAGES(),
 });
 const envFresh = () => ({
   os: 'darwin', arch: 'arm64', canStartLocal: true, preflight: CHECKS_OK.map((c) => Object.assign({}, c)),
-  local: { name: 'ax-local', state: 'NotFound', kubeContext: 'N/A', substrateStatus: '', axStatus: '' }, contexts: [], currentContext: '', tools: TOOLS(), axFlags: { runnerVolumeImage: false, defaultTaskImage: true }, setupImages: SETUP_IMAGES(),
+  local: { name: 'ax-local', state: 'NotFound', kubeContext: 'N/A', substrateStatus: '', axStatus: '' }, contexts: [], currentContext: '', tools: TOOLS(), axFlags: { runnerVolumeImage: false }, setupImages: SETUP_IMAGES(),
 });
 const DIGEST = 'sha256:' + 'f00d'.repeat(16);
 /* What a read-only check of a cluster finds: gke-team-dev runs Agent Substrate (AX once it's installed there), and
@@ -259,18 +259,18 @@ function makeBackend(opts) {
     tasks: {
       'ax-local': [
         taskDoc('readme-polish', 'SUSPENDED', { goal: 'Tighten the README.', spec: { workspace: { name: 'itsdangerous' }, sessionId: 's-readme' }, status: { conditions: [{ type: 'Ready', status: 'False', reason: 'Suspended', message: 'Actor is suspended' }] } }),
-        taskDoc('fix-flaky-tests', 'WORKING', {
+        taskDoc('fix-flaky-tests', 'RUNNING', {
           goal: 'Fix the flaky tests.\nExplain the cause.', labels: { team: 'platform' },
           spec: { profile: { image: 'gcr.io/p/claude-code@sha256:abc', resources: { limits: { cpu: '2', memory: '4Gi' } } }, workspace: { name: 'itsdangerous' }, gateway: { name: 'review-bot-gw' }, debug: true, sessionId: 's-fix' },
           status: { conditions: [{ type: 'Ready', status: 'True', reason: 'TaskRunning', message: 'Task is running and its workspace is ready' }] },
         }),
         /* An older AX calls the goal field "spec". */
-        taskDoc('upgrade-node-22', 'FAILED', { goal: 'Upgrade to Node 22.', goalField: 'spec', spec: { sessionId: 's-up' }, status: { statusDetail: { reason: 'TASK_STATUS_REASON_SANDBOX_CRASHED', detail: 'sandbox exited: out of memory (limit 512Mi)' } } }),
-        taskDoc('changelog-draft', 'COMPLETED', { goal: 'Draft the changelog.', spec: { sessionId: 's-log', workspace: { name: 'ws-changelog-draft' }, gateway: { name: 'gw-changelog-draft' } }, status: { outcome: { result: 'TASK_RESULT_SUCCEEDED', output: 'Wrote CHANGES.rst for 2.3.\nPushed branch ax/changelog-draft.' } } }),
-        taskDoc('signer-b2c3', 'WORKING', { goal: 'Also add a regression test.', created: '2026-11-17T10:05:00Z', spec: { sessionId: 's-sign' } }),
-        taskDoc('signer-a1b2', 'COMPLETED', { goal: 'Make the signer tests pass.', created: '2026-11-17T10:00:00Z', spec: { sessionId: 's-sign' } }),
+        taskDoc('upgrade-node-22', 'CRASHED', { goal: 'Upgrade to Node 22.', goalField: 'spec', spec: { sessionId: 's-up' } }),
+        taskDoc('changelog-draft', 'SUSPENDED', { goal: 'Draft the changelog.', spec: { sessionId: 's-log', workspace: { name: 'ws-changelog-draft' }, gateway: { name: 'gw-changelog-draft' } } }),
+        taskDoc('signer-b2c3', 'RUNNING', { goal: 'Also add a regression test.', created: '2026-11-17T10:05:00Z', spec: { sessionId: 's-sign' } }),
+        taskDoc('signer-a1b2', 'SUSPENDED', { goal: 'Make the signer tests pass.', created: '2026-11-17T10:00:00Z', spec: { sessionId: 's-sign' } }),
       ],
-      'gke-team-dev': [taskDoc('nightly-triage', 'WORKING', { goal: 'Triage the failing builds.', spec: { sessionId: 's-night' } })],
+      'gke-team-dev': [taskDoc('nightly-triage', 'RUNNING', { goal: 'Triage the failing builds.', spec: { sessionId: 's-night' } })],
     },
     changes: {
       'fix-flaky-tests': { taskName: 'fix-flaky-tests', available: true, repoDir: '/workspace', branch: 'main', fullPatch: PATCH_SIGNER + PATCH_NOTE, files: [
@@ -361,7 +361,7 @@ function makeBackend(opts) {
       if (!docs.some((d) => d.kind === 'Task')) return err('no Task in the file');
       return ok(out.join('\n') + '\n');
     }
-    if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_WORKING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
+    if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_RUNNING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
     if (a[0] === 'promote' && a[1] === 'task') {
       const name = a[2], to = a[a.indexOf('--to') + 1], pre = a.includes('--preflight-only') ? ' (preflight only)' : '';
       const src = find(ctx, name);
@@ -377,7 +377,7 @@ function makeBackend(opts) {
       out.push(`task.ax.io/${name} resumed${pre}`);
       if (!pre) {
         if (there) list(to).splice(list(to).indexOf(there), 1);
-        list(to).push(taskDoc(name, 'WORKING', { goal: (src.spec.goal || {}).text || (src.spec.goal || {}).spec, spec: Object.assign({}, src.spec) }));
+        list(to).push(taskDoc(name, 'RUNNING', { goal: (src.spec.goal || {}).text || (src.spec.goal || {}).spec, spec: Object.assign({}, src.spec) }));
         if (a.includes('--suspend-source')) src.status.state = 'TASK_STATE_SUSPENDED';
       }
       return ok(out.join('\n') + '\n', notes.join('\n'));
@@ -420,7 +420,7 @@ function makeBackend(opts) {
         if (!t) return answer(404, { error: `task default/${name} not found`, code: 'NotFound' });
         if (u.pathname.endsWith('/resume') && name === 'upgrade-node-22') return answer(502, { error: 'no free workers available', code: 'ResourceExhausted' });
         if (u.pathname.endsWith('/delete')) list(ctx).splice(list(ctx).indexOf(t), 1);
-        else t.status.state = u.pathname.endsWith('/suspend') ? 'TASK_STATE_SUSPENDED' : 'TASK_STATE_WORKING';
+        else t.status.state = u.pathname.endsWith('/suspend') ? 'TASK_STATE_SUSPENDED' : 'TASK_STATE_RUNNING';
         return answer(200, { ok: true });
       }
       case '/api/workspaces': return answer(200, { workspaces: B.workspaces });
@@ -576,7 +576,7 @@ function makeContext(B, env) {
   liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
   liveNewDraft, liveNewApplyPreset, liveNewPresetChanges, liveYAMLHTML, liveYAMLTaskName, liveNewStatusHTML, LIVE_AGENTS,
   liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems,
-  liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
+  liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere, liveSuspendResumeHTML, LIVE_SHELL_IMAGE,
   studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
 }
@@ -618,15 +618,21 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   const { api } = p;
   const L = api.LIVE;
   await check("AX's states read in the UI's words, and an unknown state says so", () => {
-    const want = { Working: 'Running', Queued: 'Starting', Suspending: 'Suspending', Suspended: 'Suspended', Failed: 'Failed', RequiresAction: 'Waiting for you', Completed: 'Done', Cancelled: 'Stopped' };
-    for (const k of Object.keys(want)) if (api.liveState(k).label !== want[k]) throw new Error(`${k} should read ${want[k]}, got ${api.liveState(k).label}`);
-    if (api.liveState('Hibernating').label !== 'Unknown') throw new Error('an unknown state');
-    if (api.liveStateName('TASK_STATE_REQUIRES_ACTION') !== 'RequiresAction' || api.liveStateName('TASK_STATE_WORKING') !== 'Working' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
+    /* AX v0.4.0-rc.2's states: the task's actor on Agent Substrate, and Queued before it has one. */
+    const want = { RUNNING: 'Running', QUEUED: 'Starting', RESUMING: 'Resuming', REVERTING: 'Reverting', SUSPENDING: 'Suspending', SUSPENDED: 'Suspended', CRASHED: 'Crashed', DELETING: 'Deleting' };
+    for (const [k, label] of Object.entries(want)) {
+      const name = api.liveStateName('TASK_STATE_' + k);
+      if (api.liveState(name).label !== label) throw new Error(`TASK_STATE_${k} should read ${label}, got ${name} (${api.liveState(name).label})`);
+    }
+    if (api.liveStateName('TASK_STATE_RUNNING') !== 'Running' || api.liveStateName('TASK_STATE_SUSPENDED') !== 'Suspended' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
+    /* rc.1's names are gone: an unknown state says so. */
+    for (const old of ['Working', 'Idle', 'RequiresAction', 'Completed', 'Failed', 'Cancelled', 'Terminating', 'Hibernating']) if (api.liveState(old).label !== 'Unknown') throw new Error(`${old} should be unknown`);
+    if (!api.liveSuspendResumeHTML('t', api.liveStateName('TASK_STATE_RUNNING'), '', '').includes('data-action="live-suspend"')) throw new Error('a running task can be suspended');
   });
   await check('a task reads the same whether AX calls the goal field text or spec', () => {
-    const a = api.liveTask(taskDoc('a', 'WORKING', { goal: 'New name', spec: { sessionId: 's1', debug: true } }));
+    const a = api.liveTask(taskDoc('a', 'RUNNING', { goal: 'New name', spec: { sessionId: 's1', debug: true } }));
     const b = api.liveTask(taskDoc('b', 'QUEUED', { goal: 'Old name', goalField: 'spec' }));
-    if (a.goal !== 'New name' || a.state !== 'Working' || a.session !== 's1' || !a.debug) throw new Error(JSON.stringify(a));
+    if (a.goal !== 'New name' || a.state !== 'Running' || a.session !== 's1' || !a.debug) throw new Error(JSON.stringify(a));
     if (b.goal !== 'Old name' || b.state !== 'Queued' || b.debug) throw new Error(JSON.stringify(b));
     if (api.liveTask({}).name !== '' || api.liveTask(null).state !== 'Unknown') throw new Error('an empty task');
   });
@@ -656,22 +662,22 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(home.html, ['id="live-home-title"', '>Home</h1>', 'class="home-stats"', 'Running', 'Needs you', 'Suspended', 'Workspaces &amp; Gateways', 'id="home-recent-h">Recent tasks</h2>', 'href="#/tasks"']);
     const v = api.liveViewTasks('tasks');
     const order = (v.html.match(/id="live-trow-[a-z0-9-]+"/g) || []).map((x) => x.slice(14, -1)).join();
-    if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,readme-polish,changelog-draft') throw new Error('order: ' + order);
+    if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,changelog-draft,readme-polish') throw new Error('order: ' + order);
     need(v.html, ['<h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">Tasks</h1>', '6 tasks on this computer.', 'On this computer', 'ax --context ax-local get tasks',
       'id="tab-tasks" href="#/tasks" aria-selected="true"', 'id="tab-resources" href="#/tasks/resources" aria-selected="false"', 'Workspaces and Gateways',
       'class="table tasks-table"', '<th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th>', '<a href="#/task/upgrade-node-22" class="mono">upgrade-node-22</a>', 'Upgrade to Node 22.',
-      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', 'Turn 1 of 2', 'Turn 2 of 2',
+      '</svg>Crashed</span>', '</svg>Running</span>', '</svg>Suspended</span>', 'Turn 1 of 2', 'Turn 2 of 2',
       'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"', '>Suspended<span class="seg-n tnum">', 'href="#/new"', 'data-action="live-sample-task"']);
     /* Each row: Suspend for a running task, Resume for a suspended one, a shell when it has debug access, its logs, and Delete. */
     const row = (name) => { const a = v.html.indexOf(`id="live-trow-${name}"`); return v.html.slice(a, v.html.indexOf('</tr>', a)); };
     need(row('fix-flaky-tests'), ['data-action="live-suspend" data-task="fix-flaky-tests"', 'title="ax --context ax-local suspend task fix-flaky-tests"', 'href="#/task/fix-flaky-tests/terminal"', 'href="#/task/fix-flaky-tests/logs"', 'data-action="live-delete" data-task="fix-flaky-tests"']);
     need(row('readme-polish'), ['data-action="live-resume" data-task="readme-polish"', 'Resume</button>', 'href="#/task/readme-polish/logs"']);
     never(row('readme-polish'), ['live-suspend', '/terminal"']);
-    /* ax ssh needs the task Working: an idle task, even with debug on, gets no shell link, but can still be suspended. */
+    /* ax ssh needs the task Running: a starting task, even with debug on, gets no shell link, but can still be suspended. */
     const ff = L.tasks.find((t) => t.name === 'fix-flaky-tests');
-    ff.state = 'Idle';
+    ff.state = 'Queued';
     const idle = api.liveViewTasks('tasks').html;
-    ff.state = 'Working';
+    ff.state = 'Running';
     const at = idle.indexOf('id="live-trow-fix-flaky-tests"');
     const idleRow = idle.slice(at, idle.indexOf('</tr>', at));
     never(idleRow, ['/terminal"']);
@@ -691,11 +697,12 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (calls[0] !== '--context ax-local -a default apply -f -' || !name) throw new Error(calls.join(' | '));
     const y = B.applied[B.applied.length - 1];
     need(y, ['kind: Task', `  name: "${name}"`, '  commands: ["sh", "-c", "echo Hello from a sandbox on this computer; sleep infinity"]', '  debug: true']);
-    /* The cluster's default task image, and nothing it would need to set up or reach. */
-    never(y, ['image:', 'goal:', 'workspace:', 'gateway:']);
+    /* AX's runner image (AX has no default task image), and nothing it would need to set up or reach. */
+    need(y, ['  profile:\n    image: "' + api.LIVE_SHELL_IMAGE + '"']);
+    never(y, ['goal:', 'workspace:', 'gateway:']);
     if (p.ctx.location.hash !== `#/task/${name}`) throw new Error('opens it: ' + p.ctx.location.hash);
     need(toasts(p), [`Started <span class="mono">${name}</span>`]);
-    if (!L.tasks.some((t) => t.name === name && t.state === 'Working')) throw new Error('listed, and running');
+    if (!L.tasks.some((t) => t.name === name && t.state === 'Running')) throw new Error('listed, and running');
     /* Back to the list the next checks expect. */
     B.tasks['ax-local'] = B.tasks['ax-local'].filter((t) => t.metadata.name !== name);
     await api.liveRefresh(true);
@@ -770,30 +777,24 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   await check('resume asks the server to resume it', async () => {
     api.ACTIONS['live-resume']({ dataset: { task: 'fix-flaky-tests' } });
     await settle();
-    if (!B.posts.some((x) => x.path === '/api/tasks/resume' && x.body.name === 'fix-flaky-tests') || L.tasks.find((t) => t.name === 'fix-flaky-tests').state !== 'Working') throw new Error('resume');
+    if (!B.posts.some((x) => x.path === '/api/tasks/resume' && x.body.name === 'fix-flaky-tests') || L.tasks.find((t) => t.name === 'fix-flaky-tests').state !== 'Running') throw new Error('resume');
   });
   await check('when AX refuses, Studio says what AX said and changes nothing', async () => {
     await api.liveTaskAction('upgrade-node-22', 'resume');
     await settle();
     need(toasts(p), ["Couldn't resume <span class=\"mono\">upgrade-node-22</span>: no free workers available"]);
-    if (L.tasks.find((t) => t.name === 'upgrade-node-22').state !== 'Failed') throw new Error('state unchanged');
+    if (L.tasks.find((t) => t.name === 'upgrade-node-22').state !== 'Crashed') throw new Error('state unchanged');
   });
-  await check('a failed task says why, and offers no suspend, resume or follow-up', async () => {
+  await check('a crashed task says why, and offers no suspend, resume or follow-up', async () => {
     await go(p, '#/task/upgrade-node-22');
     const h = main(p);
-    need(h, ['Upgrade to Node 22.', 'sandbox exited: out of memory (limit 512Mi)', '</svg>Failed</span>', 'data-action="live-delete"', 'Stopped with an error',
-      'Give it more memory when you start it again.']);
+    need(h, ['Upgrade to Node 22.', '</svg>Crashed</span>', 'data-action="live-delete"', 'Its sandbox crashed', 'says its sandbox crashed', 'See what it printed in Logs']);
+    never(h, ['AX says:']);
     never(h, ['data-action="live-suspend"', 'data-action="live-resume"', 'live-try-again', 'again=1']);
     /* AX's default image is named in the header, so Where it runs doesn't name it again. */
     never(h.slice(h.indexOf('id="live-where-card"')), ['<dt>Image</dt>']);
     /* The browser tab says how many tasks need you. */
     if (!/^\(1\) /.test(p.ctx.document.title)) throw new Error('tab title: ' + p.ctx.document.title);
-    return { html: h };
-  });
-  await check('a finished task shows its result, exit code and output', async () => {
-    await go(p, '#/task/changelog-draft');
-    const h = main(p);
-    need(h, ['id="live-result"', '<dt>Result</dt><dd>Succeeded</dd>', '<dt>Exit code</dt><dd><span class="mono">0</span></dd>', 'Wrote CHANGES.rst for 2.3.\nPushed branch ax/changelog-draft.']);
     return { html: h };
   });
   await check('a task with no gateway and no debug access says so', async () => {
@@ -1004,7 +1005,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-agent'] || api.ACTIONS['live-new-source']) throw new Error('the old steps are gone');
     return { html: h };
   });
-  await check('Blank works without keys: the default task image, a command that keeps the sandbox open, debug access, no workspace and no network', () => {
+  await check("Blank works without keys: AX's runner image, a command that keeps the sandbox open, debug access, no workspace and no network", () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'blank' } });
     const d = L.draft;
     if (d.preset !== 'blank') throw new Error('switched to blank: ' + d.preset);
@@ -1013,9 +1014,10 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (docs.length !== 1) throw new Error('only a Task: ' + docs.map((x) => x.kind).join());
     const t = docOf(docs, 'Task');
     if (!/^task-ab[0-9a-f]{2}$/.test(t.metadata.name)) throw new Error('name: ' + t.metadata.name);
-    if (JSON.stringify(t.spec) !== JSON.stringify({ commands: ['sh', '-c', 'sleep infinity'], debug: true })) throw new Error(JSON.stringify(t.spec));
+    /* AX has no default task image, so Blank names AX's runner image. */
+    if (JSON.stringify(t.spec) !== JSON.stringify({ profile: { image: api.LIVE_SHELL_IMAGE }, commands: ['sh', '-c', 'sleep infinity'], debug: true })) throw new Error(JSON.stringify(t.spec));
     /* The panel shows the same YAML, with its keys marked, and Ready to create. */
-    need(main(p), ["The cluster's default task image", 'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'Ready to create', '<span class="k">kind</span>: Task', 'sleep infinity']);
+    need(main(p), ['A plain shell on AX&#39;s runner image', 'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'Ready to create', '<span class="k">kind</span>: Task', 'sleep infinity']);
   });
   await check('Start from Antigravity fills its image, environment and resources, and a Gateway that adds its key outside the sandbox', () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
@@ -1096,7 +1098,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (L.draft.creds.length !== 1 || L.draft.creds[0].secret !== 'gemini-api-creds') throw new Error(JSON.stringify(L.draft.creds));
     /* Back to Blank: the agent's fields and rules go, and the host you allowed keeps the network on. */
     api.liveNewApplyPreset(L.draft, 'blank');
-    if (L.draft.image || L.draft.command !== "sh -c 'sleep infinity'" || L.draft.creds.length || L.draft.tls.length || L.draft.net !== 'allow') throw new Error(JSON.stringify(L.draft));
+    if (L.draft.image !== api.LIVE_SHELL_IMAGE || L.draft.command !== "sh -c 'sleep infinity'" || L.draft.creds.length || L.draft.tls.length || L.draft.net !== 'allow') throw new Error(JSON.stringify(L.draft));
     Object.assign(L.draft, { hosts: [], net: 'none', goal: '' });
   });
   await check("A new workspace has every setup option AX has (Git repos, files, skills, setup commands, a setup network) and its MCP servers, in AX's order", () => {
@@ -1199,6 +1201,8 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const base = () => Object.assign(blankDraft(), { net: 'allow' });
     const issues = (o) => api.liveNewIssues(Object.assign(base(), o)).join(' | ');
     need(issues({ image: 'ghcr.io/me/agent:latest' }), ['The image address must end in its digest: @sha256: and 64 characters.']);
+    /* AX has no default task image: every task names one. */
+    need(issues({ image: '' }), ['Give the task an image: AX has no default task image.']);
     if (issues({ image: 'ghcr.io/me/agent@sha256:' + 'a'.repeat(64), hosts: ['github.com'] })) throw new Error('a pinned image is fine');
     need(issues({ nameEdited: true, name: 'Not A Name' }), ['The name can use lowercase letters, digits and hyphens, up to 63 characters.']);
     need(issues({ command: 'echo "unclosed', env: [{ name: '1BAD', value: 'x' }], cpu: 'lots', memory: '6GB', config: '- not a mapping' }),
@@ -1316,7 +1320,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (docs.map((x) => x.kind).join() !== 'Gateway,Workspace,Task') throw new Error(docs.map((x) => x.kind).join());
     if (JSON.stringify(docOf(docs, 'Gateway').spec.egress.slice(-1)) !== JSON.stringify([{ https: { hostnames: ['gitlab.example.com'] } }])) throw new Error('the repo is allowed');
     const t = L.tasks.find((x) => x.name === name);
-    if (!t || t.state !== 'Working' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.' || t.debug) throw new Error(JSON.stringify(t && [t.state, t.goal, t.debug]));
+    if (!t || t.state !== 'Running' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.' || t.debug) throw new Error(JSON.stringify(t && [t.state, t.goal, t.debug]));
     if (p.ctx.location.hash !== `#/task/${name}` || L.draft !== null) throw new Error('opens the task: ' + p.ctx.location.hash);
     need(toasts(p), [`Started <span class="mono">${name}</span>`]);
     if (JSON.parse(p.store['ax.live.recentRepos'])[0] !== 'https://gitlab.example.com/me/project.git') throw new Error(p.store['ax.live.recentRepos']);
@@ -1386,7 +1390,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if ((h.match(/<\/svg>Running<\/span>/g) || []).length !== 3) throw new Error('each of the three layers says it is running');
     /* Studio names its own images, so Update needs nothing from you. */
     if (/id="live-local-update"[^>]*disabled/.test(h)) throw new Error('update is on: Studio has images of its own');
-    need(h, ['<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="acc-pill">Studio default</span><span class="acc-meta mono">ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.', 'Default task image', "For tasks that don't name an image."]);
+    need(h, ['<span class="acc-title">AX images</span><span class="acc-sub" id="live-images-sum"><span class="acc-pill">Studio default</span><span class="acc-meta mono">ax-server:v1@', 'Empty uses the image Studio pins for the AX it was built with.']);
+    /* AX has no default task image any more, so setup doesn't offer one. */
+    never(h, ['Default task image', "For tasks that don't name an image."]);
     /* No remote clusters, no install on one, no cluster switch. This ax has no --runner-volume-image, so that field isn't offered. */
     never(h, ['Remote clusters', 'gke-team-dev', 'gke-broken', 'data-action="live-use-context"', 'data-action="live-cluster-check"', 'Install AX…', 'id="live-cl-needs"', 'ax promote', 'gVisor',
       '<span class="chip waiting">Needed</span>', '127.0.0.1', 'Runner volume image', 'data-action="live-uninstall"']);
@@ -1582,17 +1588,18 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     if (L.atespace !== 'default' || 'ax.live.atespace' in p.store) throw new Error('back to default');
   });
-  await check('Home says when the list was read, with Refresh; Details names the sandbox and the previous attempt; the shell needs a Working task', async () => {
+  await check('Home says when the list was read, with Refresh; Details names the sandbox; the shell needs a Running task', async () => {
     await go(p, '#/');
     need(main(p), ['Updated <span data-live-updated data-fmt="ago"', 'data-action="live-refresh" aria-label="Refresh the list"']);
     const t = B.tasks['ax-local'].find((x) => x.metadata.name === 'fix-flaky-tests');
-    Object.assign(t.status, { actor: 'fix-flaky-tests', actorUid: '427663e8-5707-4ea2-9dce-d38d059e8fbe', previousFailure: 'attempt 1: sandbox crashed' });
+    Object.assign(t.status, { actor: 'fix-flaky-tests', actorUid: '427663e8-5707-4ea2-9dce-d38d059e8fbe' });
     await api.liveRefresh(true);
     await go(p, '#/task/fix-flaky-tests');
     await settle();
-    need(main(p), ['<dt>Sandbox</dt>', '427663e8-5707-4ea2-9dce-d38d059e8fbe', 'aria-label="Copy the sandbox uid"', '<dt>Previous attempt</dt><dd>attempt 1: sandbox crashed</dd>']);
+    need(main(p), ['<dt>Sandbox</dt>', '427663e8-5707-4ea2-9dce-d38d059e8fbe', 'aria-label="Copy the sandbox uid"']);
+    never(main(p), ['Previous attempt']);
     const ft = api.liveTask(t);
-    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Working'), ['No shell is open.', 'id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests"', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
+    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Running'), ['No shell is open.', 'id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests"', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
     const idle = api.liveTermInnerHTML('fix-flaky-tests', ft, 'Idle');
     need(idle, ['A shell can open only while the task is running.', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
     never(idle, ['live-term-open', 'live-resume']);
@@ -1611,12 +1618,12 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     B.notes = [];
     p.ctx.document.hidden = true;
     await api.liveRefresh(true);
-    const t = B.tasks[L.context].find((x) => x.status.state === 'TASK_STATE_WORKING');
-    t.status.state = 'TASK_STATE_REQUIRES_ACTION';
+    const t = B.tasks[L.context].find((x) => x.status.state === 'TASK_STATE_RUNNING');
+    t.status.state = 'TASK_STATE_CRASHED';
     await api.liveRefresh(true);
     await api.liveRefresh(true);
-    if (B.notes.length !== 1 || !/Waiting for you/.test(B.notes[0].body)) throw new Error(JSON.stringify(B.notes));
-    t.status.state = 'TASK_STATE_WORKING';
+    if (B.notes.length !== 1 || !/^Crashed · /.test(B.notes[0].body)) throw new Error(JSON.stringify(B.notes));
+    t.status.state = 'TASK_STATE_RUNNING';
     p.ctx.document.hidden = false;
     await api.liveRefresh(true);
     await api.ACTIONS['live-notify-toggle']({ checked: false });
@@ -1653,9 +1660,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(main(p), ['id="live-tasks-title"', '>Tasks</h1>', 'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"',
       'class="table tasks-table"', 'id="live-trow-fix-flaky-tests"', '>Image</th>', '>Workspace</th>', '>Resources</th>', '>Created</th>']);
     never(main(p), ['All tasks', '>Template</th>']);
-    api.ACTIONS['live-tasks-filter']({ dataset: { v: 'done' } });
-    need(main(p), ['data-v="done" aria-pressed="true"']);
-    never(main(p), ['id="live-trow-fix-flaky-tests"']);
+    api.ACTIONS['live-tasks-filter']({ dataset: { v: 'paused' } });
+    need(main(p), ['data-v="paused" aria-pressed="true"']);
+    never(main(p), ['id="live-trow-fix-flaky-tests"', 'data-v="done"']);
     api.ACTIONS['live-tasks-filter']({ dataset: { v: 'all' } });
     L.tasksFilter.q = 'zzzz-nothing';
     api.render();
@@ -1830,7 +1837,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const id = starts()[0].body.id;
     if (!/^sh-[0-9a-f]{16}$/.test(id)) throw new Error('session id ' + id);
     const doc = () => m.api.liveTask(M.tasks['ax-local'].find((x) => x.metadata.name === 'fix-flaky-tests'));
-    const panel = () => m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Working');
+    const panel = () => m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Running');
     need(panel(), ['Connecting…', 'Shell 1']);
     /* What the shell prints comes as base64 of its bytes; a character split between two events still shows whole. */
     const bytes = Buffer.from('root@sandbox:/workspace# \x1b[1;32mok\x1b[0m café \x1b[?2004h');

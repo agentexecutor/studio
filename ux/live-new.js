@@ -20,7 +20,7 @@
    network goes through, as ax.io/v1alpha1 resources. The form has a section for each, with their fields in the order AX
    defines them, and the YAML beside it is what Studio applies: it follows the form as you type, and Edit YAML lets you
    change it by hand.
-   - Start from fills the form. Blank is a plain task: the cluster's default task image, a command that keeps the
+   - Start from fills the form. Blank is a plain task: AX's runner image (a shell), a command that keeps the
      sandbox open, debug access on, no workspace and no network, so a first task works without any keys. Antigravity and
      Claude Code fill in an agent: its image, environment, resources and config, and the Gateway rules that add its API
      key outside the sandbox. Everything stays editable. Starting from another preset after you changed what the last
@@ -59,7 +59,7 @@ const LIVE_AGENTS = {
 const LIVE_PRESETS = {
   antigravity: { name: 'Antigravity', desc: LIVE_AGENTS.antigravity.desc, agent: 'antigravity' },
   claude: { name: 'Claude Code', desc: LIVE_AGENTS.claude.desc, agent: 'claude' },
-  blank: { name: 'Blank', desc: "A plain task on the cluster's default task image" },
+  blank: { name: 'Blank', desc: "A plain shell on AX's runner image" },
 };
 /* Hosts a task often needs, to allow with one click. The task page calls a Gateway that allows all of them Balanced. */
 const LIVE_HOST_PICKS = [
@@ -210,7 +210,7 @@ function liveNewGwHosts(doc) {
 /** What a preset fills in: the fields an agent decides. Everything else in the form stays as it is. */
 function livePresetFields(id) {
   const A = LIVE_AGENTS[(LIVE_PRESETS[id] || {}).agent];
-  if (!A) return { image: '', command: LIVE_BLANK_COMMAND, env: [], cpu: '', memory: '', config: '', goalAsPrompt: false, tls: [], creds: [] };
+  if (!A) return { image: LIVE_SHELL_IMAGE, command: LIVE_BLANK_COMMAND, env: [], cpu: '', memory: '', config: '', goalAsPrompt: false, tls: [], creds: [] };
   return {
     image: A.image, command: '',
     /* The agent sends its key header with a placeholder; the Gateway puts the real key in, outside the sandbox. */
@@ -379,7 +379,8 @@ function liveNewIssues(d) {
   /* Task */
   if (!LIVE_NAME_RE.test(liveDraftName(d))) say('The name can use lowercase letters, digits and hyphens, up to 63 characters.');
   const image = liveT(d.image), goal = liveT(d.goal);
-  if (image && !LIVE_DIGEST_RE.test(image)) say('The image address must end in its digest: @sha256: and 64 characters.');
+  if (!image) say('Give the task an image: AX has no default task image.');
+  else if (!LIVE_DIGEST_RE.test(image)) say('The image address must end in its digest: @sha256: and 64 characters.');
   if (liveT(d.command) && liveSplitArgs(liveT(d.command)).error) say(liveSplitArgs(liveT(d.command)).error);
   if (!goal && Object.values(LIVE_AGENTS).some((a) => a.image === image)) say('Describe the goal: the agent works from it.');
   if (!goal && d.goalAsPrompt) say('Describe the goal: it is passed as the prompt.');
@@ -683,7 +684,7 @@ function liveNewEnvHTML(d) {
 }
 function liveNewAdvTaskSummary(d) {
   const A = LIVE_AGENTS[(LIVE_PRESETS[d.preset] || {}).agent];
-  const img = !liveT(d.image) ? 'Default image' : (A && liveT(d.image) === A.image ? A.name : liveImageShort(liveT(d.image)));
+  const img = !liveT(d.image) ? 'No image' : (A && liveT(d.image) === A.image ? A.name : liveImageShort(liveT(d.image)));
   const res = `${liveT(d.cpu) || '1'} CPU · ${liveT(d.memory) || '512Mi'}`;
   const envN = d.env.filter((e) => liveT(e.name) || liveT(e.value)).length;
   const parts = [res, d.debug ? 'Debug on' : 'Debug off'];
@@ -700,8 +701,8 @@ function liveNewTaskHTML(d) {
       <span class="prow-hint" id="nt-name-h">Lowercase letters, digits and hyphens. Made from the goal above until you edit it.</span>`, { labelId: 'nt-name-l', sub: liveField('metadata.name') }),
   ];
   const advanced = [
-    prow('Image', `<input class="input mono" type="text" id="live-new-image" data-live-new="image" value="${esc(d.image)}" placeholder="The cluster's default task image" aria-labelledby="nt-image-l" aria-describedby="nt-image-h" autocomplete="off" spellcheck="false">
-      <span class="prow-hint" id="nt-image-h">Pinned by its digest (<span class="mono">name@sha256:…</span>). Empty uses the cluster's default task image.</span>`, { labelId: 'nt-image-l', sub: liveField('spec.profile.image') }),
+    prow('Image', `<input class="input mono" type="text" id="live-new-image" data-live-new="image" value="${esc(d.image)}" placeholder="registry.example.com/agent@sha256:…" aria-labelledby="nt-image-l" aria-describedby="nt-image-h" autocomplete="off" spellcheck="false">
+      <span class="prow-hint" id="nt-image-h">Pinned by its digest (<span class="mono">name@sha256:…</span>). Every task names one: AX has no default task image.</span>`, { labelId: 'nt-image-l', sub: liveField('spec.profile.image') }),
     prow('Command', `<input class="input mono" type="text" id="live-new-command" data-live-new="command" value="${esc(d.command)}" placeholder="The image's own command" aria-labelledby="nt-command-l" aria-describedby="nt-command-h" autocomplete="off" spellcheck="false">
       <span class="prow-hint" id="nt-command-h">As in a shell, quotes keep spaces. Empty runs the image's own command; <span class="mono">sleep infinity</span> keeps the sandbox open for a shell.</span>`, { labelId: 'nt-command-l', sub: liveField('spec.commands') }),
     prow('Resources', `<div class="nt-res">

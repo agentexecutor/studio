@@ -82,15 +82,16 @@ function liveOpCommand(op) {
 }
 /* What you typed under "AX images", kept in this browser (they are image names, not secrets). Empty fields use the
    images the server names in setupImages: Studio's own, pinned to the AX its go.mod uses, or AX_SERVER_IMAGE and
-   AX_DEFAULT_TASK_IMAGE from Studio's environment. */
+   AX_RUNNER_VOLUME_IMAGE from Studio's environment. */
 const LIVE_IMAGES_KEY = 'ax.live.images';
 LIVE.images = (() => {
-  const empty = { serverImage: '', defaultTaskImage: '', runnerVolumeImage: '' };
-  try { return Object.assign(empty, JSON.parse(localStorage.getItem(LIVE_IMAGES_KEY) || '{}')); } catch (e) { return empty; }
+  const empty = { serverImage: '', runnerVolumeImage: '' };
+  /* AX dropped its default task image (rc.2): a value kept from before is left behind. */
+  try { const kept = JSON.parse(localStorage.getItem(LIVE_IMAGES_KEY) || '{}'); return { serverImage: String(kept.serverImage || ''), runnerVolumeImage: String(kept.runnerVolumeImage || '') }; } catch (e) { return empty; }
 })();
 LIVE.imagesOpen = false;
 function liveSaveImages() { try { localStorage.setItem(LIVE_IMAGES_KEY, JSON.stringify(LIVE.images)); } catch (e) { /* ignore */ } }
-/** The images setup uses when you leave the fields empty: { serverImage, taskImage, ... } from the server. */
+/** The images setup uses when you leave the fields empty: { serverImage, runnerVolumeImage, ... } from the server. */
 function liveSetupImages() { return (LIVE.env && LIVE.env.setupImages) || {}; }
 /** What's wrong with the images you typed. Empty is fine: setup uses Studio's. */
 function liveImageProblems() {
@@ -99,8 +100,7 @@ function liveImageProblems() {
   const out = [];
   /* An older Studio server names no images of its own; then ax needs one. */
   if (!im.serverImage.trim() && !env.serverImageEnv && !liveSetupImages().serverImage) out.push('Give the AX server image: AX has none of its own yet.');
-  [['The AX server image', im.serverImage], ['The default task image', LIVE.axFlags && LIVE.axFlags.defaultTaskImage ? im.defaultTaskImage : ''],
-    ['The runner volume image', LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? im.runnerVolumeImage : '']].forEach(([label, raw]) => {
+  [['The AX server image', im.serverImage], ['The runner volume image', LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? im.runnerVolumeImage : '']].forEach(([label, raw]) => {
     const v = String(raw || '').trim();
     if (v && (v.startsWith('-') || /\s/.test(v))) out.push(`${label} isn't an image name.`);
     else if (v.includes('sha256:') && !/@sha256:[0-9a-f]{64}$/.test(v)) out.push(`${label} must give its digest as name@sha256: and 64 characters.`);
@@ -110,7 +110,7 @@ function liveImageProblems() {
 /** The images to send with setup: the ones typed here. For the rest the server uses its own (setupImages). */
 function liveImagesToSend() {
   const out = {};
-  ['serverImage'].concat(LIVE.axFlags && LIVE.axFlags.defaultTaskImage ? ['defaultTaskImage'] : [], LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? ['runnerVolumeImage'] : []).forEach((k) => {
+  ['serverImage'].concat(LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? ['runnerVolumeImage'] : []).forEach((k) => {
     const v = String(LIVE.images[k] || '').trim();
     if (v) out[k] = v;
   });
@@ -315,7 +315,7 @@ function liveImageProblemsHTML(problems) {
 }
 /** The images in a word, next to their heading: Needed, or the AX server image setup uses. */
 function liveImagesSummaryHTML(problems) {
-  const custom = !!LIVE.images.serverImage.trim() || !!LIVE.images.defaultTaskImage.trim() || !!LIVE.images.runnerVolumeImage.trim();
+  const custom = !!LIVE.images.serverImage.trim() || !!LIVE.images.runnerVolumeImage.trim();
   const using = LIVE.images.serverImage.trim() || (LIVE.env || {}).serverImageEnv || liveSetupImages().serverImage || '';
   if (problems.length) return '<span class="chip waiting">Needed</span>';
   const tag = custom ? '<span class="acc-pill custom">Custom</span>' : '<span class="acc-pill">Studio default</span>';
@@ -339,8 +339,7 @@ function liveImagesHTML() {
     </summary>
     <div class="setup-acc-body"><p class="small sub">Setting up, updating or repairing AX here deploys these. Leave them empty to use the defaults shown. Custom values are saved in this browser.</p>
       ${field('serverImage', 'AX server image', def.serverImage ? short(def.serverImage) : env.serverImageEnv || 'registry.example.com/ax/ax-server@sha256:…', !def.serverImage && !env.serverImageEnv, from(def.serverImage, def.serverImageFrom))}
-      ${LIVE.axFlags && LIVE.axFlags.defaultTaskImage ? field('defaultTaskImage', 'Default task image', def.taskImage ? short(def.taskImage) : 'Optional', false, def.taskImage ? `For tasks that don't name an image. ${from(def.taskImage, def.taskImageFrom)}` : "For tasks that don't name an image.") : ''}
-      ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', "Optional. Leave empty to run the runner in each task's image") : ''}
+      ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', def.runnerVolumeImage ? short(def.runnerVolumeImage) : "Optional. Leave empty to run the runner in each task's image", false, def.runnerVolumeImage ? `AX's task runner, mounted into every task, for images that don't ship one (like agy-cli). ${from(def.runnerVolumeImage, def.runnerVolumeImageFrom)}` : '') : ''}
       <div id="live-image-problems">${liveImageProblemsHTML(problems)}</div></div></details>`;
 }
 /** ax, kubectl and kind, as ax will find them: version, where each is, or that ax downloads it. */

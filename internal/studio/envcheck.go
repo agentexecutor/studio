@@ -57,7 +57,6 @@ type ToolInfo struct {
 // what will work.
 type AXFlags struct {
 	RunnerVolumeImage bool `json:"runnerVolumeImage"`
-	DefaultTaskImage  bool `json:"defaultTaskImage"`
 }
 
 const (
@@ -184,7 +183,6 @@ func (s *Server) axFlags(ctx context.Context) AXFlags {
 		res, _ := s.runner.Run(hctx, kube.Spec{Name: s.axBinary, Args: []string{"local", "start", "--help"}})
 		help := res.Stdout + res.Stderr
 		s.extras.flags.RunnerVolumeImage = strings.Contains(help, "--runner-volume-image")
-		s.extras.flags.DefaultTaskImage = strings.Contains(help, "--default-task-image")
 	})
 	return s.extras.flags
 }
