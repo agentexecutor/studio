@@ -1230,7 +1230,7 @@ html[data-theme="dark"] .setup-acc { background: rgba(255, 255, 255, .025); }
 .nt-head { align-items: flex-start; }
 .nt-step-num { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 999px; background: var(--key-soft); color: var(--key-ink); font-size: 12px; font-weight: 700; }
 .nt-load-btn { margin-left: auto; }
-.nt-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.nt-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 @media (max-width: 760px) { .nt-presets { grid-template-columns: 1fr; } }
 .nt-preset-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px 15px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg); color: inherit; text-align: left; font: inherit; cursor: pointer; transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease), background var(--dur-2) var(--ease); }
 html[data-theme="dark"] .nt-preset-card { background: rgba(255, 255, 255, .025); }

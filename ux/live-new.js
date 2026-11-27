@@ -21,8 +21,8 @@
    defines them, and the YAML beside it is what Studio applies: it follows the form as you type, and Edit YAML lets you
    change it by hand.
    - Start from fills the form. Blank is a plain task: the cluster's default task image, a command that keeps the
-     sandbox open, debug access on, no workspace and no network, so a first task works without any keys. Antigravity and
-     Claude Code fill in an agent: its image, environment, resources and config, and the Gateway rules that add its API
+     sandbox open, debug access on, no workspace and no network, so a first task works without any keys. Antigravity
+     fills in an agent: its image, environment, resources and config, and the Gateway rules that add its API
      key outside the sandbox. Everything stays editable. Starting from another preset after you changed what the last
      one filled in asks first; the goal, the workspace and the hosts you allowed stay either way.
    - The workspace is none (an empty /workspace), one already on this computer, or a new one: Git repos, files, skills,
@@ -46,19 +46,10 @@ const LIVE_AGENTS = {
     tlsPassthrough: ['storage.googleapis.com'],
     extraEnv: [['AGY_RUNTIME_INSTALL', 'true']],
   },
-  claude: {
-    id: 'claude', name: 'Claude Code', desc: "Anthropic's coding agent", keyFrom: 'Anthropic', model: 'claude-opus-5-5',
-    image: 'ghcr.io/rakyll/ax-images/claude-managed-agents@sha256:1a532d86c58a5fea3005e9c525683cf8f354e2c403be6460a308ad2f8f0510c0',
-    secret: 'anthropic-api-creds', keyName: 'ANTHROPIC_API_KEY', host: 'api.anthropic.com', header: 'x-api-key',
-    /* Its runner reads the agent's settings and the prompt from the Task's config. The prompt is the goal. */
-    config: 'agent:\n  model: "claude-opus-5-5"\n  system: "You are a careful software engineer working in /workspace."',
-    goalAsPrompt: true,
-  },
 };
-/* Start from: Antigravity, Claude Code, or Blank. */
+/* Start from: Antigravity or Blank. */
 const LIVE_PRESETS = {
   antigravity: { name: 'Antigravity', desc: LIVE_AGENTS.antigravity.desc, agent: 'antigravity' },
-  claude: { name: 'Claude Code', desc: LIVE_AGENTS.claude.desc, agent: 'claude' },
   blank: { name: 'Blank', desc: "A plain task on the cluster's default task image" },
 };
 /* Hosts a task often needs, to allow with one click. The task page calls a Gateway that allows all of them Balanced. */
@@ -244,8 +235,7 @@ function liveNewApplyPreset(d, id) {
   d.tls = d.tls.filter((h) => !old.tls.includes(h));
   f.tls.forEach((h) => { if (!d.tls.includes(h)) d.tls.push(h); });
   d.creds = d.creds.filter((c) => !c.preset).concat(f.creds.map((c) => Object.assign({ preset: true }, c)));
-  if (f.creds.length || f.tls.length) d.net = 'allow';
-  else if (d.net === 'allow' && !d.hosts.length && !d.tls.length && !d.creds.length) d.net = 'none';
+  if (d.net === 'allow' && !d.hosts.length && !d.tls.length && !d.creds.length) d.net = 'none';
   d.error = '';
 }
 /** What you changed in the fields the current preset filled in, in words. */
@@ -367,7 +357,7 @@ function liveConfigProblem(d) {
   if (text.length > 16384) return 'The config can be up to 16 KiB.';
   const lines = text.split('\n').filter((l) => l.trim() && !/^\s*#/.test(l));
   if (lines.some((l) => /^\s*\t/.test(l))) return 'Indent the config with spaces, not tabs.';
-  if (lines.some((l) => /^---/.test(l)) || lines.filter((l) => !/^\s/.test(l)).some((l) => !/^("[^"]+"|'[^']+'|[A-Za-z0-9_.$-]+)\s*:(\s|$)/.test(l))) return 'Write the config as YAML keys and values, like model: "claude-opus-5-5".';
+  if (lines.some((l) => /^---/.test(l)) || lines.filter((l) => !/^\s/.test(l)).some((l) => !/^("[^"]+"|'[^']+'|[A-Za-z0-9_.$-]+)\s*:(\s|$)/.test(l))) return 'Write the config as YAML keys and values, like model: "gemini-2.5-pro".';
   if (d.goalAsPrompt && lines.some((l) => /^prompt\s*:/.test(l))) return 'The config has a prompt already. Remove it, or stop passing the goal as the prompt.';
   return '';
 }
@@ -378,11 +368,9 @@ function liveNewIssues(d) {
   if (d.raw) { if (!/^kind:\s*["']?Task["']?\s*$/m.test(d.yaml)) say('The YAML needs a Task.'); return out; }
   /* Task */
   if (!LIVE_NAME_RE.test(liveDraftName(d))) say('The name can use lowercase letters, digits and hyphens, up to 63 characters.');
-  const image = liveT(d.image), goal = liveT(d.goal);
+  const image = liveT(d.image);
   if (image && !LIVE_DIGEST_RE.test(image)) say('The image address must end in its digest: @sha256: and 64 characters.');
   if (liveT(d.command) && liveSplitArgs(liveT(d.command)).error) say(liveSplitArgs(liveT(d.command)).error);
-  if (!goal && Object.values(LIVE_AGENTS).some((a) => a.image === image)) say('Describe the goal: the agent works from it.');
-  if (!goal && d.goalAsPrompt) say('Describe the goal: it is passed as the prompt.');
   const env = liveRowsUsed(d.env, LIVE_ROW_KEYS.env).map(({ r }) => liveT(r.name));
   if (env.some((n) => !LIVE_ENV_NAME_RE.test(n))) say('Give each environment variable a name: letters, digits and underscores, not starting with a digit.');
   else if (new Set(env).size < env.length) say('Each environment variable needs its own name.');
@@ -695,7 +683,7 @@ function liveNewTaskHTML(d) {
   const isAgent = !!(LIVE_PRESETS[d.preset] || {}).agent;
   const essential = [
     prow('Goal', `<textarea class="textarea" id="live-new-goal" data-live-new="goal" rows="3" placeholder="e.g. Fix the flaky tests in tests/ and explain the cause. Done when: they pass 10 runs in a row." aria-labelledby="nt-goal-l" aria-describedby="nt-goal-h">${esc(d.goal)}</textarea>
-      <span class="prow-hint" id="nt-goal-h">${isAgent ? 'What the agent should work on.' : 'Optional. What the task should do, in your words.'}</span>`, { labelId: 'nt-goal-l', sub: liveField('spec.goal.text') }),
+      <span class="prow-hint" id="nt-goal-h">${isAgent ? 'Optional. What the agent should work on.' : 'Optional. What the task should do, in your words.'}</span>`, { labelId: 'nt-goal-l', sub: liveField('spec.goal.text') }),
     prow('Name', `<input class="input mono" type="text" id="live-new-name" data-live-new="name" value="${esc(liveDraftName(d))}" aria-labelledby="nt-name-l" aria-describedby="nt-name-h" autocomplete="off" spellcheck="false">
       <span class="prow-hint" id="nt-name-h">Lowercase letters, digits and hyphens. Made from the goal above until you edit it.</span>`, { labelId: 'nt-name-l', sub: liveField('metadata.name') }),
   ];
@@ -992,7 +980,7 @@ function liveNewCommitBarHTML(d) {
   return `<div class="nt-commit-bar" id="live-new-commit-bar">
     <div class="nt-commit-status" id="live-new-commit-status">${liveNewCommitStatusHTML(d)}</div>
     <div class="btn-row">
-      <a class="btn" href="#/tasks">Cancel</a>
+      <a class="btn" href="#/tasks" data-action="live-new-cancel">Cancel</a>
       <button type="button" class="btn primary" id="live-new-run" data-action="live-new-run" ${busy ? 'disabled' : ''}>${busy ? `${icon('loader', 'sm')}${esc(d.busy)}` : `Create task<span class="kbd-hint">${MOD}↵</span>`}</button>
     </div>
   </div>`;
@@ -1126,6 +1114,7 @@ const LIVE_NEW_PICKS = {
 };
 const LIVE_NEW_ACTIONS = {
   'live-new-run': () => liveNewRun(),
+  'live-new-cancel': () => { LIVE.draft = null; },
   'live-new-preset-card': (el) => { if (el && el.dataset.preset) liveNewPickPreset(el.dataset.preset); },
   'live-new-ws': (el) => {
     const d = LIVE.draft;

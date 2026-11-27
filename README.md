@@ -15,7 +15,7 @@
 AX Studio is the local web app for [AX](https://github.com/google/ax), a task orchestrator. It's one small binary that opens in your browser and works with AX on your computer: a Kubernetes cluster in your container runtime that AX sets up for you.
 
 - **Set up AX in one click.** Studio checks this computer, then runs `ax local start` and shows each step as it happens.
-- **Start tasks.** From Antigravity, Claude Code, your own image, or a task file. Each task runs in its own sandbox and can only reach the sites you allow. An API key is added outside the sandbox, so the task never holds it.
+- **Start tasks.** From Antigravity, your own image, or a task file. Each task runs in its own sandbox and can only reach the sites you allow. An API key is added outside the sandbox, so the task never holds it.
 - **See what they do.** Every task's state, what AX recorded, its logs, and a shell inside its sandbox. Suspend, resume or delete it.
 
 ## Quick start
@@ -39,7 +39,7 @@ ax-studio   # opens http://127.0.0.1:8080
 
 **3. Set up AX on this computer.** Studio opens on setup until AX runs here. Click **Set up AX on this computer**: Studio runs `ax local start`, which creates a Kind cluster with Agent Substrate and AX in Docker or Podman. AX doesn't publish release images yet, so Studio deploys images built from the same AX commit as its [`go.mod`](go.mod). To use others, set `AX_SERVER_IMAGE`, or enter them under **AX images**.
 
-**4. Start a task.** Click **New task**, pick Antigravity, Claude Code or Blank, describe the goal, and press **Create task**.
+**4. Start a task.** Click **New task**, pick Antigravity or Blank, optionally describe a goal, and press **Create task**.
 
 > [!TIP]
 > When an AX release includes AX Studio, AX's installer sets up both tools, and `ax studio` starts Studio:
@@ -64,7 +64,7 @@ Stopping Studio (`Ctrl-C`) only stops the web app. AX on this computer and its t
 <table>
   <tr>
     <td width="50%" valign="top"><img src="docs/screenshots/setup.png" alt="Set up AX on this computer: system checks, what gets installed, the AX images, and one button."><br><b>Setup.</b> Studio checks this computer, then runs <code>ax local start</code> and shows each step.</td>
-    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: start from Antigravity, Claude Code or Blank, then the goal, the workspace and the network, with the YAML beside it."><br><b>New task.</b> Start from Antigravity, Claude Code or Blank. The YAML beside it is what Studio applies.</td>
+    <td width="50%" valign="top"><img src="docs/screenshots/new-task.png" alt="New task: start from Antigravity or Blank, then the goal, the workspace and the network, with the YAML beside it."><br><b>New task.</b> Start from Antigravity or Blank. The YAML beside it is what Studio applies.</td>
   </tr>
   <tr>
     <td width="50%" valign="top"><img src="docs/screenshots/task.png" alt="A task's page: what AX recorded, its state, where it runs, and the sites it can reach."><br><b>A task.</b> What AX recorded, its state, where it runs, and the sites it can reach.</td>

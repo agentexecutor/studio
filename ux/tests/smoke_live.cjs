@@ -726,7 +726,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!B.calls.includes('GET /api/tasks/get?context=ax-local&atespace=default&name=fix-flaky-tests')) throw new Error('the task is read from that cluster');
     /* What it can reach comes from the task's Gateway: the sites it allows, and the key it adds outside the sandbox. */
     if (!B.calls.includes('GET /api/gateways/get?context=ax-local&atespace=default&name=review-bot-gw')) throw new Error('the Gateway is read');
-    need(h, ['What it can reach · Balanced', 'api.anthropic.com', 'github.com', '+3 more allowed', 'Anthropic API key, added outside the sandbox', 'Every other site is blocked', 'A task keeps the rules it started with.']);
+    need(h, ['What it can reach · Balanced', 'api.anthropic.com', 'github.com', '+3 more allowed', 'A key in <span class="mono">x-api-key</span>, added outside the sandbox', 'Every other site is blocked', 'A task keeps the rules it started with.']);
     never(h, ['0 raw keys']);
     await go(p, '#/task/fix-flaky-tests/file');
     need(main(p), ['role="tabpanel" class="task-panel" id="panel-file"', 'apiVersion: ax.io/v1alpha1', 'data-action="copy"', 'ax --context ax-local get task fix-flaky-tests']);
@@ -970,7 +970,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     L.local = keep;
     await go(p, '#/new');
     if (L.draft.preset !== 'antigravity' || !L.draft.debug) throw new Error(JSON.stringify([L.draft.preset, L.draft.debug]));
-    need(main(p), ['id="live-new-commit-bar"', 'id="live-new-run"', '1 thing to fix first']);
+    need(main(p), ['id="live-new-commit-bar"', 'id="live-new-run"', 'Ready to create']);
     /* Nothing changed on the cluster side: a background refresh leaves the form alone. */
     p.els['#main'].innerHTML = main(p) + '<!--kept-->';
     api.render({ keepScroll: true, background: true });
@@ -981,27 +981,34 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   await go(p, '#/new');
   await check("New task is one page that follows AX's specs: Start from cards, Task, Workspace and Network, progressive disclosure, sticky commit bar, and the YAML beside them", () => {
     const h = main(p);
-    need(h, ['<h1 tabindex="-1">New task</h1>', 'id="nt-start-h">Start from</h2>', 'data-action="live-new-preset-card" data-preset="antigravity"', 'data-action="live-new-preset-card" data-preset="claude"', 'data-action="live-new-preset-card" data-preset="blank"',
+    need(h, ['<h1 tabindex="-1">New task</h1>', 'id="nt-start-h">Start from</h2>', 'data-action="live-new-preset-card" data-preset="antigravity"', 'data-action="live-new-preset-card" data-preset="blank"',
       'data-action="live-new-load"', 'Load a task file…', 'id="live-new-commit-bar"', 'id="live-new-run"', 'Create task',
       'id="nt-task-h">Task</h2>', 'id="nt-ws-h">Workspace</h2>', 'id="nt-net-h">Network</h2>', 'kind: Task', 'kind: Workspace', 'kind: Gateway',
       /* The Task's fields (Goal and Name upfront; the rest tucked under Advanced task options), each naming the field it writes. */
       'id="live-new-goal"', 'id="live-new-name"', 'id="live-new-adv-task"', 'Advanced task options',
       'id="live-new-image"', 'id="live-new-command"', 'Environment', 'id="live-new-cpu"', 'id="live-new-memory"',
       'id="live-new-config"', 'id="live-new-debug"', 'spec.<wbr>profile.<wbr>image', 'spec.<wbr>goal.<wbr>text',
-      /* Preset API key upfront + Advanced network options accordion. */
-      'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options',
-      /* The workspace starts at none, as a radio group; Antigravity starts with Allow hosts. */
-      'aria-checked="true" data-action="live-new-ws" data-ws="none"', 'aria-checked="true" data-action="live-new-net" data-net="allow"',
+      /* Both Workspace and Network start at none by default. */
+      'aria-checked="true" data-action="live-new-ws" data-ws="none"', 'The task starts in an empty <span class="mono">/workspace</span>.',
+      'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'data-action="live-new-cancel"',
       /* The YAML panel: what Studio applies, to edit or download, and the same from a terminal. */
       'id="live-new-manifest"', 'data-action="live-new-raw"', 'Edit YAML', 'data-action="live-new-download"', 'ax --context ax-local apply -f task.yaml']);
-    /* Preset cards are ordered Antigravity, Claude Code, then Blank. */
-    const ia = h.indexOf('data-preset="antigravity"'), ic = h.indexOf('data-preset="claude"'), ib = h.indexOf('data-preset="blank"');
-    if (!(ia > 0 && ia < ic && ic < ib)) throw new Error('preset order: ' + [ia, ic, ib]);
-    /* AX refuses spec.retry until it retries tasks, so the form doesn't offer it. */
-    never(h, ['Where should it run?', 'Pick a template', 'Customize', 'More options', 'Send a follow-up', 'Try again', 'gVisor', '—', '→', 'live-new-gatemap', 'class="card plan-card"', 'retry', 'Retries']);
+    if (L.draft.ws !== 'none' || L.draft.existing !== '') throw new Error('no workspace selected by default');
+    if (L.draft.net !== 'none' || L.draft.gateway !== '') throw new Error('no network selected by default');
+    /* Preset cards are ordered Antigravity, then Blank. */
+    const ia = h.indexOf('data-preset="antigravity"'), ib = h.indexOf('data-preset="blank"');
+    if (!(ia > 0 && ia < ib)) throw new Error('preset order: ' + [ia, ib]);
+    /* AX refuses spec.retry until it retries tasks, so the form doesn't offer it. Claude Code is not offered either. */
+    never(h, ['data-preset="claude"', 'Claude Code', 'Where should it run?', 'Pick a template', 'Customize', 'More options', 'Send a follow-up', 'Try again', 'gVisor', '—', '→', 'live-new-gatemap', 'class="card plan-card"', 'retry', 'Retries']);
     if (!/id="live-new-debug"[^>]*checked/.test(h)) throw new Error('debug access is on by default');
     if (JSON.stringify(api.liveViewNew().crumbs) !== JSON.stringify([{ label: 'Home', href: '#/' }, { label: 'New task' }])) throw new Error(JSON.stringify(api.liveViewNew().crumbs));
     if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-agent'] || api.ACTIONS['live-new-source']) throw new Error('the old steps are gone');
+    /* Cancel clears the draft so reopening New task starts with no workspace and no network selected again. */
+    L.draft.ws = 'existing'; L.draft.existing = 'itsdangerous'; L.draft.net = 'allow';
+    api.ACTIONS['live-new-cancel']();
+    if (L.draft !== null) throw new Error('cancel clears draft');
+    api.render();
+    if (L.draft.ws !== 'none' || L.draft.existing !== '' || L.draft.net !== 'none') throw new Error('fresh draft after cancel has no workspace or network');
     return { html: h };
   });
   await check('Blank works without keys: the default task image, a command that keeps the sandbox open, debug access, no workspace and no network', () => {
@@ -1017,13 +1024,16 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     /* The panel shows the same YAML, with its keys marked, and Ready to create. */
     need(main(p), ["The cluster's default task image", 'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'Ready to create', '<span class="k">kind</span>: Task', 'sleep infinity']);
   });
-  await check('Start from Antigravity fills its image, environment and resources, and a Gateway that adds its key outside the sandbox', () => {
+  await check('Start from Antigravity fills its image, environment and resources, starts with No network, and adds its Gateway when Allow hosts is chosen', () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
     const d = L.draft;
     const A = api.LIVE_AGENTS.antigravity;
-    if (d.preset !== 'antigravity' || d.image !== A.image || d.net !== 'allow' || d.command !== '') throw new Error(JSON.stringify([d.preset, d.image, d.net, d.command]));
-    need(api.liveNewIssues(d).join(' | '), ['Describe the goal: the agent works from it.']);
-    need(main(p), ['aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'storage.googleapis.com', 'id="live-new-preset-key"', 'id="nt-creds-0-value"', 'type="password"']);
+    if (d.preset !== 'antigravity' || d.image !== A.image || d.net !== 'none' || d.command !== '') throw new Error(JSON.stringify([d.preset, d.image, d.net, d.command]));
+    if (api.liveNewIssues(d).length) throw new Error('goal is optional: ' + api.liveNewIssues(d).join(' | '));
+    const noNetDocs = axDocs(api.liveNewYAML(d, 'text', {}));
+    if (noNetDocs.map((x) => x.kind).join() !== 'Task' || 'goal' in noNetDocs[0].spec || 'gateway' in noNetDocs[0].spec) throw new Error(JSON.stringify(noNetDocs));
+    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
+    need(main(p), ['Optional. What the agent should work on.', 'aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'storage.googleapis.com', 'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options', 'id="nt-creds-0-value"', 'type="password"']);
     d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
     const name = api.liveDraftName(d);
     if (!/^make-the-signer-tests-ab[0-9a-f]{2}$/.test(name)) throw new Error('name: ' + name);
@@ -1066,37 +1076,34 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     B.storedKeys = keep;
     L.credStatus = {};
   });
-  await check('Start from Claude Code: its image, its key from anthropic-api-creds, and the config its runner reads, with the goal as the prompt', () => {
-    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'claude' } });
+  await check('Config and passing the goal as prompt write spec.config on the Task', () => {
     const d = L.draft;
-    if (d.preset !== 'claude') throw new Error('nothing was changed, so it switches without asking: ' + d.preset);
-    if (d.goal !== 'Make the signer tests pass.\nExplain what was wrong.') throw new Error('the goal stays');
-    need(main(p), ['Anthropic API key', 'id="live-new-goal-prompt" data-action="live-new-goal-prompt" checked']);
-    const docs = axDocs(api.liveNewYAML(d, 'text', {}));
-    const gw = docOf(docs, 'Gateway'), t = docOf(docs, 'Task');
-    if (JSON.stringify(gw.spec.egress) !== JSON.stringify([{ https: { hostnames: ['api.anthropic.com'], effects: { replaceHeaders: [{ header: 'x-api-key', credentialUri: 'ate-secret://k8s.io/default/ax-system/anthropic-api-creds/ANTHROPIC_API_KEY' }] } } }])) throw new Error(JSON.stringify(gw.spec.egress));
-    if (JSON.stringify(t.spec.config) !== JSON.stringify({ agent: { model: 'claude-opus-5-5', system: 'You are a careful software engineer working in /workspace.' }, prompt: 'Make the signer tests pass.\nExplain what was wrong.\n' })) throw new Error(JSON.stringify(t.spec.config));
-    if (t.spec.profile.image !== api.LIVE_AGENTS.claude.image || JSON.stringify(t.spec.env) !== JSON.stringify([{ name: 'ANTHROPIC_API_KEY', value: 'placeholder' }])) throw new Error(JSON.stringify(t.spec));
+    d.config = 'agent:\n  model: "gemini-2.5-pro"';
+    d.goalAsPrompt = true;
+    api.render();
+    need(main(p), ['id="live-new-goal-prompt" data-action="live-new-goal-prompt" checked']);
+    const t = docOf(axDocs(api.liveNewYAML(d, 'text', {})), 'Task');
+    if (JSON.stringify(t.spec.config) !== JSON.stringify({ agent: { model: 'gemini-2.5-pro' }, prompt: 'Make the signer tests pass.\nExplain what was wrong.\n' })) throw new Error(JSON.stringify(t.spec.config));
     /* Passing the goal as the prompt is a choice: without it, the config is what you typed. */
     d.goalAsPrompt = false;
     if ('prompt' in docOf(axDocs(api.liveNewYAML(d, 'text', {})), 'Task').spec.config) throw new Error('no prompt');
-    d.goalAsPrompt = true;
+    d.config = '';
+    api.render();
   });
   await check('Starting from another preset after you changed what this one filled in asks first, and keeps the goal, the workspace and your hosts', async () => {
     const d = L.draft;
     d.cpu = '3';
     d.hosts.push('docs.example.com');
     if (api.liveNewPresetChanges(d).join() !== 'the resources') throw new Error(api.liveNewPresetChanges(d).join());
-    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
-    need(p.els['#overlay'].innerHTML, ['Start from Antigravity?', 'That replaces the resources.', 'The name, goal, workspace and the hosts you allowed stay as they are.', 'Keep what I typed', 'id="np-go"']);
-    if (d.preset !== 'claude' || d.cpu !== '3') throw new Error('nothing changes before you choose');
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'blank' } });
+    need(p.els['#overlay'].innerHTML, ['Start from Blank?', 'That replaces the resources.', 'The name, goal, workspace and the hosts you allowed stay as they are.', 'Keep what I typed', 'id="np-go"']);
+    if (d.preset !== 'antigravity' || d.cpu !== '3') throw new Error('nothing changes before you choose');
     await fire(dialog(p).querySelector('#np-go'), 'click');
-    if (L.draft.preset !== 'antigravity' || L.draft.cpu !== '2' || !L.draft.hosts.includes('docs.example.com') || !L.draft.goal) throw new Error(JSON.stringify([L.draft.preset, L.draft.cpu, L.draft.hosts, L.draft.goal]));
-    /* Claude Code's credential went with it, and Antigravity's came in. */
-    if (L.draft.creds.length !== 1 || L.draft.creds[0].secret !== 'gemini-api-creds') throw new Error(JSON.stringify(L.draft.creds));
-    /* Back to Blank: the agent's fields and rules go, and the host you allowed keeps the network on. */
+    if (L.draft.preset !== 'blank' || L.draft.image || L.draft.command !== "sh -c 'sleep infinity'" || L.draft.creds.length || L.draft.tls.length || !L.draft.hosts.includes('docs.example.com') || L.draft.net !== 'allow' || !L.draft.goal) throw new Error(JSON.stringify(L.draft));
+    /* Switching back without edits needs no dialog, and Antigravity's credential comes back in. */
+    api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
+    if (L.draft.preset !== 'antigravity' || L.draft.creds.length !== 1 || L.draft.creds[0].secret !== 'gemini-api-creds') throw new Error(JSON.stringify(L.draft.creds));
     api.liveNewApplyPreset(L.draft, 'blank');
-    if (L.draft.image || L.draft.command !== "sh -c 'sleep infinity'" || L.draft.creds.length || L.draft.tls.length || L.draft.net !== 'allow') throw new Error(JSON.stringify(L.draft));
     Object.assign(L.draft, { hosts: [], net: 'none', goal: '' });
   });
   await check("A new workspace has every setup option AX has (Git repos, files, skills, setup commands, a setup network) and its MCP servers, in AX's order", () => {
@@ -1301,6 +1308,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-preset', value: 'antigravity' } });
     d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
     api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
     Object.assign(d.git[0], { repo: 'https://gitlab.example.com/me/project.git', ref: 'dev' });
     d.creds[0].value = 'sk-not-a-real-key';
     d.debug = false;
@@ -1893,6 +1901,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await go(m, '#/new');
     m.api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
     m.api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
+    m.api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
     ['env', 'files', 'skills', 'setup', 'mcp', 'mcp', 'creds'].forEach((kind) => m.api.ACTIONS['live-new-row-add']({ dataset: { kind } }));
     m.api.ACTIONS['live-new-mcp-kind']({ dataset: { i: '1', kind: 'local' } });
     await settle();

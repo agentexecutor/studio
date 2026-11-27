@@ -1030,7 +1030,7 @@ function liveViewHome() {
         <section class="card home-start-card featured">
           <div class="hsc-ic" aria-hidden="true">${icon('plus', 'sm')}</div>
           <h2>Create a new task</h2>
-          <p class="small sub">Start from Antigravity, Claude Code, or Blank, or load a task YAML file. Configure its Workspace and Network rules on one page.</p>
+          <p class="small sub">Start from Antigravity or Blank, or load a task YAML file. Configure its Workspace and Network rules on one page.</p>
           <div class="btn-row hsc-act"><a class="btn primary" href="#/new">${icon('plus', 'sm')}New task</a></div>
         </section>
         <section class="card home-start-card">
