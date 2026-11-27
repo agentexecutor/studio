@@ -988,13 +988,13 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
       'id="live-new-goal"', 'id="live-new-name"', 'id="live-new-adv-task"', 'Advanced task options',
       'id="live-new-image"', 'id="live-new-command"', 'Environment', 'id="live-new-cpu"', 'id="live-new-memory"',
       'id="live-new-config"', 'id="live-new-debug"', 'spec.<wbr>profile.<wbr>image', 'spec.<wbr>goal.<wbr>text',
-      /* Both Workspace and Network start at none by default. */
+      /* No workspace by default; Antigravity comes with Allow hosts and its Gemini key rule, as agy-cli's README does. */
       'aria-checked="true" data-action="live-new-ws" data-ws="none"', 'The task starts in an empty <span class="mono">/workspace</span>.',
-      'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'data-action="live-new-cancel"',
+      'aria-checked="true" data-action="live-new-net" data-net="allow"', 'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options', 'data-action="live-new-cancel"',
       /* The YAML panel: what Studio applies, to edit or download, and the same from a terminal. */
       'id="live-new-manifest"', 'data-action="live-new-raw"', 'Edit YAML', 'data-action="live-new-download"', 'ax --context ax-local apply -f task.yaml']);
     if (L.draft.ws !== 'none' || L.draft.existing !== '') throw new Error('no workspace selected by default');
-    if (L.draft.net !== 'none' || L.draft.gateway !== '') throw new Error('no network selected by default');
+    if (L.draft.net !== 'allow' || L.draft.gateway !== '' || L.draft.hosts.length) throw new Error('Antigravity comes with its own Gateway rule and no other hosts');
     /* Preset cards are ordered Antigravity, then Blank. */
     const ia = h.indexOf('data-preset="antigravity"'), ib = h.indexOf('data-preset="blank"');
     if (!(ia > 0 && ia < ib)) throw new Error('preset order: ' + [ia, ib]);
@@ -1003,18 +1003,19 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (!/id="live-new-debug"[^>]*checked/.test(h)) throw new Error('debug access is on by default');
     if (JSON.stringify(api.liveViewNew().crumbs) !== JSON.stringify([{ label: 'Home', href: '#/' }, { label: 'New task' }])) throw new Error(JSON.stringify(api.liveViewNew().crumbs));
     if (api.ACTIONS['live-new-where'] || api.ACTIONS['live-new-agent'] || api.ACTIONS['live-new-source']) throw new Error('the old steps are gone');
-    /* Cancel clears the draft so reopening New task starts with no workspace and no network selected again. */
-    L.draft.ws = 'existing'; L.draft.existing = 'itsdangerous'; L.draft.net = 'allow';
+    /* Cancel clears the draft so reopening New task starts from the defaults again. */
+    L.draft.ws = 'existing'; L.draft.existing = 'itsdangerous'; L.draft.net = 'existing'; L.draft.gateway = 'review-bot-gw';
     api.ACTIONS['live-new-cancel']();
     if (L.draft !== null) throw new Error('cancel clears draft');
     api.render();
-    if (L.draft.ws !== 'none' || L.draft.existing !== '' || L.draft.net !== 'none') throw new Error('fresh draft after cancel has no workspace or network');
+    if (L.draft.ws !== 'none' || L.draft.existing !== '' || L.draft.net !== 'allow' || L.draft.gateway !== '') throw new Error('fresh draft after cancel is back to the defaults');
     return { html: h };
   });
   await check('Blank works without keys: the default task image, a command that keeps the sandbox open, debug access, no workspace and no network', () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'blank' } });
     const d = L.draft;
     if (d.preset !== 'blank') throw new Error('switched to blank: ' + d.preset);
+    if (d.net !== 'none' || d.creds.length) throw new Error('Blank has no network: ' + JSON.stringify([d.net, d.creds]));
     if (api.liveNewIssues(d).length) throw new Error(api.liveNewIssues(d).join(' | '));
     const docs = axDocs(api.liveNewYAML(d, 'text', {}));
     if (docs.length !== 1) throw new Error('only a Task: ' + docs.map((x) => x.kind).join());
@@ -1024,15 +1025,13 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     /* The panel shows the same YAML, with its keys marked, and Ready to create. */
     need(main(p), ["The cluster's default task image", 'aria-checked="true" data-action="live-new-net" data-net="none"', "No Gateway: the task can't reach anything outside its sandbox.", 'Ready to create', '<span class="k">kind</span>: Task', 'sleep infinity']);
   });
-  await check('Start from Antigravity fills its image, environment and resources, starts with No network, and adds its Gateway when Allow hosts is chosen', () => {
+  await check('Start from Antigravity fills its image, environment and resources, and comes with Allow hosts: a Gateway that adds its key outside the sandbox', () => {
     api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
     const d = L.draft;
     const A = api.LIVE_AGENTS.antigravity;
-    if (d.preset !== 'antigravity' || d.image !== A.image || d.net !== 'none' || d.command !== '') throw new Error(JSON.stringify([d.preset, d.image, d.net, d.command]));
+    if (d.preset !== 'antigravity' || d.image !== A.image || d.net !== 'allow' || d.command !== '') throw new Error(JSON.stringify([d.preset, d.image, d.net, d.command]));
     if (api.liveNewIssues(d).length) throw new Error('goal is optional: ' + api.liveNewIssues(d).join(' | '));
-    const noNetDocs = axDocs(api.liveNewYAML(d, 'text', {}));
-    if (noNetDocs.map((x) => x.kind).join() !== 'Task' || 'goal' in noNetDocs[0].spec || 'gateway' in noNetDocs[0].spec) throw new Error(JSON.stringify(noNetDocs));
-    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
+    if ('goal' in docOf(axDocs(api.liveNewYAML(d, 'text', {})), 'Task').spec) throw new Error('empty goal omitted');
     need(main(p), ['Optional. What the agent should work on.', 'aria-checked="true" data-action="live-new-net" data-net="allow"', 'Gemini API key', "Leave empty if it&#39;s already stored", 'id="live-new-preset-key"', 'id="live-new-adv-net"', 'Advanced network options', 'id="nt-creds-0-value"', 'type="password"']);
     /* agy is built into the agy-cli image: nothing is installed at start, so nothing passes through. */
     if (!/^ghcr\.io\/agentexecutor\/agy-cli@sha256:[0-9a-f]{64}$/.test(A.image) || d.tls.length) throw new Error(JSON.stringify([A.image, d.tls]));
@@ -1309,7 +1308,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     api.ACTIONS['sel-pick']({ dataset: { key: 'live-new-preset', value: 'antigravity' } });
     d.goal = 'Make the signer tests pass.\nExplain what was wrong.';
     api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
-    api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
     Object.assign(d.git[0], { repo: 'https://gitlab.example.com/me/project.git', ref: 'dev' });
     d.creds[0].value = 'sk-not-a-real-key';
     d.debug = false;
@@ -1902,7 +1900,6 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await go(m, '#/new');
     m.api.ACTIONS['live-new-preset-card']({ dataset: { preset: 'antigravity' } });
     m.api.ACTIONS['live-new-ws']({ dataset: { ws: 'new' } });
-    m.api.ACTIONS['live-new-net']({ dataset: { net: 'allow' } });
     ['env', 'files', 'skills', 'setup', 'mcp', 'mcp', 'creds'].forEach((kind) => m.api.ACTIONS['live-new-row-add']({ dataset: { kind } }));
     m.api.ACTIONS['live-new-mcp-kind']({ dataset: { i: '1', kind: 'local' } });
     await settle();

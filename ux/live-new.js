@@ -233,7 +233,10 @@ function liveNewApplyPreset(d, id) {
   d.tls = d.tls.filter((h) => !old.tls.includes(h));
   f.tls.forEach((h) => { if (!d.tls.includes(h)) d.tls.push(h); });
   d.creds = d.creds.filter((c) => !c.preset).concat(f.creds.map((c) => Object.assign({ preset: true }, c)));
-  if (d.net === 'allow' && !d.hosts.length && !d.tls.length && !d.creds.length) d.net = 'none';
+  /* An agent comes with the network its image needs (agy-cli: the Gemini API, its key added outside the sandbox).
+     Blank has none, and goes back to No network unless you allowed something yourself. */
+  if (f.creds.length || f.tls.length) d.net = 'allow';
+  else if (d.net === 'allow' && !d.hosts.length && !d.tls.length && !d.creds.length) d.net = 'none';
   d.error = '';
 }
 /** What you changed in the fields the current preset filled in, in words. */
