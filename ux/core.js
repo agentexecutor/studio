@@ -182,11 +182,10 @@ const AXEL_STORY = {
   ],
 };
 
-/* Agent tiles: a small mark for a task's image (live.js), Antigravity and Claude Code by their own glyph and colour,
+/* Agent tiles: a small mark for a task's image (live.js), Antigravity by its own glyph and colour,
    anything else as a plain box. */
 const AGENT_TILES = {
   antigravity: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 12 5l7 14" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 14.5c2.2-1.2 4.8-1.2 7 0" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
-  claude: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
 };
 const AGENT_GLYPHS = { custom: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19.5 7.4v9.2L12 20.8 4.5 16.6V7.4Z" stroke="currentColor" stroke-width="2.3" fill="none" stroke-linejoin="round"/><path d="M4.8 7.6 12 11.7l7.2-4.1M12 11.7v8.8" stroke="currentColor" stroke-width="2.1" fill="none" stroke-linejoin="round"/></svg>' };
 function agentTile(id, size) {
