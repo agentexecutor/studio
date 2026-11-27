@@ -155,7 +155,7 @@ func newTaskTestServer(t *testing.T) (http.Handler, *http.Cookie, string, *taskS
 				SessionId: "session-1",
 				Debug:     true,
 			},
-			Status: &v1alpha1.TaskStatus{State: v1alpha1.TaskState_TASK_STATE_WORKING},
+			Status: &v1alpha1.TaskStatus{State: v1alpha1.TaskState_TASK_STATE_RUNNING},
 		},
 	}, gateways: map[string]*v1alpha1.Gateway{}, workspaces: map[string]*v1alpha1.Workspace{
 		"default/ws-fix": {ApiVersion: "ax.io/v1alpha1", Kind: "Workspace", Metadata: &v1alpha1.ObjectMeta{Name: "ws-fix", Atespace: "default"},
@@ -240,7 +240,7 @@ func TestTaskEndpoints(t *testing.T) {
 		t.Fatalf("expected 1 task, got %d: %s", len(list.Tasks), rec.Body.String())
 	}
 	if got := list.Tasks[0]; got.Metadata.Name != "fix-flaky-tests" || got.Spec.Goal.Text != "Fix the flaky tests." ||
-		got.Spec.SessionID != "session-1" || !got.Spec.Debug || got.Status.State != "TASK_STATE_WORKING" {
+		got.Spec.SessionID != "session-1" || !got.Spec.Debug || got.Status.State != "TASK_STATE_RUNNING" {
 		t.Errorf("unexpected task in list: %+v", got)
 	}
 
@@ -265,7 +265,7 @@ func TestTaskEndpoints(t *testing.T) {
 	if one.Task.Kind != "Task" || one.Task.Metadata.Name != "fix-flaky-tests" {
 		t.Errorf("unexpected task: %+v", one.Task)
 	}
-	for _, want := range []string{"apiVersion: ax.io/v1alpha1\n", "kind: Task\n", "\n  name: fix-flaky-tests\n", "\n  debug: true\n", "\n  state: TASK_STATE_WORKING\n"} {
+	for _, want := range []string{"apiVersion: ax.io/v1alpha1\n", "kind: Task\n", "\n  name: fix-flaky-tests\n", "\n  debug: true\n", "\n  state: TASK_STATE_RUNNING\n"} {
 		if !strings.Contains(one.YAML, want) {
 			t.Errorf("expected %q in the task file, got:\n%s", want, one.YAML)
 		}

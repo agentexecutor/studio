@@ -340,7 +340,7 @@ function liveImagesHTML() {
     <div class="setup-acc-body"><p class="small sub">Setting up, updating or repairing AX here deploys these. Leave them empty to use the defaults shown. Custom values are saved in this browser.</p>
       ${field('serverImage', 'AX server image', def.serverImage ? short(def.serverImage) : env.serverImageEnv || 'registry.example.com/ax/ax-server@sha256:…', !def.serverImage && !env.serverImageEnv, from(def.serverImage, def.serverImageFrom))}
       ${LIVE.axFlags && LIVE.axFlags.defaultTaskImage ? field('defaultTaskImage', 'Default task image', def.taskImage ? short(def.taskImage) : 'Optional', false, def.taskImage ? `For tasks that don't name an image. ${from(def.taskImage, def.taskImageFrom)}` : "For tasks that don't name an image.") : ''}
-      ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', "Optional. Leave empty to run the runner in each task's image") : ''}
+      ${LIVE.axFlags && LIVE.axFlags.runnerVolumeImage ? field('runnerVolumeImage', 'Runner volume image', def.runnerVolumeImage ? short(def.runnerVolumeImage) : "Optional. Leave empty to run the runner in each task's image", false, def.runnerVolumeImage ? `AX's task runner, mounted into every task, for images that don't ship one (like agy-cli). ${from(def.runnerVolumeImage, def.runnerVolumeImageFrom)}` : '') : ''}
       <div id="live-image-problems">${liveImageProblemsHTML(problems)}</div></div></details>`;
 }
 /** ax, kubectl and kind, as ax will find them: version, where each is, or that ax downloads it. */

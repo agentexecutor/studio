@@ -86,9 +86,14 @@ const LIVE_STATES = {
   Cancelled: { label: 'Stopped', chip: 'paused', icon: 'pause', rank: 3 },
 };
 function liveState(s) { return LIVE_STATES[s] || { label: 'Unknown', chip: 'paused', icon: 'clock', rank: 2 }; }
-/** "TASK_STATE_REQUIRES_ACTION" (the API) -> "RequiresAction" (what `ax get tasks` prints). */
+/* AX v0.4.0-rc.2 reports the actor's own states (google/ax#731). The pages are written for the states above, so each
+   new one is read as the state that behaves the same: a running task has a shell and Suspend, a crashed one failed. */
+const LIVE_STATE_ALIASES = { Running: 'Working', Resuming: 'Queued', Reverting: 'Queued', Crashed: 'Failed', Deleting: 'Terminating' };
+/** "TASK_STATE_REQUIRES_ACTION" (the API) -> "RequiresAction" (what `ax get tasks` prints), and AX's newer names
+    ("TASK_STATE_RUNNING") -> the state the pages handle ("Working"). */
 function liveStateName(v) {
-  return String(v || '').replace(/^TASK_STATE_/, '').toLowerCase().split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('') || 'Unknown';
+  const name = String(v || '').replace(/^TASK_STATE_/, '').toLowerCase().split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('') || 'Unknown';
+  return LIVE_STATE_ALIASES[name] || name;
 }
 const LIVE_RESULTS = { TASK_RESULT_SUCCEEDED: 'Succeeded', TASK_RESULT_FAILED: 'Failed', TASK_RESULT_CANCELLED: 'Cancelled' };
 

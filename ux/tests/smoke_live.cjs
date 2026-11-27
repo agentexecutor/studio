@@ -576,7 +576,7 @@ function makeContext(B, env) {
   liveCmd, liveViewHome, liveViewTasks, liveSampleTask, liveViewTask, liveViewPlaces, liveViewSetup, liveViewNotYet, liveViewNew, liveNewYAML, liveNewIssues, liveNewRun, liveDraftName,
   liveNewDraft, liveNewApplyPreset, liveNewPresetChanges, liveYAMLHTML, liveYAMLTaskName, liveNewStatusHTML, LIVE_AGENTS,
   liveTermOpen, liveTermInput, liveTermFlush, liveTermActive, liveTermInnerHTML, livePaletteItems,
-  liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere,
+  liveViewSettings, liveShortcutRows, liveOpenDiagnostics, liveLayersHTML, liveOutputInnerHTML, liveLoadLogs, liveLogsError, liveLogLine, liveLogsTick, liveSplitArgs, liveNewLoadFile, liveLinkHere, liveSuspendResumeHTML,
   studioPost };`, ctx);
   return { ctx, api: ctx.__api, els: namedEls, store };
 }
@@ -622,6 +622,14 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     for (const k of Object.keys(want)) if (api.liveState(k).label !== want[k]) throw new Error(`${k} should read ${want[k]}, got ${api.liveState(k).label}`);
     if (api.liveState('Hibernating').label !== 'Unknown') throw new Error('an unknown state');
     if (api.liveStateName('TASK_STATE_REQUIRES_ACTION') !== 'RequiresAction' || api.liveStateName('TASK_STATE_WORKING') !== 'Working' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
+    /* AX v0.4.0-rc.2's states: a running task gets its shell and Suspend, a crashed one reads as failed. */
+    const rc2 = { RUNNING: ['Working', 'Running'], RESUMING: ['Queued', 'Starting'], SUSPENDING: ['Suspending', 'Suspending'], SUSPENDED: ['Suspended', 'Suspended'],
+      CRASHED: ['Failed', 'Failed'], DELETING: ['Terminating', 'Deleting'], REVERTING: ['Queued', 'Starting'], QUEUED: ['Queued', 'Starting'] };
+    for (const [k, [name, label]] of Object.entries(rc2)) {
+      const got = api.liveStateName('TASK_STATE_' + k);
+      if (got !== name || api.liveState(got).label !== label) throw new Error(`TASK_STATE_${k} should read ${name} (${label}), got ${got} (${api.liveState(got).label})`);
+    }
+    if (!api.liveSuspendResumeHTML('t', api.liveStateName('TASK_STATE_RUNNING'), '', '').includes('data-action="live-suspend"')) throw new Error('a running task can be suspended');
   });
   await check('a task reads the same whether AX calls the goal field text or spec', () => {
     const a = api.liveTask(taskDoc('a', 'WORKING', { goal: 'New name', spec: { sessionId: 's1', debug: true } }));

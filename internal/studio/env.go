@@ -416,6 +416,9 @@ func (s *Server) handleLocalUp(w http.ResponseWriter, r *http.Request) {
 	if taskImg == "" && strings.TrimSpace(os.Getenv("AX_DEFAULT_TASK_IMAGE")) == "" && flags.DefaultTaskImage {
 		taskImg = DefaultTaskImage
 	}
+	if runnerImg == "" && strings.TrimSpace(os.Getenv("AX_RUNNER_VOLUME_IMAGE")) == "" && flags.RunnerVolumeImage {
+		runnerImg = DefaultRunnerVolumeImage
+	}
 	workers := req.Workers
 	if workers <= 0 {
 		workers = 1

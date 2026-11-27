@@ -287,6 +287,17 @@ func TestLocalUpUsesStudiosImagesByDefault(t *testing.T) {
 	if got := start(t, ""); strings.Contains(got, "--server-image") {
 		t.Errorf("with AX_SERVER_IMAGE set, ax arguments = %q", got)
 	}
+	t.Setenv("AX_SERVER_IMAGE", "")
+	// An ax that takes --runner-volume-image gets Studio's runner volume, so
+	// agent images without a runner of their own (agy-cli) can start.
+	t.Setenv("AX_RUNNER_VOLUME_IMAGE", "")
+	if got := start(t, "  --server-image string\n  --runner-volume-image string\n"); !strings.HasSuffix(got, "--server-image "+DefaultServerImage+" --runner-volume-image "+DefaultRunnerVolumeImage) {
+		t.Errorf("ax arguments = %q, want the runner volume", got)
+	}
+	t.Setenv("AX_RUNNER_VOLUME_IMAGE", "example.com/ax-runner-volume:v2")
+	if got := start(t, "  --server-image string\n  --runner-volume-image string\n"); strings.Contains(got, "--runner-volume-image") {
+		t.Errorf("with AX_RUNNER_VOLUME_IMAGE set, ax arguments = %q", got)
+	}
 }
 
 func TestValidateAXArgs(t *testing.T) {
