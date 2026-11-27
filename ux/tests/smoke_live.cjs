@@ -259,18 +259,18 @@ function makeBackend(opts) {
     tasks: {
       'ax-local': [
         taskDoc('readme-polish', 'SUSPENDED', { goal: 'Tighten the README.', spec: { workspace: { name: 'itsdangerous' }, sessionId: 's-readme' }, status: { conditions: [{ type: 'Ready', status: 'False', reason: 'Suspended', message: 'Actor is suspended' }] } }),
-        taskDoc('fix-flaky-tests', 'WORKING', {
+        taskDoc('fix-flaky-tests', 'RUNNING', {
           goal: 'Fix the flaky tests.\nExplain the cause.', labels: { team: 'platform' },
           spec: { profile: { image: 'gcr.io/p/claude-code@sha256:abc', resources: { limits: { cpu: '2', memory: '4Gi' } } }, workspace: { name: 'itsdangerous' }, gateway: { name: 'review-bot-gw' }, debug: true, sessionId: 's-fix' },
           status: { conditions: [{ type: 'Ready', status: 'True', reason: 'TaskRunning', message: 'Task is running and its workspace is ready' }] },
         }),
         /* An older AX calls the goal field "spec". */
-        taskDoc('upgrade-node-22', 'FAILED', { goal: 'Upgrade to Node 22.', goalField: 'spec', spec: { sessionId: 's-up' }, status: { statusDetail: { reason: 'TASK_STATUS_REASON_SANDBOX_CRASHED', detail: 'sandbox exited: out of memory (limit 512Mi)' } } }),
-        taskDoc('changelog-draft', 'COMPLETED', { goal: 'Draft the changelog.', spec: { sessionId: 's-log', workspace: { name: 'ws-changelog-draft' }, gateway: { name: 'gw-changelog-draft' } }, status: { outcome: { result: 'TASK_RESULT_SUCCEEDED', output: 'Wrote CHANGES.rst for 2.3.\nPushed branch ax/changelog-draft.' } } }),
-        taskDoc('signer-b2c3', 'WORKING', { goal: 'Also add a regression test.', created: '2026-11-17T10:05:00Z', spec: { sessionId: 's-sign' } }),
-        taskDoc('signer-a1b2', 'COMPLETED', { goal: 'Make the signer tests pass.', created: '2026-11-17T10:00:00Z', spec: { sessionId: 's-sign' } }),
+        taskDoc('upgrade-node-22', 'CRASHED', { goal: 'Upgrade to Node 22.', goalField: 'spec', spec: { sessionId: 's-up' }, status: { statusDetail: { reason: 'TASK_STATUS_REASON_SANDBOX_CRASHED', detail: 'sandbox exited: out of memory (limit 512Mi)' } } }),
+        taskDoc('changelog-draft', 'SUSPENDED', { goal: 'Draft the changelog.', spec: { sessionId: 's-log', workspace: { name: 'ws-changelog-draft' }, gateway: { name: 'gw-changelog-draft' } }, status: { outcome: { result: 'TASK_RESULT_SUCCEEDED', output: 'Wrote CHANGES.rst for 2.3.\nPushed branch ax/changelog-draft.' } } }),
+        taskDoc('signer-b2c3', 'RUNNING', { goal: 'Also add a regression test.', created: '2026-11-17T10:05:00Z', spec: { sessionId: 's-sign' } }),
+        taskDoc('signer-a1b2', 'SUSPENDED', { goal: 'Make the signer tests pass.', created: '2026-11-17T10:00:00Z', spec: { sessionId: 's-sign' } }),
       ],
-      'gke-team-dev': [taskDoc('nightly-triage', 'WORKING', { goal: 'Triage the failing builds.', spec: { sessionId: 's-night' } })],
+      'gke-team-dev': [taskDoc('nightly-triage', 'RUNNING', { goal: 'Triage the failing builds.', spec: { sessionId: 's-night' } })],
     },
     changes: {
       'fix-flaky-tests': { taskName: 'fix-flaky-tests', available: true, repoDir: '/workspace', branch: 'main', fullPatch: PATCH_SIGNER + PATCH_NOTE, files: [
@@ -361,7 +361,7 @@ function makeBackend(opts) {
       if (!docs.some((d) => d.kind === 'Task')) return err('no Task in the file');
       return ok(out.join('\n') + '\n');
     }
-    if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_WORKING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
+    if (a[0] === 'resume' && a[1] === 'task') { const t = find(ctx, a[2]); if (!t) return err('task not found'); t.status.state = 'TASK_STATE_RUNNING'; return ok(`task.ax.io/${a[2]} resumed\n`); }
     if (a[0] === 'promote' && a[1] === 'task') {
       const name = a[2], to = a[a.indexOf('--to') + 1], pre = a.includes('--preflight-only') ? ' (preflight only)' : '';
       const src = find(ctx, name);
@@ -377,7 +377,7 @@ function makeBackend(opts) {
       out.push(`task.ax.io/${name} resumed${pre}`);
       if (!pre) {
         if (there) list(to).splice(list(to).indexOf(there), 1);
-        list(to).push(taskDoc(name, 'WORKING', { goal: (src.spec.goal || {}).text || (src.spec.goal || {}).spec, spec: Object.assign({}, src.spec) }));
+        list(to).push(taskDoc(name, 'RUNNING', { goal: (src.spec.goal || {}).text || (src.spec.goal || {}).spec, spec: Object.assign({}, src.spec) }));
         if (a.includes('--suspend-source')) src.status.state = 'TASK_STATE_SUSPENDED';
       }
       return ok(out.join('\n') + '\n', notes.join('\n'));
@@ -420,7 +420,7 @@ function makeBackend(opts) {
         if (!t) return answer(404, { error: `task default/${name} not found`, code: 'NotFound' });
         if (u.pathname.endsWith('/resume') && name === 'upgrade-node-22') return answer(502, { error: 'no free workers available', code: 'ResourceExhausted' });
         if (u.pathname.endsWith('/delete')) list(ctx).splice(list(ctx).indexOf(t), 1);
-        else t.status.state = u.pathname.endsWith('/suspend') ? 'TASK_STATE_SUSPENDED' : 'TASK_STATE_WORKING';
+        else t.status.state = u.pathname.endsWith('/suspend') ? 'TASK_STATE_SUSPENDED' : 'TASK_STATE_RUNNING';
         return answer(200, { ok: true });
       }
       case '/api/workspaces': return answer(200, { workspaces: B.workspaces });
@@ -618,23 +618,21 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   const { api } = p;
   const L = api.LIVE;
   await check("AX's states read in the UI's words, and an unknown state says so", () => {
-    const want = { Working: 'Running', Queued: 'Starting', Suspending: 'Suspending', Suspended: 'Suspended', Failed: 'Failed', RequiresAction: 'Waiting for you', Completed: 'Done', Cancelled: 'Stopped' };
-    for (const k of Object.keys(want)) if (api.liveState(k).label !== want[k]) throw new Error(`${k} should read ${want[k]}, got ${api.liveState(k).label}`);
-    if (api.liveState('Hibernating').label !== 'Unknown') throw new Error('an unknown state');
-    if (api.liveStateName('TASK_STATE_REQUIRES_ACTION') !== 'RequiresAction' || api.liveStateName('TASK_STATE_WORKING') !== 'Working' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
-    /* AX v0.4.0-rc.2's states: a running task gets its shell and Suspend, a crashed one reads as failed. */
-    const rc2 = { RUNNING: ['Working', 'Running'], RESUMING: ['Queued', 'Starting'], SUSPENDING: ['Suspending', 'Suspending'], SUSPENDED: ['Suspended', 'Suspended'],
-      CRASHED: ['Failed', 'Failed'], DELETING: ['Terminating', 'Deleting'], REVERTING: ['Queued', 'Starting'], QUEUED: ['Queued', 'Starting'] };
-    for (const [k, [name, label]] of Object.entries(rc2)) {
-      const got = api.liveStateName('TASK_STATE_' + k);
-      if (got !== name || api.liveState(got).label !== label) throw new Error(`TASK_STATE_${k} should read ${name} (${label}), got ${got} (${api.liveState(got).label})`);
+    /* AX v0.4.0-rc.2's states: the task's actor on Agent Substrate, and Queued before it has one. */
+    const want = { RUNNING: 'Running', QUEUED: 'Starting', RESUMING: 'Resuming', REVERTING: 'Reverting', SUSPENDING: 'Suspending', SUSPENDED: 'Suspended', CRASHED: 'Crashed', DELETING: 'Deleting' };
+    for (const [k, label] of Object.entries(want)) {
+      const name = api.liveStateName('TASK_STATE_' + k);
+      if (api.liveState(name).label !== label) throw new Error(`TASK_STATE_${k} should read ${label}, got ${name} (${api.liveState(name).label})`);
     }
+    if (api.liveStateName('TASK_STATE_RUNNING') !== 'Running' || api.liveStateName('TASK_STATE_SUSPENDED') !== 'Suspended' || api.liveStateName('') !== 'Unknown') throw new Error('state names');
+    /* rc.1's names are gone: an unknown state says so. */
+    for (const old of ['Working', 'Idle', 'RequiresAction', 'Completed', 'Failed', 'Cancelled', 'Terminating', 'Hibernating']) if (api.liveState(old).label !== 'Unknown') throw new Error(`${old} should be unknown`);
     if (!api.liveSuspendResumeHTML('t', api.liveStateName('TASK_STATE_RUNNING'), '', '').includes('data-action="live-suspend"')) throw new Error('a running task can be suspended');
   });
   await check('a task reads the same whether AX calls the goal field text or spec', () => {
-    const a = api.liveTask(taskDoc('a', 'WORKING', { goal: 'New name', spec: { sessionId: 's1', debug: true } }));
+    const a = api.liveTask(taskDoc('a', 'RUNNING', { goal: 'New name', spec: { sessionId: 's1', debug: true } }));
     const b = api.liveTask(taskDoc('b', 'QUEUED', { goal: 'Old name', goalField: 'spec' }));
-    if (a.goal !== 'New name' || a.state !== 'Working' || a.session !== 's1' || !a.debug) throw new Error(JSON.stringify(a));
+    if (a.goal !== 'New name' || a.state !== 'Running' || a.session !== 's1' || !a.debug) throw new Error(JSON.stringify(a));
     if (b.goal !== 'Old name' || b.state !== 'Queued' || b.debug) throw new Error(JSON.stringify(b));
     if (api.liveTask({}).name !== '' || api.liveTask(null).state !== 'Unknown') throw new Error('an empty task');
   });
@@ -664,22 +662,22 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(home.html, ['id="live-home-title"', '>Home</h1>', 'class="home-stats"', 'Running', 'Needs you', 'Suspended', 'Workspaces &amp; Gateways', 'id="home-recent-h">Recent tasks</h2>', 'href="#/tasks"']);
     const v = api.liveViewTasks('tasks');
     const order = (v.html.match(/id="live-trow-[a-z0-9-]+"/g) || []).map((x) => x.slice(14, -1)).join();
-    if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,readme-polish,changelog-draft') throw new Error('order: ' + order);
+    if (order !== 'upgrade-node-22,fix-flaky-tests,signer-a1b2,signer-b2c3,changelog-draft,readme-polish') throw new Error('order: ' + order);
     need(v.html, ['<h1 tabindex="-1" id="live-tasks-title" style="margin-right:0">Tasks</h1>', '6 tasks on this computer.', 'On this computer', 'ax --context ax-local get tasks',
       'id="tab-tasks" href="#/tasks" aria-selected="true"', 'id="tab-resources" href="#/tasks/resources" aria-selected="false"', 'Workspaces and Gateways',
       'class="table tasks-table"', '<th>Task</th><th>State</th><th class="tk-img">Image</th><th class="tk-ws">Workspace</th><th class="tk-res">Resources</th><th class="tk-created">Created</th>', '<a href="#/task/upgrade-node-22" class="mono">upgrade-node-22</a>', 'Upgrade to Node 22.',
-      '</svg>Failed</span>', '</svg>Running</span>', '</svg>Suspended</span>', '</svg>Done</span>', 'Turn 1 of 2', 'Turn 2 of 2',
+      '</svg>Crashed</span>', '</svg>Running</span>', '</svg>Suspended</span>', 'Turn 1 of 2', 'Turn 2 of 2',
       'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"', '>Suspended<span class="seg-n tnum">', 'href="#/new"', 'data-action="live-sample-task"']);
     /* Each row: Suspend for a running task, Resume for a suspended one, a shell when it has debug access, its logs, and Delete. */
     const row = (name) => { const a = v.html.indexOf(`id="live-trow-${name}"`); return v.html.slice(a, v.html.indexOf('</tr>', a)); };
     need(row('fix-flaky-tests'), ['data-action="live-suspend" data-task="fix-flaky-tests"', 'title="ax --context ax-local suspend task fix-flaky-tests"', 'href="#/task/fix-flaky-tests/terminal"', 'href="#/task/fix-flaky-tests/logs"', 'data-action="live-delete" data-task="fix-flaky-tests"']);
     need(row('readme-polish'), ['data-action="live-resume" data-task="readme-polish"', 'Resume</button>', 'href="#/task/readme-polish/logs"']);
     never(row('readme-polish'), ['live-suspend', '/terminal"']);
-    /* ax ssh needs the task Working: an idle task, even with debug on, gets no shell link, but can still be suspended. */
+    /* ax ssh needs the task Running: a starting task, even with debug on, gets no shell link, but can still be suspended. */
     const ff = L.tasks.find((t) => t.name === 'fix-flaky-tests');
-    ff.state = 'Idle';
+    ff.state = 'Queued';
     const idle = api.liveViewTasks('tasks').html;
-    ff.state = 'Working';
+    ff.state = 'Running';
     const at = idle.indexOf('id="live-trow-fix-flaky-tests"');
     const idleRow = idle.slice(at, idle.indexOf('</tr>', at));
     never(idleRow, ['/terminal"']);
@@ -703,7 +701,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     never(y, ['image:', 'goal:', 'workspace:', 'gateway:']);
     if (p.ctx.location.hash !== `#/task/${name}`) throw new Error('opens it: ' + p.ctx.location.hash);
     need(toasts(p), [`Started <span class="mono">${name}</span>`]);
-    if (!L.tasks.some((t) => t.name === name && t.state === 'Working')) throw new Error('listed, and running');
+    if (!L.tasks.some((t) => t.name === name && t.state === 'Running')) throw new Error('listed, and running');
     /* Back to the list the next checks expect. */
     B.tasks['ax-local'] = B.tasks['ax-local'].filter((t) => t.metadata.name !== name);
     await api.liveRefresh(true);
@@ -778,18 +776,18 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
   await check('resume asks the server to resume it', async () => {
     api.ACTIONS['live-resume']({ dataset: { task: 'fix-flaky-tests' } });
     await settle();
-    if (!B.posts.some((x) => x.path === '/api/tasks/resume' && x.body.name === 'fix-flaky-tests') || L.tasks.find((t) => t.name === 'fix-flaky-tests').state !== 'Working') throw new Error('resume');
+    if (!B.posts.some((x) => x.path === '/api/tasks/resume' && x.body.name === 'fix-flaky-tests') || L.tasks.find((t) => t.name === 'fix-flaky-tests').state !== 'Running') throw new Error('resume');
   });
   await check('when AX refuses, Studio says what AX said and changes nothing', async () => {
     await api.liveTaskAction('upgrade-node-22', 'resume');
     await settle();
     need(toasts(p), ["Couldn't resume <span class=\"mono\">upgrade-node-22</span>: no free workers available"]);
-    if (L.tasks.find((t) => t.name === 'upgrade-node-22').state !== 'Failed') throw new Error('state unchanged');
+    if (L.tasks.find((t) => t.name === 'upgrade-node-22').state !== 'Crashed') throw new Error('state unchanged');
   });
-  await check('a failed task says why, and offers no suspend, resume or follow-up', async () => {
+  await check('a crashed task says why, and offers no suspend, resume or follow-up', async () => {
     await go(p, '#/task/upgrade-node-22');
     const h = main(p);
-    need(h, ['Upgrade to Node 22.', 'sandbox exited: out of memory (limit 512Mi)', '</svg>Failed</span>', 'data-action="live-delete"', 'Stopped with an error',
+    need(h, ['Upgrade to Node 22.', 'sandbox exited: out of memory (limit 512Mi)', '</svg>Crashed</span>', 'data-action="live-delete"', 'Its sandbox crashed',
       'Give it more memory when you start it again.']);
     never(h, ['data-action="live-suspend"', 'data-action="live-resume"', 'live-try-again', 'again=1']);
     /* AX's default image is named in the header, so Where it runs doesn't name it again. */
@@ -1324,7 +1322,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     if (docs.map((x) => x.kind).join() !== 'Gateway,Workspace,Task') throw new Error(docs.map((x) => x.kind).join());
     if (JSON.stringify(docOf(docs, 'Gateway').spec.egress.slice(-1)) !== JSON.stringify([{ https: { hostnames: ['gitlab.example.com'] } }])) throw new Error('the repo is allowed');
     const t = L.tasks.find((x) => x.name === name);
-    if (!t || t.state !== 'Working' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.' || t.debug) throw new Error(JSON.stringify(t && [t.state, t.goal, t.debug]));
+    if (!t || t.state !== 'Running' || t.goal !== 'Make the signer tests pass.\nExplain what was wrong.' || t.debug) throw new Error(JSON.stringify(t && [t.state, t.goal, t.debug]));
     if (p.ctx.location.hash !== `#/task/${name}` || L.draft !== null) throw new Error('opens the task: ' + p.ctx.location.hash);
     need(toasts(p), [`Started <span class="mono">${name}</span>`]);
     if (JSON.parse(p.store['ax.live.recentRepos'])[0] !== 'https://gitlab.example.com/me/project.git') throw new Error(p.store['ax.live.recentRepos']);
@@ -1600,7 +1598,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     await settle();
     need(main(p), ['<dt>Sandbox</dt>', '427663e8-5707-4ea2-9dce-d38d059e8fbe', 'aria-label="Copy the sandbox uid"', '<dt>Previous attempt</dt><dd>attempt 1: sandbox crashed</dd>']);
     const ft = api.liveTask(t);
-    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Working'), ['No shell is open.', 'id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests"', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
+    need(api.liveTermInnerHTML('fix-flaky-tests', ft, 'Running'), ['No shell is open.', 'id="live-term-open" data-action="live-term-open" data-task="fix-flaky-tests"', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
     const idle = api.liveTermInnerHTML('fix-flaky-tests', ft, 'Idle');
     need(idle, ['A shell can open only while the task is running.', '<code>ax --context ax-local ssh fix-flaky-tests</code>']);
     never(idle, ['live-term-open', 'live-resume']);
@@ -1619,12 +1617,12 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     B.notes = [];
     p.ctx.document.hidden = true;
     await api.liveRefresh(true);
-    const t = B.tasks[L.context].find((x) => x.status.state === 'TASK_STATE_WORKING');
-    t.status.state = 'TASK_STATE_REQUIRES_ACTION';
+    const t = B.tasks[L.context].find((x) => x.status.state === 'TASK_STATE_RUNNING');
+    t.status.state = 'TASK_STATE_CRASHED';
     await api.liveRefresh(true);
     await api.liveRefresh(true);
-    if (B.notes.length !== 1 || !/Waiting for you/.test(B.notes[0].body)) throw new Error(JSON.stringify(B.notes));
-    t.status.state = 'TASK_STATE_WORKING';
+    if (B.notes.length !== 1 || !/^Crashed · /.test(B.notes[0].body)) throw new Error(JSON.stringify(B.notes));
+    t.status.state = 'TASK_STATE_RUNNING';
     p.ctx.document.hidden = false;
     await api.liveRefresh(true);
     await api.ACTIONS['live-notify-toggle']({ checked: false });
@@ -1661,9 +1659,9 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     need(main(p), ['id="live-tasks-title"', '>Tasks</h1>', 'id="live-tasks-q"', 'data-action="live-tasks-filter" data-v="all" aria-pressed="true"',
       'class="table tasks-table"', 'id="live-trow-fix-flaky-tests"', '>Image</th>', '>Workspace</th>', '>Resources</th>', '>Created</th>']);
     never(main(p), ['All tasks', '>Template</th>']);
-    api.ACTIONS['live-tasks-filter']({ dataset: { v: 'done' } });
-    need(main(p), ['data-v="done" aria-pressed="true"']);
-    never(main(p), ['id="live-trow-fix-flaky-tests"']);
+    api.ACTIONS['live-tasks-filter']({ dataset: { v: 'paused' } });
+    need(main(p), ['data-v="paused" aria-pressed="true"']);
+    never(main(p), ['id="live-trow-fix-flaky-tests"', 'data-v="done"']);
     api.ACTIONS['live-tasks-filter']({ dataset: { v: 'all' } });
     L.tasksFilter.q = 'zzzz-nothing';
     api.render();
@@ -1838,7 +1836,7 @@ const fire = async (el, type, ev) => { for (const fn of el.on[type] || []) await
     const id = starts()[0].body.id;
     if (!/^sh-[0-9a-f]{16}$/.test(id)) throw new Error('session id ' + id);
     const doc = () => m.api.liveTask(M.tasks['ax-local'].find((x) => x.metadata.name === 'fix-flaky-tests'));
-    const panel = () => m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Working');
+    const panel = () => m.api.liveTermInnerHTML('fix-flaky-tests', doc(), 'Running');
     need(panel(), ['Connecting…', 'Shell 1']);
     /* What the shell prints comes as base64 of its bytes; a character split between two events still shows whole. */
     const bytes = Buffer.from('root@sandbox:/workspace# \x1b[1;32mok\x1b[0m café \x1b[?2004h');

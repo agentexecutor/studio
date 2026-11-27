@@ -49,7 +49,7 @@ function liveNotifyNeeds() {
   needs.filter((t) => !known.has(t.name)).forEach((t) => {
     const detail = t.doc && t.doc.status && t.doc.status.statusDetail && (t.doc.status.statusDetail.detail || '');
     const title = (t.goal || t.name).split('\n')[0].slice(0, 80);
-    const body = t.state === 'Failed' ? `Failed${detail ? `: ${detail}` : ''}` : 'Waiting for you';
+    const body = `Crashed${detail ? `: ${detail}` : ''}`;
     liveNotify(title, `${body} · ${t.name}`, `#/task/${encodeURIComponent(t.name)}`, `ax-${t.name}`);
   });
 }
@@ -71,7 +71,7 @@ function liveSetNotifyHTML() {
         : 'Off. Your browser asks first the first time you turn it on.';
   return `<div class="card">
       <div class="set-row"><div class="sr-main"><div class="sr-title" id="ls-notify-title">When something needs you</div>
-        <div class="sr-desc" id="ls-notify-desc">A browser notification when a task starts waiting for you or fails, and when setting up AX or an install finishes. ${why}</div></div>
+        <div class="sr-desc" id="ls-notify-desc">A browser notification when a task crashes, and when setting up AX or an install finishes. ${why}</div></div>
         <label class="switch"><input type="checkbox" role="switch" id="ls-notify" data-action="live-notify-toggle" ${on ? 'checked' : ''} ${perm === 'unsupported' ? 'disabled' : ''} aria-labelledby="ls-notify-title" aria-describedby="ls-notify-desc"><span class="track"></span><span class="thumb"></span></label></div>
       ${on ? `<div class="set-row"><div class="sr-main"><div class="sr-title">Try it</div><div class="sr-desc">Sends one now, even with this tab in front.</div></div>
         <button type="button" class="btn sm" data-action="live-notify-test" id="ls-notify-test">${icon('bell', 'sm')}Send a test notification</button></div>` : ''}
